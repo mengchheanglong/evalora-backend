@@ -1,0 +1,232 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  ORGANIZATION
+  INTERVIEWER
+  CANDIDATE
+}
+
+enum SessionStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  EXPIRED
+}
+
+enum ModuleType {
+  AI_INTERVIEW
+  CODING
+  DEBUGGING
+  WORK_STYLE
+  BEHAVIORAL
+  LEADERSHIP
+  COMMUNICATION
+  PROBLEM_SOLVING
+}
+
+enum QuestionType {
+  MCQ
+  SCALE
+  SHORT_ANSWER
+  CODING
+  SCENARIO
+  ROLEPLAY
+}
+
+model Organization {
+  id        String               @id @default(uuid())
+  name      String
+  users     User[]
+  templates AssessmentTemplate[]
+  sessions  InterviewSession[]
+  createdAt DateTime             @default(now()) @map("created_at")
+  updatedAt DateTime             @updatedAt @map("updated_at")
+
+  @@map("organizations")
+}
+
+model User {
+  id               String                @id @default(uuid())
+  name             String
+  email            String                @unique
+  passwordHash     String                @map("password_hash")
+  role             UserRole
+  organizationId   String?               @map("organization_id")
+  organization     Organization?         @relation(fields: [organizationId], references: [id])
+  createdTemplates AssessmentTemplate[]  @relation("TemplateCreator")
+  candidateSessions InterviewSession[]   @relation("CandidateSessions")
+  reviewerNotes    ReviewerNote[]
+  createdAt        DateTime              @default(now()) @map("created_at")
+  updatedAt        DateTime              @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model AssessmentTemplate {
+  id             String             @id @default(uuid())
+  title          String
+  description    String?
+  roleType       String             @map("role_type")
+  timeLimitMin   Int?               @map("time_limit_min")
+  scoringRules   Json?              @map("scoring_rules")
+  createdById    String             @map("created_by_id")
+  createdBy      User               @relation("TemplateCreator", fields: [createdById], references: [id])
+  organizationId String?            @map("organization_id")
+  organization   Organization?      @relation(fields: [organizationId], references: [id])
+  modules        AssessmentModule[]
+  sessions       InterviewSession[]
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+
+  @@map("assessment_templates")
+}
+
+model AssessmentModule {
+  id          String             @id @default(uuid())
+  templateId  String             @map("template_id")
+  template    AssessmentTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  moduleType  ModuleType         @map("module_type")
+  title       String
+  description String?
+  weight      Float              @default(1)
+  orderIndex  Int                @map("order_index")
+  settings    Json?
+  questions   Question[]
+  evaluations Evaluation[]
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+
+  @@map("assessment_modules")
+}
+
+model Question {
+  id           String           @id @default(uuid())
+  moduleId     String           @map("module_id")
+  module       AssessmentModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  questionText String           @map("question_text")
+  questionType QuestionType     @map("question_type")
+  options      Json?
+  rubric       Json?
+  responses    Response[]
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+
+  @@map("questions")
+}
+
+model InterviewSession {
+  id              String             @id @default(uuid())
+  candidateId     String             @map("candidate_id")
+  candidate       User               @relation("CandidateSessions", fields: [candidateId], references: [id])
+  templateId      String             @map("template_id")
+  template        AssessmentTemplate @relation(fields: [templateId], references: [id])
+  organizationId  String?            @map("organization_id")
+  organization    Organization?      @relation(fields: [organizationId], references: [id])
+  accessCode      String             @unique @map("access_code")
+  status          SessionStatus      @default(NOT_STARTED)
+  startedAt       DateTime?          @map("started_at")
+  completedAt     DateTime?          @map("completed_at")
+  expiresAt       DateTime?          @map("expires_at")
+  responses       Response[]
+  aiMessages      AIMessage[]
+  codeSubmissions CodeSubmission[]
+  evaluations     Evaluation[]
+  report          CandidateReport?
+  reviewerNotes   ReviewerNote[]
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  @@map("interview_sessions")
+}
+
+model Response {
+  id           String           @id @default(uuid())
+  sessionId    String           @map("session_id")
+  session      InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  questionId   String?          @map("question_id")
+  question     Question?        @relation(fields: [questionId], references: [id])
+  responseText String           @map("response_text")
+  responseJson Json?            @map("response_json")
+  createdAt    DateTime         @default(now()) @map("created_at")
+
+  @@map("responses")
+}
+
+model AIMessage {
+  id        String           @id @default(uuid())
+  sessionId String           @map("session_id")
+  session   InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      String
+  content   String
+  metadata  Json?
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  @@map("ai_messages")
+}
+
+model CodeSubmission {
+  id              String           @id @default(uuid())
+  sessionId       String           @map("session_id")
+  session         InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  language        String
+  sourceCode      String           @map("source_code")
+  executionOutput String?          @map("execution_output")
+  executionStatus String?          @map("execution_status")
+  testResults     Json?            @map("test_results")
+  isFinal         Boolean          @default(false) @map("is_final")
+  createdAt       DateTime         @default(now()) @map("created_at")
+
+  @@map("code_submissions")
+}
+
+model Evaluation {
+  id             String            @id @default(uuid())
+  sessionId      String            @map("session_id")
+  session        InterviewSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  moduleId       String?           @map("module_id")
+  module         AssessmentModule? @relation(fields: [moduleId], references: [id])
+  score          Float
+  feedback       String
+  evidence       Json?
+  criteriaScores Json?             @map("criteria_scores")
+  createdAt      DateTime          @default(now()) @map("created_at")
+
+  @@map("evaluations")
+}
+
+model CandidateReport {
+  id               String           @id @default(uuid())
+  sessionId        String           @unique @map("session_id")
+  session          InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  overallScore     Float            @map("overall_score")
+  moduleScores     Json             @map("module_scores")
+  summary          String
+  strengths        Json
+  improvementAreas Json             @map("improvement_areas")
+  evidence         Json
+  reviewerSummary  String?          @map("reviewer_summary")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  @@map("candidate_reports")
+}
+
+model ReviewerNote {
+  id        String           @id @default(uuid())
+  sessionId String           @map("session_id")
+  session   InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  reviewerId String          @map("reviewer_id")
+  reviewer  User             @relation(fields: [reviewerId], references: [id])
+  note      String
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  @@map("reviewer_notes")
+}

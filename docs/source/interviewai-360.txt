@@ -1,0 +1,1480 @@
+Software Requirements Specification
+
+Project Name: InterviewAI 360
+
+AI-Powered Technical and Behavioral Assessment Platform
+
+Version: 1.0
+Prepared For: Client / Instructor / Project Stakeholders
+Prepared By: Project Team
+Project Duration: 4 Months
+
+1. Introduction
+
+1.1 Purpose
+
+This Software Requirements Specification defines the requirements for InterviewAI 360, an AI-powered
+interview and assessment platform designed to help organizations evaluate candidates through technical
+interviews, coding assessments, behavioral scenarios, leadership tests, communication simulations, and
+automated assessment reports.
+
+The purpose of this document is to provide a clear blueprint for the development team and help
+stakeholders understand what the system will do, how it will work, and what features will be delivered.
+
+1.2 Project Scope
+
+InterviewAI 360 will allow organizations to create structured interview sessions for different candidate roles.
+The system will support both technical and non-technical assessments.
+
+The platform will include:
+
+        · User authentication and role management
+        · AI-powered interview chat
+        · Live coding assessment
+        · Work-style and behavioral assessment forms
+        · Leadership scenario testing
+        · Communication roleplay simulation
+        · Problem-solving and case study assessment
+        · Candidate performance scoring
+        · AI-generated feedback reports
+        · Analytics dashboard
+        · Interview history and session management
+
+                                                                           1
+The system is designed as a modular assessment platform, meaning new assessment types can be added in
+the future without rebuilding the whole system.
+
+1.3 Intended Users
+
+The system is intended for the following users:
+
+User Type       Description
+
+Admin           Manages platform settings, users, assessment templates, and system data
+
+Organization / Client Creates interview campaigns and reviews candidate results
+
+Interviewer / Assessor Manages interviews, reviews AI feedback, and evaluates candidates
+
+Candidate       Completes assigned interviews and assessments
+
+Developer Team  Builds, tests, deploys, and maintains the platform
+
+1.4 Product Goal
+
+The goal of InterviewAI 360 is to reduce the time and effort required to screen candidates while improving
+consistency, structure, and insight in the evaluation process.
+
+The platform should not replace human hiring decisions. Instead, it provides organized assessment data,
+AI-generated summaries, and performance insights to support human reviewers.
+
+2. Overall Description
+
+2.1 Product Perspective
+
+InterviewAI 360 is a web-based platform that combines interview management, real-time interaction, AI
+evaluation, coding assessment, and analytics.
+
+The system will be accessible through a browser and will support multiple user roles. It will include
+dashboards for admins and organizations, assessment pages for candidates, and result pages for reviewing
+candidate performance.
+
+                                                 2
+2.2 Product Functions
+
+The main functions of the system are:
+
+      1. Register and authenticate users
+      2. Manage user roles and permissions
+      3. Create assessment templates
+      4. Create interview sessions
+      5. Allow candidates to complete assessments
+      6. Provide AI interview conversations
+      7. Provide live coding tasks
+      8. Support non-technical tests
+      9. Generate AI-based evaluations
+     10. Display analytics and reports
+     11. Store interview history
+     12. Export or share candidate reports
+
+2.3 User Classes and Characteristics
+
+Admin
+
+The admin has full control over the platform. Admins can manage users, assessment templates, system
+settings, and data.
+
+Organization / Client
+
+The organization user creates assessment campaigns, invites candidates, selects assessment modules, and
+reviews candidate reports.
+
+Interviewer / Assessor
+
+The interviewer reviews candidate performance, reads AI-generated summaries, and may manually add
+feedback.
+
+Candidate
+
+The candidate joins an assigned interview session and completes the required assessment modules.
+
+2.4 Operating Environment
+
+The system should run on modern web browsers, including:
+
+        · Google Chrome
+        · Microsoft Edge
+
+                                                                           3
+        · Firefox
+        · Safari
+The system should be responsive and usable on:
+
+        · Desktop
+        · Laptop
+        · Tablet
+        · Mobile browser, with limited support for coding tasks
+Recommended technical environment:
+
+        · Frontend: React / Next.js
+        · Backend: Node.js / Express.js or NestJS
+        · Database: PostgreSQL or MongoDB
+        · Real-time communication: WebSocket / Socket.IO
+        · AI Integration: AI API provider
+        · Code Editor: Monaco Editor or CodeMirror
+        · Deployment: Vercel, Render, Railway, AWS, or similar platform
+
+2.5 Design and Implementation Constraints
+
+The system must follow these constraints:
+
+        · The website must be publicly accessible for final submission.
+        · The GitHub repository must be public.
+        · The system must include clear commit history from all team members.
+        · The system must include professional documentation.
+        · AI-generated results must be explainable and reviewable.
+        · The system must not claim to make final hiring decisions automatically.
+        · Behavioral assessment must not be presented as medical or mental health diagnosis.
+        · Candidate data must be protected and accessible only to authorized users.
+
+3. System Features and Functional Requirements
+
+3.1 Authentication and Role Management
+
+Description
+
+The system shall allow users to register, log in, and access features based on their role.
+
+                                                                           4
+Functional Requirements
+
+    ID  Requirement                                                                Priority
+
+    FR-001 The system shall allow users to register with name, email, password, and role. High
+
+    FR-002 The system shall allow users to log in securely.                        High
+
+    FR-003 The system shall support role-based access control.                     High
+
+    FR-004 The system shall provide protected routes for each role.                High
+
+    FR-005 The system shall allow users to log out.                                High
+
+    FR-006 The system shall manage user sessions securely.                         High
+
+    FR-007 The system shall prevent unauthorized users from accessing restricted pages. High
+
+Roles
+
+        Role             Permissions
+
+        Admin            Full platform access
+
+        Organization / Client Create assessments, invite candidates, view reports
+
+        Interviewer / Assessor Review sessions, evaluate candidates, add feedback
+
+        Candidate        Complete assigned assessments only
+
+3.2 Assessment Template Management
+
+Description
+
+The system shall allow organizations or admins to create reusable assessment templates for different job
+roles.
+
+Functional Requirements
+
+ID      Requirement                                                                Priority
+                                                                                   High
+FR-008 The system shall allow authorized users to create assessment templates.     High
+                                                                                   Medium
+FR-009 The system shall allow templates to include multiple assessment modules.    High
+
+FR-010 The system shall allow users to edit, duplicate, and delete templates.
+
+FR-011 The system shall allow users to assign templates to candidates.
+
+                                      5
+ID      Requirement                                                                                      Priority
+                                                                                                         High
+              The system shall store template title, description, role type, modules, time limit,
+FR-012
+
+              and scoring rules.
+
+Example Templates
+
+    Template Name               Modules
+
+    Software Engineer Assessment AI interview, coding test, debugging, technical reasoning
+
+    Project Manager Assessment  Leadership scenario, planning test, communication roleplay
+
+    HR Assessment               Communication test, empathy scenario, decision-making test
+
+    Marketing Assessment        Creativity test, case study, persuasion response
+
+    General Candidate Assessment Work-style test, problem-solving test, AI interview
+
+3.3 Assessment Module System
+
+Description
+
+The system shall support different assessment modules that can be combined into one interview session.
+
+Functional Requirements
+
+    ID  Requirement                                                                                Priority
+
+    FR-013 The system shall support multiple assessment module types.                              High
+
+    FR-014 The system shall allow modules to be added to assessment templates. High
+
+    FR-015 The system shall store candidate responses for each module.                             High
+
+    FR-016 The system shall calculate scores per module.                                           High
+
+    FR-017 The system shall generate module-level feedback.                                        High
+
+Supported Module Types
+
+    Module                      Description
+    AI Interview Chat           Candidate answers AI-generated interview questions
+    Coding Assessment           Candidate solves programming problems
+
+                                         6
+    Module                  Description
+
+    Debugging Task          Candidate finds and explains code errors
+
+    Work-Style Assessment   Candidate answers structured behavioral questions
+
+    Leadership Scenario     Candidate responds to leadership-related situations
+
+    Communication Roleplay  Candidate interacts with AI in a simulated conversation
+
+    Problem-Solving Case Study Candidate solves a realistic business or workplace problem
+
+3.4 AI Interview Chat System
+
+Description
+
+The system shall provide an AI-powered chat interface where candidates answer interview questions. The AI
+may ask follow-up questions based on candidate responses.
+
+Functional Requirements
+
+ID  Requirement                                                                      Priority
+
+FR-018 The system shall allow candidates to chat with an AI interviewer.             High
+
+FR-019 The AI shall generate interview questions based on the selected role or template. High
+
+FR-020 The AI shall ask follow-up questions when needed.                             Medium
+
+FR-021 The system shall store conversation history.                                  High
+
+FR-022 The system shall support streaming AI responses if technically possible.      Medium
+
+FR-023 The system shall handle AI API failures gracefully.                           High
+
+FR-024 The system shall generate a summary of the AI interview.                      High
+
+Example AI Interview Questions
+
+For a software engineer:
+
+        · Explain a project you built and the technical challenges you faced.
+        · How would you optimize a slow API?
+        · How do you handle bugs in production?
+For a team leader:
+
+        · How would you handle conflict between two team members?
+
+                                         7
+· How do you prioritize tasks when deadlines are tight?
+· How do you motivate a team that is under pressure?
+
+3.5 Live Coding Assessment
+
+Description
+
+The system shall provide a browser-based coding environment where candidates can solve programming
+problems.
+
+Functional Requirements
+
+ID  Requirement                                                             Priority
+
+FR-025 The system shall provide a browser-based code editor.                High
+
+FR-026 The editor shall support syntax highlighting.                        High
+
+FR-027 The system shall support at least one programming language for MVP.  High
+
+FR-028 The system should support multiple programming languages if time allows. Medium
+
+FR-029 The system shall allow candidates to run code.                       High
+
+FR-030 The system shall show code execution output.                         High
+
+FR-031 The system shall handle code execution timeout.                      High
+
+FR-032 The system shall save code submissions.                              High
+
+FR-033 The AI shall provide code review feedback.                           Medium
+
+FR-034 The system shall store execution results and final submissions.      High
+
+MVP Programming Language
+
+For the first version, the system may support:
+
+        · JavaScript
+Additional languages may be added later:
+
+        · Python
+        · Java
+        · C++
+
+                                                8
+3.6 Work-Style and Behavioral Assessment
+
+Description
+
+The system shall provide structured questions to understand candidate work preferences, collaboration
+style, adaptability, motivation, and response to workplace situations.
+
+This module must be presented as a work-style assessment, not a medical or psychological diagnosis.
+
+Functional Requirements
+
+ID  Requirement                                                              Priority
+
+FR-035 The system shall provide multiple-choice and scale-based behavioral questions. High
+
+FR-036 The system shall allow short-answer behavioral questions.             High
+
+FR-037 The system shall calculate work-style indicators based on responses.  Medium
+
+FR-038 The system shall generate a written summary of candidate work style.  High
+
+FR-039 The system shall show that results are supportive insights, not final decisions. High
+
+Assessment Areas
+
+    Area            Description
+
+    Collaboration   How the candidate works with others
+
+    Adaptability    How the candidate reacts to change
+
+    Ownership       How responsible the candidate is with tasks
+
+    Stress Response How the candidate handles pressure
+
+    Motivation      What type of work or goal motivates the candidate
+
+    Learning Style  How the candidate prefers to learn and improve
+
+3.7 Leadership Scenario Assessment
+
+Description
+
+The system shall provide realistic leadership scenarios and ask the candidate to explain how they would
+respond.
+
+                                 9
+Functional Requirements
+
+ID  Requirement                                                                 Priority
+
+FR-040 The system shall display leadership scenarios to candidates.             High
+
+FR-041 The candidate shall submit written responses.                            High
+
+FR-042 The AI shall evaluate responses based on leadership rubric criteria.     High
+
+FR-043 The system shall generate scores for each leadership criterion.          High
+
+FR-044 The system shall provide evidence-based feedback from the candidate's answer. High
+
+Leadership Rubric
+
+    Criteria             Description
+
+    Empathy              Understands people and situations fairly
+
+    Accountability       Takes responsibility and avoids blaming
+
+    Decision-Making Chooses practical actions
+
+    Communication Explains clearly and professionally
+
+    Conflict Handling Handles disagreement constructively
+
+    Team Support         Helps the team move forward
+
+3.8 Communication Roleplay Simulation
+
+Description
+
+The system shall simulate workplace conversations using AI. Candidates must respond professionally to
+different situations.
+
+Functional Requirements
+
+ID  Requirement                                                                 Priority
+
+FR-045 The system shall allow candidates to enter an AI roleplay conversation.  High
+
+FR-046 The AI shall act as a specific role, such as client, teammate, manager, or customer. High
+
+FR-047 The candidate shall respond through chat.                                High
+
+FR-048 The system shall store the conversation.                                 High
+
+                         10
+ID      Requirement                                                                   Priority
+                                                                                      High
+FR-049 The AI shall evaluate communication quality.                                   High
+
+FR-050 The system shall provide a communication score and feedback.
+
+Example Roleplay Scenarios
+
+        Scenario            Purpose
+
+        Angry customer complaint Tests calmness, empathy, and solution quality
+
+        Confused client explanation Tests clarity and patience
+
+        Team conflict       Tests professionalism and conflict handling
+
+        Deadline pressure   Tests communication under stress
+
+3.9 Problem-Solving Case Study
+
+Description
+
+The system shall present realistic problems and ask candidates to propose solutions.
+
+Functional Requirements
+
+    ID  Requirement                                                                   Priority
+
+    FR-051 The system shall display case study questions.                             Medium
+
+    FR-052 Candidates shall submit structured written responses.                      Medium
+
+    FR-053 The AI shall evaluate analysis, creativity, practicality, and prioritization. Medium
+
+    FR-054 The system shall generate feedback and improvement suggestions.            Medium
+
+Example Case Study
+
+A small business is losing customers after a competitor opens nearby. The candidate must analyze the
+problem and suggest practical solutions.
+
+                            11
+3.10 Interview Session Management
+
+Description
+
+The system shall allow organizations to create, manage, and track interview sessions.
+
+Functional Requirements
+
+ID  Requirement                                                                            Priority
+                                                                                           High
+FR-055 The system shall allow authorized users to create interview sessions.               High
+                                                                                           High
+FR-056 Each session shall be linked to a candidate and assessment template.
+                                                                                           High
+FR-057 The system shall generate a unique session link or access code.
+                                                                                           High
+              The system shall track session status: not started, in progress, completed,  Medium
+FR-058                                                                                     High
+
+              expired.
+
+FR-059 The system shall save progress during the session.
+
+FR-060 The system shall handle candidate reconnect scenarios.
+
+FR-061 The system shall store interview history.
+
+3.11 AI Evaluation and Scoring System
+
+Description
+
+The system shall evaluate candidate responses using predefined rubrics and AI-generated analysis.
+
+Functional Requirements
+
+ID  Requirement                                                                            Priority
+
+FR-062 The system shall evaluate candidate responses using scoring rubrics.                High
+
+FR-063 The AI shall provide scores for each assessment module.                             High
+
+FR-064 The AI shall provide written feedback for each module.                              High
+
+FR-065 The AI shall include evidence from candidate responses when explaining scores. High
+
+FR-066 The system shall generate an overall candidate score.                               High
+
+FR-067 The system shall allow human reviewers to review AI feedback.                       High
+
+                                                  12
+ID  Requirement                                                                              Priority
+                                                                                             High
+FR-068 The system shall clearly state that AI feedback is advisory.
+
+Scoring Scale
+
+                            Score Meaning
+
+                            1            Very weak
+
+                            2            Weak
+
+                            3            Acceptable
+
+                            4            Good
+
+                            5            Excellent
+
+Example Evaluation Dimensions
+
+        Dimension           Description
+
+        Technical Skill     Coding, debugging, technical explanation
+
+        Problem Solving     Logic, analysis, solution quality
+
+        Communication       Clarity, tone, structure
+
+        Leadership          Decision-making, accountability, conflict handling
+
+        Work Style          Collaboration, adaptability, ownership
+
+        Learning Potential Ability to reflect, improve, and learn
+
+3.12 Candidate Report Generation
+
+Description
+
+The system shall generate a structured report after the candidate completes the assessment.
+
+Functional Requirements
+
+    ID         Requirement                                            Priority
+                                                                      High
+    FR-069 The system shall generate a candidate assessment report.   High
+
+    FR-070 The report shall include module scores.
+
+                                         13
+    ID  Requirement                                                  Priority
+
+    FR-071 The report shall include AI feedback summary.             High
+
+    FR-072 The report shall include strengths and improvement areas. High
+
+    FR-073 The report shall include evidence from responses.         High
+
+    FR-074 The report should support PDF export if time allows.      Medium
+
+    FR-075 The report shall be accessible only to authorized users.  High
+
+Report Sections
+
+The candidate report shall include:
+
+      1. Candidate information
+      2. Assessment template name
+      3. Completion date and duration
+      4. Overall score
+      5. Module scores
+      6. Technical assessment summary
+      7. Behavioral assessment summary
+      8. Leadership and communication summary
+      9. Strengths
+     10. Improvement areas
+     11. AI recommendation summary
+     12. Human reviewer notes
+
+3.13 Analytics Dashboard
+
+Description
+
+The system shall provide dashboards for organizations and admins to view interview statistics and
+candidate performance.
+
+Functional Requirements
+
+ID      Requirement                                                            Priority
+                                                                               High
+FR-076 The dashboard shall show total assessments created.                     High
+                                                                               Medium
+FR-077 The dashboard shall show completed and pending sessions.
+
+FR-078 The dashboard shall show candidate score distribution.
+
+                                               14
+    ID  Requirement                                                              Priority
+
+    FR-079 The dashboard shall show module-level performance.                    Medium
+
+    FR-080 The dashboard shall allow filtering by role, template, candidate, and date. Medium
+
+    FR-081 The dashboard shall show recent interview activity.                   High
+
+Dashboard Metrics
+
+        Metric              Description
+
+        Total Candidates    Number of candidates invited
+
+        Completed Sessions  Number of completed assessments
+
+        Average Score       Average score across candidates
+
+        Top Strengths       Common strong areas
+
+        Common Weaknesses   Common improvement areas
+
+        Assessment Completion Rate Percentage of candidates who completed sessions
+
+4. Non-Functional Requirements
+
+4.1 Performance Requirements
+
+ID      Requirement                                                                 Priority
+
+NFR-001 The system shall load main pages within 3 seconds under normal conditions. High
+
+NFR-002 The system shall support multiple concurrent interview sessions.            High
+
+NFR-003 AI response time should be optimized using streaming or loading states.     Medium
+
+NFR-004 Code execution shall return results within a reasonable time limit.         High
+
+NFR-005 Dashboard queries shall be optimized for fast loading.                      Medium
+
+4.2 Security Requirements
+
+ID      Requirement                                                                    Priority
+                                                                                       High
+NFR-006 Passwords shall be securely hashed.
+
+                                             15
+ID       Requirement                                                                      Priority
+                                                                                          High
+NFR-007 The system shall use secure authentication tokens or sessions.                    High
+                                                                                          High
+NFR-008 Users shall only access data allowed by their role.                               High
+                                                                                          High
+NFR-009 Candidate reports shall not be public.
+                                                                                          High
+NFR-010 API endpoints shall validate user permissions.
+
+NFR-011 Code execution shall be sandboxed or isolated.
+
+NFR-012  The system shall protect against basic web vulnerabilities such as unauthorized
+         access and invalid input.
+
+4.3 Reliability Requirements
+
+ID       Requirement                                                                      Priority
+
+NFR-013 The system shall save candidate progress during assessments.                      High
+
+NFR-014 The system shall handle AI API failure gracefully.                                High
+
+NFR-015 The system shall handle WebSocket disconnection if real-time features are used. Medium
+
+NFR-016 The system shall show clear error messages to users.                              High
+
+NFR-017 The system shall prevent data loss during page refresh where possible.            Medium
+
+4.4 Usability Requirements
+
+    ID   Requirement                                                                      Priority
+
+    NFR-018 The user interface shall be simple and easy to understand.                    High
+
+    NFR-019 Candidates shall be able to start an assessment with minimal instruction. High
+
+    NFR-020 Dashboards shall use clear charts and summaries.                              Medium
+
+    NFR-021 The system shall be responsive for desktop and mobile views.                  Medium
+
+    NFR-022 Coding assessment should be optimized for desktop use.                        High
+
+                                                16
+4.5 Maintainability Requirements
+
+ID        Requirement                                     Priority
+
+NFR-023 The codebase shall use modular structure.         High
+
+NFR-024 Frontend components shall be reusable.            Medium
+
+NFR-025 Backend services shall be separated by feature.   High
+
+NFR-026 API documentation shall be provided.              High
+
+NFR-027 Database schema shall be documented.              High
+
+NFR-028 Environment variables shall be used for secret keys and API keys. High
+
+5. System Architecture
+
+5.1 High-Level Architecture
+
+The system will follow a client-server architecture.
+
+Candidate / Client / Admin
+
+    |
+
+    v
+
+Frontend Web Application
+
+    |
+
+    v
+
+Backend API Server
+
+    |
+
+    +-------------------+
+
+    |                       |
+
+    v                       v
+
+Database            AI Service
+
+    |
+
+    v
+
+Assessment Data / Reports
+
+                                                      17
+5.2 Main Components
+
+Component               Responsibility
+
+Frontend Application    User interface, dashboards, interview room, coding editor
+
+Backend API             Business logic, authentication, session management
+
+Database                Stores users, templates, sessions, responses, evaluations
+
+AI Service              Generates questions, feedback, scores, and summaries
+
+Code Execution Service Runs submitted code safely and returns output
+
+WebSocket Service       Supports real-time chat or live session updates
+
+Report Service          Generates candidate reports
+
+6. Database Requirements
+
+6.1 Main Data Entities
+
+Entity                  Description
+
+User                    Stores account and role information
+
+Organization            Stores company/client information
+
+AssessmentTemplate Stores reusable assessment structure
+
+AssessmentModule Stores module type and settings
+
+Question                Stores questions and prompts
+
+InterviewSession        Stores candidate interview session
+
+Response                Stores candidate answers
+
+AIMessage               Stores AI chat messages
+
+CodeSubmission          Stores coding answers and execution results
+
+Evaluation              Stores module scores and AI feedback
+
+CandidateReport         Stores final report data
+
+ReviewerNote            Stores human reviewer comments
+
+                                        18
+6.2 Suggested Database Tables
+
+users
+
+Field                        Type          Description
+
+id                           UUID          Unique user ID
+
+name                         String        User full name
+
+email                        String        User email
+
+password_hash String                       Hashed password
+
+role                         String        Admin, organization, interviewer, candidate
+
+created_at                   DateTime Account creation date
+
+assessment_templates
+
+                      Field          Type        Description
+
+                      id             UUID        Template ID
+
+                      title          String      Template name
+
+                      description Text           Template description
+
+                      role_type      String      Target role
+
+                      created_by UUID            Creator user ID
+
+                      created_at DateTime Creation date
+
+assessment_modules
+
+       Field                       Type      Description
+
+       id                          UUID      Module ID
+
+       template_id UUID                      Linked template
+
+       module_type String                    Coding, AI chat, leadership, etc.
+
+       title                       String    Module title
+
+       description Text                      Module description
+
+       weight                      Number Score weight
+
+       order_index Number Display order
+
+                                             19
+questions
+
+                 Field           Type Description
+
+                 id              UUID Question ID
+
+                 module_id       UUID Linked module
+
+                 question_text Text      Question content
+
+                 question_type String MCQ, scale, short answer, coding, scenario
+
+                 options         JSON Multiple-choice options
+
+                 rubric          JSON Evaluation criteria
+
+interview_sessions
+
+             Field               Type    Description
+
+             id                  UUID    Session ID
+
+             candidate_id UUID           Candidate user ID
+
+             template_id UUID            Assessment template ID
+
+             status              String  Not started, in progress, completed, expired
+
+             started_at          DateTime Start time
+
+             completed_at DateTime Completion time
+
+responses
+
+                          Field          Type         Description
+
+                          id             UUID         Response ID
+
+                          session_id     UUID         Linked session
+
+                          question_id    UUID         Linked question
+
+                          response_text Text          Candidate answer
+
+                          created_at     DateTime Submission time
+
+evaluations
+
+                     Field       Type    Description
+                     id          UUID    Evaluation ID
+                     session_id  UUID    Linked session
+
+                                               20
+Field        Type             Description
+
+module_id UUID                Linked module
+
+score        Number Module score
+
+feedback Text                 AI feedback
+
+evidence JSON                 Supporting evidence from responses
+
+created_at DateTime Evaluation creation time
+
+7. API Requirements
+
+7.1 Authentication APIs
+
+       Method Endpoint                     Description
+
+       POST              /api/auth/register Register new user
+
+       POST              /api/auth/login   Log in user
+
+       POST              /api/auth/logout Log out user
+
+       GET               /api/auth/me      Get current user
+
+7.2 Assessment Template APIs
+
+       Method Endpoint                    Description
+
+       GET               /api/templates   Get all templates
+
+       POST              /api/templates   Create template
+
+       GET               /api/templates/:id Get template details
+
+       PUT               /api/templates/:id Update template
+
+       DELETE /api/templates/:id Delete template
+
+7.3 Interview Session APIs
+
+Method Endpoint                            Description
+                                           Create interview session
+POST        /api/sessions
+
+                              21
+             Method Endpoint                Description
+
+             GET   /api/sessions            Get session list
+
+             GET   /api/sessions/:id        Get session details
+
+             PUT   /api/sessions/:id/start  Start session
+
+             PUT   /api/sessions/:id/complete Complete session
+
+7.4 Response APIs
+
+             Method Endpoint                Description
+
+             POST  /api/responses           Submit response
+
+             GET   /api/responses/session/:sessionId Get session responses
+
+7.5 AI APIs
+
+             Method Endpoint                Description
+
+             POST  /api/ai/interview-question Generate interview question
+
+             POST  /api/ai/follow-up        Generate follow-up question
+
+             POST  /api/ai/evaluate         Evaluate candidate response
+
+             POST  /api/ai/report           Generate candidate report
+
+7.6 Coding APIs
+
+             Method Endpoint                Description
+
+             POST  /api/code/run            Run candidate code
+
+             POST  /api/code/submit         Submit final code
+
+             GET   /api/code/submissions/:sessionId Get code submissions
+
+                                      22
+7.7 Report APIs
+
+    Method Endpoint                                         Description
+
+    GET          /api/reports/:sessionId                    Get candidate report
+
+    POST         /api/reports/:sessionId/generate Generate candidate report
+
+    GET          /api/reports/:sessionId/export             Export report, if supported
+
+8. AI Requirements
+
+8.1 AI Responsibilities
+
+The AI system shall support:
+
+      1. Generating interview questions
+      2. Asking follow-up questions
+      3. Reviewing candidate answers
+      4. Reviewing code submissions
+      5. Evaluating leadership and communication responses
+      6. Generating scores based on rubrics
+      7. Producing feedback summaries
+      8. Generating final candidate reports
+
+8.2 AI Safety and Limitation Requirements
+
+ID       Requirement
+
+AIR-001 AI feedback shall be advisory, not final hiring judgment.
+
+AIR-002 AI shall provide explanation for scores.
+
+AIR-003 AI shall avoid unsupported claims about candidates.
+
+AIR-004 AI shall not provide medical or mental health diagnosis.
+
+AIR-005 AI shall use only candidate responses and assessment rubrics for evaluation.
+
+AIR-006 Human reviewers shall be able to review AI-generated results.
+
+                                          23
+9. User Interface Requirements
+
+9.1 Main Pages
+
+The platform shall include the following pages:
+
+Page               Description
+
+Landing Page       Introduces the platform
+
+Login Page         Allows users to log in
+
+Register Page      Allows users to create accounts
+
+Admin Dashboard    Shows platform overview
+
+Organization Dashboard Shows assessments, candidates, and reports
+
+Template Builder   Allows creation of assessment templates
+
+Candidate Session Page Candidate completes assigned assessment
+
+AI Interview Page  Candidate chats with AI interviewer
+
+Coding Page        Candidate solves coding task
+
+Report Page        Shows candidate evaluation
+
+Analytics Page     Shows performance statistics
+
+9.2 Candidate Flow
+
+   Candidate receives session link
+                 |
+                 v
+
+   Candidate logs in or enters access code
+                 |
+                 v
+
+   Candidate views instructions
+                 |
+                 v
+
+   Candidate completes modules
+                 |
+                 v
+
+   Candidate submits assessment
+                 |
+
+                                                 24
+                 v
+   System generates report
+
+9.3 Organization Flow
+
+   Organization logs in
+                 |
+                 v
+
+   Creates assessment template
+                 |
+                 v
+
+   Adds assessment modules
+                 |
+                 v
+
+   Invites candidate
+                 |
+                 v
+
+   Reviews candidate result
+                 |
+                 v
+
+   Adds human reviewer notes
+
+10. Testing Requirements
+
+10.1 Functional Testing
+
+The team shall test:
+
+        · User registration
+        · User login
+        · Role-based access
+        · Template creation
+        · Session creation
+        · Candidate assessment submission
+        · AI chat response
+        · Code execution
+        · AI evaluation
+        · Report generation
+        · Dashboard data display
+
+                                                                           25
+10.2 Edge Case Testing
+
+The team shall test:
+
+Case                     Expected Result
+
+Invalid login            Show error message
+
+Unauthorized page access Redirect or block access
+
+AI API failure           Show fallback message
+
+Empty candidate answer   Prevent submission or request input
+
+Code execution timeout   Stop execution and show timeout message
+
+Candidate refreshes page Preserve progress where possible
+
+Candidate loses connection Allow reconnect where possible
+
+Invalid session link     Show invalid session message
+
+Expired session          Prevent access and show status
+
+Large answer submission  Handle or limit input safely
+
+10.3 Performance Testing
+
+The team should test:
+
+        · Multiple users accessing dashboard
+        · Multiple candidates taking assessments
+        · AI response loading time
+        · Code execution response time
+        · Database query speed
+        · Page loading speed
+
+11. Acceptance Criteria
+
+The project will be considered successful if:
+
+      1. Users can register and log in.
+      2. Roles and permissions work correctly.
+      3. Organizations can create assessment templates.
+      4. Candidates can complete assigned assessment sessions.
+      5. The system supports at least one AI interview module.
+
+                         26
+      6. The system supports at least one coding assessment.
+      7. The system supports at least one non-technical assessment module.
+      8. The AI can generate feedback and scores.
+      9. The system can generate a candidate report.
+     10. The dashboard displays assessment and candidate data.
+     11. The platform is deployed publicly.
+     12. The GitHub repository is public and contains commits from all team members.
+     13. The final report includes architecture, database design, screenshots, API documentation, testing,
+
+          and individual contribution.
+
+12. Project Timeline
+
+Month 1: Foundation
+
+Goals
+
+        · Finalize SRS
+        · Design database
+        · Create UI wireframes
+        · Set up GitHub repository
+        · Build authentication
+        · Build role-based dashboard layout
+        · Build basic assessment template system
+
+Deliverables
+
+        · Database schema
+        · Auth system
+        · Basic dashboard
+        · Template creation page
+        · Initial API documentation
+
+Month 2: Core Assessment Features
+
+Goals
+
+        · Build candidate session flow
+        · Build AI interview chat
+        · Build coding assessment page
+        · Build non-technical assessment form
+        · Store candidate responses
+
+                                                                           27
+Deliverables
+
+        · Candidate assessment flow
+        · AI chat module
+        · Coding module
+        · Work-style form module
+        · Response storage
+
+Month 3: Evaluation and Analytics
+
+Goals
+
+        · Build AI evaluation system
+        · Build leadership scenario module
+        · Build communication roleplay module
+        · Build candidate report page
+        · Build analytics dashboard
+
+Deliverables
+
+        · AI scoring system
+        · Candidate report
+        · Analytics dashboard
+        · Interview history
+        · Module-level feedback
+
+Month 4: Production Polish and Submission
+
+Goals
+
+        · Improve UI/UX
+        · Add error handling
+        · Test edge cases
+        · Optimize performance
+        · Deploy public website
+        · Record demo video
+        · Complete final PDF report
+
+Deliverables
+
+        · Public website URL
+        · Public GitHub repository
+        · Public demo video
+        · Final PDF report
+        · Testing documentation
+
+                                                                           28
+        · Individual contribution report
+
+13. Team Responsibilities
+
+Member 1: Frontend and UI/UX Lead
+
+Responsible for:
+
+        · Landing page
+        · Login and register pages
+        · Dashboard UI
+        · Template builder UI
+        · Candidate assessment UI
+        · Report page UI
+        · Responsive design
+        · Charts and visual polish
+
+Member 2: Backend and Database Lead
+
+Responsible for:
+
+        · Backend API structure
+        · Authentication logic
+        · Role-based access control
+        · Database schema
+        · Assessment template APIs
+        · Session management APIs
+        · Response storage
+        · Backend validation
+
+Member 3: AI and Assessment Logic Lead
+
+Responsible for:
+
+        · AI prompt design
+        · AI interview question generation
+        · AI follow-up logic
+        · Scoring rubrics
+        · AI evaluation system
+        · Candidate report generation
+        · Behavioral and leadership assessment logic
+
+                                                                           29
+Member 4: Real-Time, Code Execution, Testing, and Deployment
+Lead
+
+Responsible for:
+
+        · WebSocket or real-time features
+        · Coding editor integration
+        · Code execution service
+        · Error handling
+        · Testing
+        · Deployment
+        · CI/CD if possible
+        · Demo stability
+
+14. Out of Scope for Version 1
+
+The following features are not required for the first version:
+
+        · Full video interview recording
+        · Real payment system
+        · Enterprise HR system integration
+        · Advanced proctoring
+        · Face recognition
+        · Voice emotion analysis
+        · Mobile app version
+        · Perfect automated hiring decision
+        · Large-scale enterprise deployment
+
+These features may be considered for future versions.
+
+15. Risks and Mitigation
+
+Risk             Impact                                          Mitigation
+
+AI API failure   Candidate cannot complete AI                    Add fallback message and retry option
+                 interview
+                                                                 Use sandboxed execution or limited
+Code execution security                                          language support
+                                       System may be unsafe      Prioritize MVP modules first
+
+issue
+
+Scope too large  Team may not finish
+
+                                                             30
+Risk               Impact                                                      Mitigation
+                                                                               Use clear rubrics and evidence-based
+Poor AI scoring quality Reports may feel unreliable                            feedback
+
+Weak UI/UX         Client may not understand                                   Use simple, clean, guided interface
+                   product value
+Uneven team                                                                    Assign clear responsibilities and track
+contribution       Final submission may suffer                                 GitHub commits
+Deployment issues                                                              Deploy early and test weekly
+                   Demo may fail
+
+16. MVP Feature Priority
+
+Must Have
+
+      1. Authentication
+      2. Role management
+      3. Assessment template creation
+      4. Candidate session flow
+      5. AI interview chat
+      6. Coding assessment
+      7. Work-style assessment
+      8. AI evaluation
+      9. Candidate report
+     10. Dashboard
+     11. Public deployment
+
+Should Have
+
+      1. Leadership scenario
+      2. Communication roleplay
+      3. Analytics charts
+      4. Report export
+      5. Session reconnect handling
+      6. Interview history filtering
+
+Could Have
+
+      1. Multiple programming languages
+      2. Live cursor tracking
+      3. Advanced cheating detection
+      4. PDF export
+      5. Email invitation
+      6. Real-time dashboard updates
+
+                                                                           31
+17. Success Measurement
+
+The system success will be measured by:
+
+Measurement          Target
+
+Assessment completion Candidate can complete full assessment without developer help
+
+AI feedback quality  Feedback includes score, explanation, and evidence
+
+Technical function   Coding task can be submitted and evaluated
+
+Non-technical function Work-style or leadership test can be completed
+
+Dashboard usefulness Client can understand candidate results clearly
+
+Deployment           Website is publicly accessible
+
+Documentation        Report explains system architecture, API, database, testing, and contribution
+
+18. Final Product Summary
+
+InterviewAI 360 is a web-based AI assessment platform that helps organizations evaluate candidates
+through structured technical and behavioral assessments.
+
+The system supports AI interviews, coding tests, work-style assessments, leadership scenarios,
+communication roleplay, problem-solving case studies, automated scoring, candidate reports, and analytics
+dashboards.
+
+The platform is designed to be modular, scalable, and practical for real-world screening workflows while still
+allowing human reviewers to make the final decision.
+
+                             32
+
