@@ -14,7 +14,7 @@ Implemented auth persistence slice:
 - Logic adapted from the Coorad backend auth flow: normalize email, hash password, verify password with bcrypt, sign JWT with role claims, and never return password hashes.
 - `src/modules/auth/auth.service.ts` exposes `register` and `login` over a repository boundary.
 - `PrismaAuthRepository` writes/reads `User` records through Prisma using Evalora's `passwordHash` and role enum fields.
-- `src/modules/auth/auth.guard.ts` parses `Authorization: Bearer <jwt>`, attaches the authenticated user to the request, and provides role-access checks.
+- `src/modules/auth/auth.guard.ts` parses `Authorization: Bearer JWT_TOKEN`, attaches the authenticated user to the request, and provides role-access checks.
 - `GET /api/auth/me` is protected by `JwtAuthGuard`.
 
 Next auth tasks:
@@ -32,11 +32,18 @@ Endpoints:
 - `PUT /api/templates/:id`
 - `DELETE /api/templates/:id`
 
-Implementation tasks:
+Implemented template persistence slice:
 
-- Persist templates, modules, questions, scoring rules.
-- Support edit/duplicate/delete.
-- Enforce organization ownership.
+- `src/modules/templates/templates.service.ts` maps API DTOs to Prisma `AssessmentTemplate`, `AssessmentModule`, and `Question` writes.
+- `POST /api/templates` creates nested modules/questions and stores scoring rules.
+- `PUT /api/templates/:id` replaces nested modules/questions so edits stay in sync with the template editor.
+- `GET /api/templates` and `GET /api/templates/:id` return nested module/question DTOs.
+- Template routes require JWT auth; write routes are restricted to `admin` and `organization` roles.
+
+Next template tasks:
+
+- Enforce organization ownership in query filters once organization membership is fully connected.
+- Add duplicate-template endpoint if needed by the frontend workflow.
 
 ## Sessions
 

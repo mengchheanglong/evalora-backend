@@ -53,15 +53,20 @@ Implemented first core logic slice:
   - `src/modules/auth/auth.guard.ts` verifies Bearer JWTs, attaches `{ id, email, role }` to requests, and provides `Roles`/`RolesGuard` helpers.
   - `GET /api/auth/me` now requires a valid JWT.
   - `test/auth.guard.test.ts` verifies token parsing and role rejection.
+- Template persistence slice:
+  - `src/modules/templates/templates.service.ts` maps template DTOs to Prisma nested writes for `AssessmentTemplate`, `AssessmentModule`, and `Question`.
+  - `src/modules/templates/templates.controller.ts` now uses the service instead of mock template data.
+  - Template routes require JWT auth; write routes require `admin` or `organization` role.
+  - `test/templates.service.test.ts` verifies nested create/update mapping and DTO conversion without Neon credentials.
 
 ## Next Member 1 slices
 
 Work in this order:
 
-1. Apply JWT/role guards to persisted session, report, template, and admin endpoints as they become real database routes.
-2. Implement template persistence: templates, modules, questions, scoring rules.
-3. Implement session persistence: access codes, status, timestamps, candidate assignment.
-4. Implement response persistence and autosave.
+1. Enforce organization ownership filters for templates once organization membership is connected.
+2. Implement session persistence: access codes, status, timestamps, candidate assignment.
+3. Implement response persistence and autosave.
+4. Apply JWT/role guards to persisted session, report, response, and admin endpoints as they become real database routes.
 5. Replace deterministic evaluation with a DeepSeek V4 Flash provider adapter while keeping the same output contract.
 
 ## Rules

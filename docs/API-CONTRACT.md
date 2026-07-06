@@ -50,7 +50,7 @@ Both successful routes return a signed JWT and safe user object. The response mu
 Protected routes, including `GET /api/auth/me`, require:
 
 ```http
-Authorization: Bearer <jwt>
+Authorization: Bearer JWT_TOKEN
 ```
 
 JWT payloads carry `sub`, `email`, and `role`. Role-restricted routes should use the same role values as the SRS: `candidate`, `interviewer`, `organization`, or `admin`.
@@ -64,6 +64,39 @@ JWT payloads carry `sub`, `email`, and `role`. Role-restricted routes should use
 | GET | `/templates/:id` | Get template details including modules/questions. |
 | PUT | `/templates/:id` | Update template. |
 | DELETE | `/templates/:id` | Delete template. |
+
+Template routes require a Bearer JWT. `GET` routes allow `admin`, `organization`, and `interviewer`; write routes allow `admin` and `organization`.
+
+`POST /api/templates` request:
+
+```json
+{
+  "title": "Backend Engineer Assessment",
+  "description": "Technical backend screen",
+  "roleType": "Backend Engineer",
+  "timeLimitMin": 60,
+  "scoringRules": { "passScore": 3.5 },
+  "organizationId": "org-id-if-applicable",
+  "modules": [
+    {
+      "type": "ai_interview",
+      "title": "AI Interview",
+      "description": "Scenario questions",
+      "weight": 1.25,
+      "orderIndex": 1,
+      "questions": [
+        {
+          "questionText": "Tell us about a production incident.",
+          "questionType": "scenario",
+          "rubric": ["clarity", "ownership"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+The backend uses the authenticated JWT user as `createdById`; clients must not send password or secret fields in template payloads.
 
 ## Interview sessions
 
