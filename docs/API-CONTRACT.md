@@ -25,6 +25,36 @@ Frontend code should read the backend URL from `NEXT_PUBLIC_API_URL` and default
 | POST | `/auth/logout` | End session/token client-side or server-side when implemented. |
 | GET | `/auth/me` | Return current authenticated user. |
 
+`POST /api/auth/register` request:
+
+```json
+{
+  "name": "Demo User",
+  "email": "demo@example.com",
+  "password": "minimum-8-characters",
+  "role": "candidate"
+}
+```
+
+`POST /api/auth/login` request:
+
+```json
+{
+  "email": "demo@example.com",
+  "password": "minimum-8-characters"
+}
+```
+
+Both successful routes return a signed JWT and safe user object. The response must never include `passwordHash`.
+
+Protected routes, including `GET /api/auth/me`, require:
+
+```http
+Authorization: Bearer <jwt>
+```
+
+JWT payloads carry `sub`, `email`, and `role`. Role-restricted routes should use the same role values as the SRS: `candidate`, `interviewer`, `organization`, or `admin`.
+
 ## Assessment templates
 
 | Method | Endpoint | Description |
@@ -76,6 +106,19 @@ Frontend code should read the backend URL from `NEXT_PUBLIC_API_URL` and default
 | GET | `/reports/:sessionId` | Get candidate report. |
 | POST | `/reports/:sessionId/generate` | Generate or regenerate report. |
 | GET | `/reports/:sessionId/export` | Export report if supported. |
+
+`POST /api/reports/:sessionId/generate` returns generated report fields plus:
+
+```json
+{
+  "generatedAt": "2026-07-01T00:00:00.000Z",
+  "persistence": {
+    "status": "persisted"
+  }
+}
+```
+
+Persistence status may be `persisted`, `skipped`, or `failed`. A failed persistence status means report generation completed, but the database write did not complete.
 
 ## Analytics
 

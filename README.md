@@ -2,6 +2,15 @@
 
 Standalone NestJS + TypeScript backend for Evalora.
 
+MVP provider choices:
+
+- AI: DeepSeek V4 Flash.
+- Database: PostgreSQL on Neon.
+
+## AI agent start rule
+
+Before any AI agent changes this repository, read `AGENTS.md` first.
+
 ## Run locally
 
 ```bash
@@ -42,10 +51,11 @@ This backend is a scaffold with route contracts and demo responses. Replace demo
 ## Verification
 
 ```bash
+pnpm test
 pnpm typecheck
 pnpm lint
 pnpm build
-DATABASE_URL='postgresql://postgres:postgres@localhost:5432/evalora' pnpm prisma:validate
+DATABASE_URL='postgresql://postgres:***@localhost:5432/evalora' pnpm prisma:validate
 ```
 
 ## Separate repository note

@@ -9,12 +9,18 @@ Endpoints:
 - `POST /api/auth/logout`
 - `GET /api/auth/me`
 
-Implementation tasks:
+Implemented auth persistence slice:
 
-- Hash passwords with bcrypt.
-- Sign JWT with role claims.
-- Add guards for authenticated routes.
-- Add role guard for admin/organization/interviewer/candidate boundaries.
+- Logic adapted from the Coorad backend auth flow: normalize email, hash password, verify password with bcrypt, sign JWT with role claims, and never return password hashes.
+- `src/modules/auth/auth.service.ts` exposes `register` and `login` over a repository boundary.
+- `PrismaAuthRepository` writes/reads `User` records through Prisma using Evalora's `passwordHash` and role enum fields.
+- `src/modules/auth/auth.guard.ts` parses `Authorization: Bearer <jwt>`, attaches the authenticated user to the request, and provides role-access checks.
+- `GET /api/auth/me` is protected by `JwtAuthGuard`.
+
+Next auth tasks:
+
+- Apply JWT/role guards to real session, report, template, and admin endpoints as they move from demo data to persistence.
+- Add refresh-token/logout persistence if the project needs server-side session invalidation.
 
 ## Templates
 
@@ -51,6 +57,20 @@ Implementation tasks:
 ## AI
 
 Keep provider details hidden behind a service adapter. The controller should not contain prompt logic long-term.
+
+Implemented first Member 1 slice:
+
+- `src/modules/ai/evaluation.service.ts` evaluates response text against rubrics.
+- `POST /api/ai/evaluate` returns score, criteria scores, feedback, strengths, improvement areas, evidence, and advisory notice.
+- `POST /api/ai/report` aggregates module evaluations into a candidate report.
+
+## Reports
+
+Implemented first Member 1 slice:
+
+- `GET /api/reports/:sessionId` returns a generated evidence-based demo report.
+- `POST /api/reports/:sessionId/generate` generates the report, attempts to persist `Evaluation` and `CandidateReport` records through Prisma, and returns `persistence.status`.
+- Persistence succeeds only when the `sessionId` exists in the database; demo/nonexistent sessions return generated report data with a failed/skipped persistence status instead of crashing.
 
 ## Code execution
 

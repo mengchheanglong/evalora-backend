@@ -40,14 +40,14 @@ The platform supports both technical and non-technical assessments for different
 
 - Frontend: Next.js with TypeScript.
 - Backend: NestJS with TypeScript.
-- Database: PostgreSQL.
+- Database: PostgreSQL on Neon.
 - ORM: Prisma.
 - Authentication: JWT-based authentication.
 - UI styling: Tailwind CSS.
 - Real-time communication: Socket.IO/WebSocket boundary.
 - Code editor: Monaco Editor.
 - Code execution: Judge0 API or secure sandbox service.
-- AI integration: external AI API provider via backend abstraction.
+- AI integration: DeepSeek V4 Flash via backend abstraction.
 
 ## 2. Overall description
 

@@ -2,6 +2,15 @@
 
 The AI service must be replaceable. Controllers should call an internal service interface, not provider SDKs directly.
 
+## Selected MVP provider
+
+- Provider: DeepSeek.
+- Model: `deepseek-v4-flash`.
+- Base URL: `https://api.deepseek.com/v1`.
+- API key env var: `DEEPSEEK_API_KEY`.
+
+Do not commit API keys. Keep provider settings in `.env` / hosting environment variables.
+
 ## Required operations
 
 ```text
