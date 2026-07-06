@@ -49,10 +49,19 @@ export interface AssessmentTemplateDto {
 
 export interface InterviewSessionDto {
   id: string;
+  candidateId?: string;
   candidateName: string;
+  candidateEmail?: string;
   templateId: string;
+  templateTitle?: string;
+  organizationId?: string;
   status: SessionStatus;
   accessCode: string;
+  startedAt?: string;
+  completedAt?: string;
+  expiresAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface CandidateReportDto {

@@ -58,15 +58,20 @@ Implemented first core logic slice:
   - `src/modules/templates/templates.controller.ts` now uses the service instead of mock template data.
   - Template routes require JWT auth; write routes require `admin` or `organization` role.
   - `test/templates.service.test.ts` verifies nested create/update mapping and DTO conversion without Neon credentials.
+- Session persistence slice:
+  - `src/modules/sessions/sessions.service.ts` creates and reads `InterviewSession` records linked to candidate user IDs and template IDs.
+  - session creation generates an access code and starts with `not_started` status.
+  - start/complete endpoints persist `startedAt`, `completedAt`, and status transitions.
+  - `test/sessions.service.test.ts` verifies create/list/start/complete Prisma mapping without Neon credentials.
 
 ## Next Member 1 slices
 
 Work in this order:
 
-1. Enforce organization ownership filters for templates once organization membership is connected.
-2. Implement session persistence: access codes, status, timestamps, candidate assignment.
-3. Implement response persistence and autosave.
-4. Apply JWT/role guards to persisted session, report, response, and admin endpoints as they become real database routes.
+1. Enforce organization ownership filters for templates/sessions once organization membership is connected.
+2. Implement response persistence and autosave.
+3. Add candidate access-code lookup/reconnect flow if needed by frontend.
+4. Apply JWT/role guards to persisted response, report, and admin endpoints as they become real database routes.
 5. Replace deterministic evaluation with a DeepSeek V4 Flash provider adapter while keeping the same output contract.
 
 ## Rules

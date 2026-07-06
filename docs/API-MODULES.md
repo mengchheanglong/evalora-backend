@@ -55,11 +55,19 @@ Endpoints:
 - `PUT /api/sessions/:id/start`
 - `PUT /api/sessions/:id/complete`
 
-Implementation tasks:
+Implemented session persistence slice:
 
-- Generate secure access code/link.
-- Track status and timestamps.
-- Save progress and reconnect state.
+- `src/modules/sessions/sessions.service.ts` creates `InterviewSession` records with generated access codes.
+- Session DTOs include candidate/template labels from Prisma relations when available.
+- `PUT /api/sessions/:id/start` writes `IN_PROGRESS` and `startedAt`.
+- `PUT /api/sessions/:id/complete` writes `COMPLETED` and `completedAt`.
+- Session routes require JWT auth; create/list routes are restricted to `admin`, `organization`, and `interviewer` roles.
+
+Next session tasks:
+
+- Enforce organization/candidate ownership filters before exposing broad session lists.
+- Add candidate access-code lookup/reconnect flow if the frontend needs link-based entry.
+- Persist response progress/autosave.
 
 ## AI
 

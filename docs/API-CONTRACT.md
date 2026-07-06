@@ -108,6 +108,21 @@ The backend uses the authenticated JWT user as `createdById`; clients must not s
 | PUT | `/sessions/:id/start` | Mark session in progress. |
 | PUT | `/sessions/:id/complete` | Complete session and trigger evaluation/report workflow. |
 
+Session routes require a Bearer JWT. Create/list routes allow `admin`, `organization`, and `interviewer`. Detail/start/complete routes additionally allow `candidate` for assigned candidate flows; ownership filtering still belongs in the next hardening slice.
+
+`POST /api/sessions` request:
+
+```json
+{
+  "candidateId": "candidate-user-id",
+  "templateId": "assessment-template-id",
+  "organizationId": "org-id-if-applicable",
+  "expiresAt": "2026-08-01T00:00:00.000Z"
+}
+```
+
+The backend generates a unique-style access code and starts sessions as `not_started`. Session responses include candidate/template labels when Prisma relation data is available.
+
 ## Responses
 
 | Method | Endpoint | Description |

@@ -1,42 +1,63 @@
-import { Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
-import { sessions } from "../mock-data";
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  NotFoundException,
+  Param,
+  Post,
+  Put,
+  Query,
+  UseGuards,
+} from "@nestjs/common";
+import type { SessionStatus } from "../../domain/evalora.types";
+import { JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
+import { type CreateSessionInput, type ListSessionsFilter, SessionsService } from "./sessions.service";
 
 @Controller("sessions")
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class SessionsController {
+  constructor(private readonly sessionsService: SessionsService) {}
+
   @Post()
-  create(@Body() body: { candidateName?: string; templateId?: string }) {
-    return {
-      id: "session-new",
-      candidateName: body.candidateName ?? "New Candidate",
-      templateId: body.templateId ?? "software-engineer",
-      status: "not_started",
-      accessCode: "NEW-DEMO",
-      message: "Session creation scaffold. Generate secure access code in implementation.",
-    };
+  @Roles("admin", "organization", "interviewer")
+  async create(@Body() body: CreateSessionInput) {
+    try {
+      return await this.sessionsService.createSession(body);
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : "Session creation failed.");
+    }
   }
 
   @Get()
-  findAll() {
-    return sessions;
+  @Roles("admin", "organization", "interviewer")
+  findAll(
+    @Query("organizationId") organizationId?: string,
+    @Query("candidateId") candidateId?: string,
+    @Query("templateId") templateId?: string,
+    @Query("status") status?: SessionStatus,
+  ) {
+    const filter: ListSessionsFilter = { organizationId, candidateId, templateId, status };
+    return this.sessionsService.listSessions(filter);
   }
 
   @Get(":id")
-  findOne(@Param("id") id: string) {
-    return sessions.find((session) => session.id === id) ?? { message: "Session not found", id };
+  @Roles("admin", "organization", "interviewer", "candidate")
+  async findOne(@Param("id") id: string) {
+    const session = await this.sessionsService.getSession(id);
+    if (!session) throw new NotFoundException("Session not found.");
+    return session;
   }
 
   @Put(":id/start")
+  @Roles("admin", "organization", "interviewer", "candidate")
   start(@Param("id") id: string) {
-    return { id, status: "in_progress", startedAt: new Date().toISOString() };
+    return this.sessionsService.startSession(id);
   }
 
   @Put(":id/complete")
+  @Roles("admin", "organization", "interviewer", "candidate")
   complete(@Param("id") id: string) {
-    return {
-      id,
-      status: "completed",
-      completedAt: new Date().toISOString(),
-      next: `/api/reports/${id}`,
-    };
+    return this.sessionsService.completeSession(id);
   }
 }
