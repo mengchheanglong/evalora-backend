@@ -130,6 +130,21 @@ The backend generates a unique-style access code and starts sessions as `not_sta
 | POST | `/responses` | Submit or autosave candidate response. |
 | GET | `/responses/session/:sessionId` | Get responses for one session. |
 
+Response routes require a Bearer JWT. `POST /api/responses` accepts candidate autosaves and reviewer/admin corrections; ownership filtering still belongs in the next hardening slice.
+
+`POST /api/responses` request:
+
+```json
+{
+  "sessionId": "interview-session-id",
+  "questionId": "question-id-if-applicable",
+  "responseText": "Candidate answer text",
+  "responseJson": { "confidence": 4 }
+}
+```
+
+If `sessionId` + `questionId` already has a saved response, the backend updates that row for autosave. Otherwise it creates a new response. The response includes `savedAt` from the persisted row timestamp.
+
 ## AI
 
 | Method | Endpoint | Description |

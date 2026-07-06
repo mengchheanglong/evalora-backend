@@ -67,7 +67,26 @@ Next session tasks:
 
 - Enforce organization/candidate ownership filters before exposing broad session lists.
 - Add candidate access-code lookup/reconnect flow if the frontend needs link-based entry.
-- Persist response progress/autosave.
+
+## Responses
+
+Endpoints:
+
+- `POST /api/responses`
+- `GET /api/responses/session/:sessionId`
+
+Implemented response persistence/autosave slice:
+
+- `src/modules/responses/responses.service.ts` writes `Response` records through Prisma.
+- `POST /api/responses` creates a response when no existing `sessionId` + `questionId` answer exists.
+- `POST /api/responses` updates the existing `sessionId` + `questionId` answer for autosave.
+- `GET /api/responses/session/:sessionId` returns responses ordered by creation time.
+- Response routes require JWT auth and currently allow `admin`, `organization`, `interviewer`, and `candidate` roles pending ownership filters.
+
+Next response tasks:
+
+- Enforce candidate/session ownership before exposing response lists.
+- Add per-module validation when frontend DTOs are finalized.
 
 ## AI
 

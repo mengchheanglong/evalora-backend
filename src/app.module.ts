@@ -9,6 +9,7 @@ import { CodeController } from "./modules/code/code.controller";
 import { ReportsController } from "./modules/reports/reports.controller";
 import { ReportsService } from "./modules/reports/reports.service";
 import { ResponsesController } from "./modules/responses/responses.controller";
+import { ResponsesService } from "./modules/responses/responses.service";
 import { SessionsController } from "./modules/sessions/sessions.controller";
 import { SessionsService } from "./modules/sessions/sessions.service";
 import { TemplatesController } from "./modules/templates/templates.controller";
@@ -50,6 +51,11 @@ import { PrismaService } from "./prisma/prisma.service";
     {
       provide: SessionsService,
       useFactory: (prisma: PrismaService) => new SessionsService(prisma),
+      inject: [PrismaService],
+    },
+    {
+      provide: ResponsesService,
+      useFactory: (prisma: PrismaService) => new ResponsesService(prisma),
       inject: [PrismaService],
     },
   ],

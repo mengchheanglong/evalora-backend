@@ -63,16 +63,20 @@ Implemented first core logic slice:
   - session creation generates an access code and starts with `not_started` status.
   - start/complete endpoints persist `startedAt`, `completedAt`, and status transitions.
   - `test/sessions.service.test.ts` verifies create/list/start/complete Prisma mapping without Neon credentials.
+- Response persistence/autosave slice:
+  - `src/modules/responses/responses.service.ts` writes `Response` records through Prisma.
+  - autosave updates an existing `sessionId` + `questionId` answer when present, otherwise creates a new response.
+  - `src/modules/responses/responses.controller.ts` now uses the service instead of mock response data.
+  - `test/responses.service.test.ts` verifies create/update autosave and session response listing without Neon credentials.
 
 ## Next Member 1 slices
 
 Work in this order:
 
-1. Enforce organization ownership filters for templates/sessions once organization membership is connected.
-2. Implement response persistence and autosave.
-3. Add candidate access-code lookup/reconnect flow if needed by frontend.
-4. Apply JWT/role guards to persisted response, report, and admin endpoints as they become real database routes.
-5. Replace deterministic evaluation with a DeepSeek V4 Flash provider adapter while keeping the same output contract.
+1. Enforce organization/candidate ownership filters for templates, sessions, and responses once organization membership is connected.
+2. Add candidate access-code lookup/reconnect flow if needed by frontend.
+3. Apply JWT/role guards to persisted report and admin endpoints as they become real database routes.
+4. Replace deterministic evaluation with a DeepSeek V4 Flash provider adapter while keeping the same output contract.
 
 ## Rules
 

@@ -64,6 +64,16 @@ export interface InterviewSessionDto {
   updatedAt?: string;
 }
 
+export interface CandidateResponseDto {
+  id: string;
+  sessionId: string;
+  questionId?: string;
+  responseText: string;
+  responseJson?: JsonValue;
+  savedAt?: string;
+  createdAt?: string;
+}
+
 export interface CandidateReportDto {
   sessionId: string;
   candidateName: string;
