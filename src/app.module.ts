@@ -2,6 +2,8 @@ import { Module } from "@nestjs/common";
 import { AnalyticsController } from "./modules/analytics/analytics.controller";
 import { AppController } from "./app.controller";
 import { AiController } from "./modules/ai/ai.controller";
+import { AiService } from "./modules/ai/ai.service";
+import { createDeepSeekProviderFromEnv } from "./modules/ai/deepseek.provider";
 import { AuthController } from "./modules/auth/auth.controller";
 import { JwtAuthGuard, RolesGuard } from "./modules/auth/auth.guard";
 import { AuthService, PrismaAuthRepository } from "./modules/auth/auth.service";
@@ -33,6 +35,10 @@ import { PrismaService } from "./prisma/prisma.service";
     PrismaService,
     JwtAuthGuard,
     RolesGuard,
+    {
+      provide: AiService,
+      useFactory: () => new AiService(createDeepSeekProviderFromEnv()),
+    },
     {
       provide: AuthService,
       useFactory: (prisma: PrismaService) => new AuthService(new PrismaAuthRepository(prisma)),

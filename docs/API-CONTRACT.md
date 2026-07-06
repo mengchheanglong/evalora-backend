@@ -152,8 +152,27 @@ If `sessionId` + `questionId` already has a saved response, the backend updates 
 | --- | --- | --- |
 | POST | `/ai/interview-question` | Generate role/template-based interview question. |
 | POST | `/ai/follow-up` | Generate follow-up based on candidate answer. |
-| POST | `/ai/evaluate` | Evaluate one response/module using rubric. |
-| POST | `/ai/report` | Generate final report summary. |
+| POST | `/ai/evaluate` | Evaluate one response/module using rubric and DeepSeek V4 Flash when configured. |
+| POST | `/ai/report` | Generate final report summary from module evaluations. |
+
+AI routes call the internal `AiService` boundary. DeepSeek provider failures do not crash evaluation; the service returns the same DTO shape with deterministic fallback rubric evaluation and an advisory notice.
+
+`POST /api/ai/evaluate` returns:
+
+```json
+{
+  "moduleType": "leadership",
+  "score": 4.4,
+  "criteriaScores": {
+    "clarity": 4.4
+  },
+  "feedback": "Evidence-based feedback.",
+  "strengths": ["Uses clear reasoning"],
+  "improvementAreas": ["Add measurable impact"],
+  "evidence": ["candidate response evidence"],
+  "advisoryNotice": "This AI feedback is advisory and must be reviewed by a human interviewer."
+}
+```
 
 ## Coding
 

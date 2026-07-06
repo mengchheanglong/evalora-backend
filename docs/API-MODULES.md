@@ -90,13 +90,16 @@ Next response task:
 
 ## AI
 
-Keep provider details hidden behind a service adapter. The controller should not contain prompt logic long-term.
+Keep provider details hidden behind a service adapter. Controllers call `AiService`; provider prompt and HTTP logic live outside controllers.
 
-Implemented first Member 1 slice:
+Implemented Member 1 slices:
 
-- `src/modules/ai/evaluation.service.ts` evaluates response text against rubrics.
+- `src/modules/ai/evaluation.service.ts` keeps deterministic rubric evaluation and report aggregation as a safe fallback.
+- `src/modules/ai/ai.service.ts` preserves the evaluation/report DTO contract while routing to a provider when available.
+- `src/modules/ai/deepseek.provider.ts` calls the OpenAI-compatible DeepSeek V4 Flash `/chat/completions` endpoint and parses JSON evaluation output.
 - `POST /api/ai/evaluate` returns score, criteria scores, feedback, strengths, improvement areas, evidence, and advisory notice.
 - `POST /api/ai/report` aggregates module evaluations into a candidate report.
+- Provider failures fall back to deterministic rubric evaluation instead of crashing the candidate flow.
 
 ## Reports
 

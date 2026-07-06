@@ -1,0 +1,98 @@
+import { test } from "node:test";
+import { strict as assert } from "node:assert";
+import { AiService, type AiProviderClient } from "../src/modules/ai/ai.service";
+import { DeepSeekAiProvider, type DeepSeekFetch } from "../src/modules/ai/deepseek.provider";
+import type { EvaluateResponseInput, EvaluationResultDto } from "../src/modules/ai/evaluation.service";
+
+const fallbackInput: EvaluateResponseInput = {
+  moduleType: "leadership",
+  moduleTitle: "Leadership Scenario",
+  responseText: "I would listen to both teammates, clarify priorities, explain the trade-off, and measure the impact after release.",
+  rubric: ["clarity", "empathy", "decision-making"],
+};
+
+class ProviderStub implements AiProviderClient {
+  constructor(private readonly next: Partial<EvaluationResultDto> | Error) {}
+
+  async evaluateResponse() {
+    if (this.next instanceof Error) throw this.next;
+    return this.next;
+  }
+}
+
+test("AiService uses provider output while preserving the evaluation DTO contract", async () => {
+  const service = new AiService(
+    new ProviderStub({
+      score: 4.8,
+      criteriaScores: { clarity: 5, empathy: 4.5, "decision-making": 4.8 },
+      feedback: "Strong scenario response grounded in collaboration evidence.",
+      strengths: ["Balances stakeholder needs"],
+      improvementAreas: ["Add a measurable follow-up metric"],
+      evidence: ["clarify priorities"],
+    }),
+  );
+
+  const result = await service.evaluateResponse(fallbackInput);
+
+  assert.equal(result.moduleType, "leadership");
+  assert.equal(result.moduleTitle, "Leadership Scenario");
+  assert.equal(result.weight, 1);
+  assert.equal(result.score, 4.8);
+  assert.deepEqual(result.criteriaScores, { clarity: 5, empathy: 4.5, "decision-making": 4.8 });
+  assert.deepEqual(result.strengths, ["Balances stakeholder needs"]);
+  assert.deepEqual(result.improvementAreas, ["Add a measurable follow-up metric"]);
+  assert.deepEqual(result.evidence, ["clarify priorities"]);
+  assert.match(result.advisoryNotice, /advisory/i);
+  assert.doesNotMatch(result.advisoryNotice, /hire|reject|diagnosis/i);
+});
+
+test("AiService falls back to deterministic rubric evaluation when provider evaluation fails", async () => {
+  const service = new AiService(new ProviderStub(new Error("provider unavailable")));
+
+  const result = await service.evaluateResponse(fallbackInput);
+
+  assert.equal(result.moduleType, "leadership");
+  assert.ok(result.score >= 1 && result.score <= 5);
+  assert.match(result.feedback, /fallback/i);
+  assert.ok(result.evidence.length > 0);
+  assert.match(result.advisoryNotice, /advisory/i);
+});
+
+test("DeepSeekAiProvider posts OpenAI-compatible chat completions and parses JSON output", async () => {
+  const requests: Array<{ url: string; init: RequestInit }> = [];
+  const fetchImpl: DeepSeekFetch = async (url, init) => {
+    requests.push({ url, init });
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  score: 4.4,
+                  criteriaScores: { clarity: 4.4 },
+                  feedback: "Clear, evidence-based answer.",
+                  strengths: ["Uses clear reasoning"],
+                  improvementAreas: ["Add more measurable impact"],
+                  evidence: ["explain the trade-off"],
+                }),
+              },
+            },
+          ],
+        };
+      },
+    };
+  };
+
+  const provider = new DeepSeekAiProvider({ baseUrl: "https://api.deepseek.com/v1", model: "deepseek-v4-flash", apiKey: "test-key" }, fetchImpl);
+  const result = await provider.evaluateResponse(fallbackInput);
+
+  assert.equal(requests[0].url, "https://api.deepseek.com/v1/chat/completions");
+  assert.equal(requests[0].init.method, "POST");
+  assert.equal((requests[0].init.headers as Record<string, string>).Authorization, "Bearer test-key");
+  assert.match(String(requests[0].init.body), /deepseek-v4-flash/);
+  assert.equal(result.score, 4.4);
+  assert.deepEqual(result.evidence, ["explain the trade-off"]);
+});

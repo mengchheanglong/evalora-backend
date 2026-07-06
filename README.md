@@ -26,7 +26,7 @@ Health check: <http://localhost:4000/api/health>
 
 ## Current state
 
-This backend is a scaffold with route contracts and demo responses. Replace demo data with Prisma services as features are implemented.
+This backend now includes Prisma-backed core APIs, JWT/RBAC auth, ownership scoping, report privacy, deterministic AI fallback logic, and a DeepSeek V4 Flash AI service adapter. Some frontend-driven flows and production integrations remain MVP follow-up work.
 
 ## Module map
 

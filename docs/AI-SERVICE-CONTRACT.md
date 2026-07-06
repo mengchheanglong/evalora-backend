@@ -1,6 +1,6 @@
 # AI Service Contract
 
-The AI service must be replaceable. Controllers should call an internal service interface, not provider SDKs directly.
+The AI service must be replaceable. Controllers call the internal `AiService` interface, not provider SDKs or raw provider HTTP calls directly.
 
 ## Selected MVP provider
 
@@ -10,6 +10,12 @@ The AI service must be replaceable. Controllers should call an internal service 
 - API key env var: `DEEPSEEK_API_KEY`.
 
 Do not commit API keys. Keep provider settings in `.env` / hosting environment variables.
+
+## Current backend adapter
+
+- `src/modules/ai/ai.service.ts` owns the internal service boundary and deterministic fallback behavior.
+- `src/modules/ai/deepseek.provider.ts` owns the DeepSeek chat-completions HTTP adapter.
+- `src/modules/ai/evaluation.service.ts` remains the safe deterministic rubric/report helper used for fallback and aggregation.
 
 ## Required operations
 

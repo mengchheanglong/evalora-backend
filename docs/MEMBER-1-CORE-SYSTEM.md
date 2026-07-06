@@ -32,12 +32,14 @@ Implemented first core logic slice:
   - strengths and improvement areas.
   - advisory AI notice.
   - weighted candidate report aggregation.
+- DeepSeek AI adapter slice:
+  - `src/modules/ai/ai.service.ts` owns the AI service boundary, preserves DTO contracts, and falls back safely when provider calls fail.
+  - `src/modules/ai/deepseek.provider.ts` calls DeepSeek V4 Flash chat completions and parses JSON evaluation output.
+  - `src/modules/ai/ai.controller.ts` calls `AiService` for interview questions, follow-ups, response evaluation, and report aggregation.
+  - `test/ai.service.test.ts` verifies provider-backed evaluation, deterministic fallback, and DeepSeek request/JSON parsing behavior.
 - `test/evaluation.service.test.ts`
-  - tests bounded evaluation output.
+  - tests bounded deterministic evaluation output.
   - tests weighted report score aggregation and evidence merge.
-- `src/modules/ai/ai.controller.ts`
-  - `POST /api/ai/evaluate` now uses the evaluation service.
-  - `POST /api/ai/report` now uses the report generator.
 - `src/modules/reports/reports.controller.ts`
   - report endpoints now use generated module evaluations instead of a static report object.
 - Persistence slice:
@@ -83,9 +85,9 @@ Implemented first core logic slice:
 
 Work in this order:
 
-1. Add candidate access-code lookup/reconnect flow if needed by frontend.
-2. Replace deterministic evaluation with a DeepSeek V4 Flash provider adapter while keeping the same output contract.
-3. Add persisted report readback from `CandidateReport` rows instead of generated demo report fallback when frontend/report UI is ready.
+1. Expand module-specific rubrics/prompts for leadership, behavioral/work-style, communication, problem-solving, and coding-result evaluation.
+2. Add persisted report readback from `CandidateReport` rows instead of generated demo report fallback when frontend/report UI is ready.
+3. Support candidate access-code lookup/reconnect only if frontend integration explicitly needs Member 1 backend help.
 
 ## Rules
 

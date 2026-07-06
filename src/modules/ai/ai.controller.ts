@@ -1,27 +1,24 @@
 import { Body, Controller, Post } from "@nestjs/common";
-import { evaluateResponse, generateCandidateReport, type EvaluateResponseInput, type EvaluationResultDto } from "./evaluation.service";
+import { AiService, type FollowUpInput, type InterviewQuestionInput } from "./ai.service";
+import type { EvaluateResponseInput, EvaluationResultDto } from "./evaluation.service";
 
 @Controller("ai")
 export class AiController {
+  constructor(private readonly aiService: AiService) {}
+
   @Post("interview-question")
-  interviewQuestion(@Body() body: { roleType?: string }) {
-    return {
-      question: `Tell me about a project you built for a ${body.roleType ?? "target"} role and the hardest problem you solved.`,
-      rubric: ["clarity", "technical depth", "problem solving", "reflection"],
-    };
+  async interviewQuestion(@Body() body: InterviewQuestionInput) {
+    return this.aiService.generateInterviewQuestion(body);
   }
 
   @Post("follow-up")
-  followUp(@Body() body: { answer?: string }) {
-    return {
-      question: "What trade-off did you consider, and how did you decide between options?",
-      basedOn: body.answer ? "candidate_answer" : "default_follow_up",
-    };
+  async followUp(@Body() body: FollowUpInput) {
+    return this.aiService.generateFollowUp(body);
   }
 
   @Post("evaluate")
-  evaluate(@Body() body: Partial<EvaluateResponseInput>) {
-    return evaluateResponse({
+  async evaluate(@Body() body: Partial<EvaluateResponseInput>) {
+    return this.aiService.evaluateResponse({
       moduleId: body.moduleId,
       moduleTitle: body.moduleTitle,
       moduleType: body.moduleType ?? "ai_interview",
@@ -32,7 +29,7 @@ export class AiController {
   }
 
   @Post("report")
-  report(
+  async report(
     @Body()
     body: {
       sessionId?: string;
@@ -43,7 +40,7 @@ export class AiController {
       reviewerNotes?: string[];
     },
   ) {
-    return generateCandidateReport({
+    return this.aiService.generateCandidateReport({
       sessionId: body.sessionId ?? "demo-session",
       candidateName: body.candidateName ?? "Demo Candidate",
       assessmentName: body.assessmentName ?? "Evalora Assessment",
@@ -51,7 +48,7 @@ export class AiController {
       evaluations: body.evaluations?.length
         ? body.evaluations
         : [
-            evaluateResponse({
+            await this.aiService.evaluateResponse({
               moduleType: "ai_interview",
               moduleTitle: "AI Interview",
               responseText: "Candidate explained project trade-offs, testing steps, and communication decisions.",
