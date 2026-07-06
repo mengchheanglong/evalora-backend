@@ -1,4 +1,5 @@
 import { Body, Controller, Post } from "@nestjs/common";
+import { evaluateResponse, generateCandidateReport, type EvaluateResponseInput, type EvaluationResultDto } from "./evaluation.service";
 
 @Controller("ai")
 export class AiController {
@@ -19,22 +20,44 @@ export class AiController {
   }
 
   @Post("evaluate")
-  evaluate() {
-    return {
-      score: 4,
-      summary: "Demo evaluation. Replace with provider-backed rubric evaluation.",
-      strengths: ["Clear explanation", "Practical approach"],
-      improvementAreas: ["Add more measurable evidence"],
-      evidence: ["Uses a structured answer with action and result."],
-      advisoryNotice: "AI feedback is advisory and must be reviewed by a human interviewer.",
-    };
+  evaluate(@Body() body: Partial<EvaluateResponseInput>) {
+    return evaluateResponse({
+      moduleId: body.moduleId,
+      moduleTitle: body.moduleTitle,
+      moduleType: body.moduleType ?? "ai_interview",
+      responseText: body.responseText ?? "",
+      rubric: body.rubric,
+      weight: body.weight,
+    });
   }
 
   @Post("report")
-  report() {
-    return {
-      summary: "Demo AI report summary. Replace with evidence-based report generator.",
-      advisoryNotice: "AI feedback is advisory and not a final hiring decision.",
-    };
+  report(
+    @Body()
+    body: {
+      sessionId?: string;
+      candidateName?: string;
+      assessmentName?: string;
+      completedAt?: string;
+      evaluations?: EvaluationResultDto[];
+      reviewerNotes?: string[];
+    },
+  ) {
+    return generateCandidateReport({
+      sessionId: body.sessionId ?? "demo-session",
+      candidateName: body.candidateName ?? "Demo Candidate",
+      assessmentName: body.assessmentName ?? "Evalora Assessment",
+      completedAt: body.completedAt,
+      evaluations: body.evaluations?.length
+        ? body.evaluations
+        : [
+            evaluateResponse({
+              moduleType: "ai_interview",
+              moduleTitle: "AI Interview",
+              responseText: "Candidate explained project trade-offs, testing steps, and communication decisions.",
+            }),
+          ],
+      reviewerNotes: body.reviewerNotes,
+    });
   }
 }

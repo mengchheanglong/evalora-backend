@@ -41,11 +41,13 @@ export interface CandidateReportDto {
   sessionId: string;
   candidateName: string;
   assessmentName: string;
+  completedAt?: string;
   overallScore: number;
   moduleScores: Record<string, number>;
   summary: string;
   strengths: string[];
   improvementAreas: string[];
   evidence: string[];
+  reviewerSummary?: string;
   advisoryNotice: string;
 }
