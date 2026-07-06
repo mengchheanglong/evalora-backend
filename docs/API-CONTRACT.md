@@ -32,7 +32,8 @@ Frontend code should read the backend URL from `NEXT_PUBLIC_API_URL` and default
   "name": "Demo User",
   "email": "demo@example.com",
   "password": "minimum-8-characters",
-  "role": "candidate"
+  "role": "candidate",
+  "organizationId": "org-id-for-organization-or-interviewer-users"
 }
 ```
 
@@ -53,7 +54,7 @@ Protected routes, including `GET /api/auth/me`, require:
 Authorization: Bearer JWT_TOKEN
 ```
 
-JWT payloads carry `sub`, `email`, and `role`. Role-restricted routes should use the same role values as the SRS: `candidate`, `interviewer`, `organization`, or `admin`.
+JWT payloads carry `sub`, `email`, `role`, and `organizationId` when the user belongs to an organization. Role-restricted routes should use the same role values as the SRS: `candidate`, `interviewer`, `organization`, or `admin`.
 
 ## Assessment templates
 
@@ -65,7 +66,7 @@ JWT payloads carry `sub`, `email`, and `role`. Role-restricted routes should use
 | PUT | `/templates/:id` | Update template. |
 | DELETE | `/templates/:id` | Delete template. |
 
-Template routes require a Bearer JWT. `GET` routes allow `admin`, `organization`, and `interviewer`; write routes allow `admin` and `organization`.
+Template routes require a Bearer JWT. `GET` routes allow `admin`, `organization`, and `interviewer`; write routes allow `admin` and `organization`. Admins can query across organizations; organization/interviewer users are scoped to their JWT `organizationId`.
 
 `POST /api/templates` request:
 
@@ -96,7 +97,7 @@ Template routes require a Bearer JWT. `GET` routes allow `admin`, `organization`
 }
 ```
 
-The backend uses the authenticated JWT user as `createdById`; clients must not send password or secret fields in template payloads.
+The backend uses the authenticated JWT user as `createdById`. For organization users, the backend also uses the JWT `organizationId` instead of trusting a client-supplied organization. Clients must not send password or secret fields in template payloads.
 
 ## Interview sessions
 
@@ -108,7 +109,7 @@ The backend uses the authenticated JWT user as `createdById`; clients must not s
 | PUT | `/sessions/:id/start` | Mark session in progress. |
 | PUT | `/sessions/:id/complete` | Complete session and trigger evaluation/report workflow. |
 
-Session routes require a Bearer JWT. Create/list routes allow `admin`, `organization`, and `interviewer`. Detail/start/complete routes additionally allow `candidate` for assigned candidate flows; ownership filtering still belongs in the next hardening slice.
+Session routes require a Bearer JWT. Create routes allow `admin`, `organization`, and `interviewer`. List/detail/start/complete routes additionally allow `candidate` for assigned candidate flows. Admins can query broadly; organization/interviewer users are scoped to their JWT `organizationId`; candidates are scoped to their own `candidateId`.
 
 `POST /api/sessions` request:
 
@@ -130,7 +131,7 @@ The backend generates a unique-style access code and starts sessions as `not_sta
 | POST | `/responses` | Submit or autosave candidate response. |
 | GET | `/responses/session/:sessionId` | Get responses for one session. |
 
-Response routes require a Bearer JWT. `POST /api/responses` accepts candidate autosaves and reviewer/admin corrections; ownership filtering still belongs in the next hardening slice.
+Response routes require a Bearer JWT. `POST /api/responses` accepts candidate autosaves and reviewer/admin corrections. Admins can query broadly; organization/interviewer users are scoped through the response session's `organizationId`; candidates are scoped through the response session's `candidateId`.
 
 `POST /api/responses` request:
 

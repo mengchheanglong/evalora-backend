@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { randomInt } from "node:crypto";
 import type { InterviewSessionDto, SessionStatus } from "../../domain/evalora.types";
+import { buildSessionOwnershipWhere, forbiddenResourceError, mergeWhere, requireOrganizationId, type AccessContext } from "../auth/access-control";
 
 type PrismaSessionStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "EXPIRED";
 
@@ -32,6 +33,7 @@ interface SessionRow {
 type SessionCreateFn = (args: any) => Promise<SessionRow>;
 type SessionFindManyFn = (args: any) => Promise<SessionRow[]>;
 type SessionFindUniqueFn = (args: any) => Promise<SessionRow | null>;
+type SessionFindFirstFn = (args: any) => Promise<SessionRow | null>;
 type SessionUpdateFn = (args: any) => Promise<SessionRow>;
 
 interface SessionPrismaClient {
@@ -39,6 +41,7 @@ interface SessionPrismaClient {
     create?: SessionCreateFn;
     findMany?: SessionFindManyFn;
     findUnique?: SessionFindUniqueFn;
+    findFirst?: SessionFindFirstFn;
     update?: SessionUpdateFn;
   };
 }
@@ -80,13 +83,13 @@ export class SessionsService {
     this.now = options.now ?? (() => new Date());
   }
 
-  async createSession(input: CreateSessionInput): Promise<InterviewSessionDto> {
+  async createSession(input: CreateSessionInput, access?: AccessContext): Promise<InterviewSessionDto> {
     const create = requireMethod(this.prisma.interviewSession.create, "interviewSession.create");
     const session = await create({
       data: {
         candidateId: requireNonEmpty(input.candidateId, "Candidate id is required."),
         templateId: requireNonEmpty(input.templateId, "Template id is required."),
-        organizationId: input.organizationId,
+        organizationId: resolveWritableOrganizationId(input.organizationId, access),
         accessCode: this.generateAccessCode(),
         status: "NOT_STARTED",
         expiresAt: toDate(input.expiresAt),
@@ -97,10 +100,10 @@ export class SessionsService {
     return toSessionDto(session);
   }
 
-  async listSessions(filter: ListSessionsFilter = {}): Promise<InterviewSessionDto[]> {
+  async listSessions(filter: ListSessionsFilter = {}, access?: AccessContext): Promise<InterviewSessionDto[]> {
     const findMany = requireMethod(this.prisma.interviewSession.findMany, "interviewSession.findMany");
     const sessions = await findMany({
-      where: buildSessionWhere(filter),
+      where: mergeWhere(buildSessionWhere(filter), buildSessionOwnershipWhere(access)),
       include: SESSION_INCLUDE,
       orderBy: { updatedAt: "desc" },
     });
@@ -108,7 +111,16 @@ export class SessionsService {
     return sessions.map(toSessionDto);
   }
 
-  async getSession(id: string): Promise<InterviewSessionDto | null> {
+  async getSession(id: string, access?: AccessContext): Promise<InterviewSessionDto | null> {
+    if (access) {
+      const findFirst = requireMethod(this.prisma.interviewSession.findFirst, "interviewSession.findFirst");
+      const session = await findFirst({
+        where: mergeWhere({ id }, buildSessionOwnershipWhere(access)),
+        include: SESSION_INCLUDE,
+      });
+      return session ? toSessionDto(session) : null;
+    }
+
     const findUnique = requireMethod(this.prisma.interviewSession.findUnique, "interviewSession.findUnique");
     const session = await findUnique({
       where: { id },
@@ -118,7 +130,9 @@ export class SessionsService {
     return session ? toSessionDto(session) : null;
   }
 
-  async startSession(id: string): Promise<InterviewSessionDto> {
+  async startSession(id: string, access?: AccessContext): Promise<InterviewSessionDto> {
+    await this.assertSessionAccess(id, access);
+
     const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
     const session = await update({
       where: { id },
@@ -129,7 +143,9 @@ export class SessionsService {
     return toSessionDto(session);
   }
 
-  async completeSession(id: string): Promise<InterviewSessionDto> {
+  async completeSession(id: string, access?: AccessContext): Promise<InterviewSessionDto> {
+    await this.assertSessionAccess(id, access);
+
     const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
     const session = await update({
       where: { id },
@@ -138,6 +154,13 @@ export class SessionsService {
     });
 
     return toSessionDto(session);
+  }
+
+  private async assertSessionAccess(id: string, access?: AccessContext): Promise<void> {
+    if (!access || access.role === "admin") return;
+    const findFirst = requireMethod(this.prisma.interviewSession.findFirst, "interviewSession.findFirst");
+    const session = await findFirst({ where: mergeWhere({ id }, buildSessionOwnershipWhere(access)) });
+    if (!session) throw forbiddenResourceError("Session");
   }
 }
 
@@ -148,6 +171,11 @@ function buildSessionWhere(filter: ListSessionsFilter) {
   if (filter.templateId) where.templateId = filter.templateId;
   if (filter.status) where.status = toPrismaSessionStatus(filter.status);
   return Object.keys(where).length ? where : undefined;
+}
+
+function resolveWritableOrganizationId(requestedOrganizationId: string | undefined, access?: AccessContext): string | undefined {
+  if (!access || access.role === "admin") return requestedOrganizationId;
+  return requireOrganizationId(access);
 }
 
 function toSessionDto(session: SessionRow): InterviewSessionDto {

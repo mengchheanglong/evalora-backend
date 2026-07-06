@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import type { AssessmentModuleDto, AssessmentTemplateDto, JsonValue, ModuleType, QuestionDto, QuestionType } from "../../domain/evalora.types";
+import { assertCanWriteOrganizationResource, buildTemplateOwnershipWhere, forbiddenResourceError, mergeWhere, requireOrganizationId, type AccessContext } from "../auth/access-control";
 
 type PrismaModuleType = "AI_INTERVIEW" | "CODING" | "DEBUGGING" | "WORK_STYLE" | "BEHAVIORAL" | "LEADERSHIP" | "COMMUNICATION" | "PROBLEM_SOLVING";
 type PrismaQuestionType = "MCQ" | "SCALE" | "SHORT_ANSWER" | "CODING" | "SCENARIO" | "ROLEPLAY";
@@ -35,13 +36,21 @@ interface TemplateRow {
   modules?: TemplateModuleRow[];
 }
 
+type TemplateCreateFn = (args: any) => Promise<TemplateRow>;
+type TemplateFindManyFn = (args: any) => Promise<TemplateRow[]>;
+type TemplateFindUniqueFn = (args: any) => Promise<TemplateRow | null>;
+type TemplateFindFirstFn = (args: any) => Promise<TemplateRow | null>;
+type TemplateUpdateFn = (args: any) => Promise<TemplateRow>;
+type TemplateDeleteFn = (args: any) => Promise<TemplateRow>;
+
 interface TemplatePrismaClient {
   assessmentTemplate: {
-    create(args: unknown): Promise<TemplateRow>;
-    findMany(args: unknown): Promise<TemplateRow[]>;
-    findUnique(args: unknown): Promise<TemplateRow | null>;
-    update(args: unknown): Promise<TemplateRow>;
-    delete(args: unknown): Promise<TemplateRow>;
+    create?: TemplateCreateFn;
+    findMany?: TemplateFindManyFn;
+    findUnique?: TemplateFindUniqueFn;
+    findFirst?: TemplateFindFirstFn;
+    update?: TemplateUpdateFn;
+    delete?: TemplateDeleteFn;
   };
 }
 
@@ -75,6 +84,11 @@ export interface CreateTemplateInput {
 
 export type UpdateTemplateInput = Partial<Omit<CreateTemplateInput, "createdById">>;
 
+export interface ListTemplatesOptions {
+  organizationId?: string;
+  access?: AccessContext;
+}
+
 export const TEMPLATE_INCLUDE = {
   modules: {
     include: { questions: true },
@@ -86,9 +100,11 @@ export const TEMPLATE_INCLUDE = {
 export class TemplatesService {
   constructor(private readonly prisma: TemplatePrismaClient) {}
 
-  async listTemplates(organizationId?: string): Promise<AssessmentTemplateDto[]> {
-    const templates = await this.prisma.assessmentTemplate.findMany({
-      where: organizationId ? { organizationId } : undefined,
+  async listTemplates(options: string | ListTemplatesOptions = {}): Promise<AssessmentTemplateDto[]> {
+    const normalized = typeof options === "string" ? { organizationId: options } : options;
+    const findMany = requireMethod(this.prisma.assessmentTemplate.findMany, "assessmentTemplate.findMany");
+    const templates = await findMany({
+      where: buildListTemplateWhere(normalized),
       include: TEMPLATE_INCLUDE,
       orderBy: { updatedAt: "desc" },
     });
@@ -96,8 +112,18 @@ export class TemplatesService {
     return templates.map(toTemplateDto);
   }
 
-  async getTemplate(id: string): Promise<AssessmentTemplateDto | null> {
-    const template = await this.prisma.assessmentTemplate.findUnique({
+  async getTemplate(id: string, access?: AccessContext): Promise<AssessmentTemplateDto | null> {
+    if (access) {
+      const findFirst = requireMethod(this.prisma.assessmentTemplate.findFirst, "assessmentTemplate.findFirst");
+      const template = await findFirst({
+        where: mergeWhere({ id }, buildTemplateOwnershipWhere(access)),
+        include: TEMPLATE_INCLUDE,
+      });
+      return template ? toTemplateDto(template) : null;
+    }
+
+    const findUnique = requireMethod(this.prisma.assessmentTemplate.findUnique, "assessmentTemplate.findUnique");
+    const template = await findUnique({
       where: { id },
       include: TEMPLATE_INCLUDE,
     });
@@ -105,16 +131,18 @@ export class TemplatesService {
     return template ? toTemplateDto(template) : null;
   }
 
-  async createTemplate(input: CreateTemplateInput): Promise<AssessmentTemplateDto> {
-    const template = await this.prisma.assessmentTemplate.create({
+  async createTemplate(input: CreateTemplateInput, access?: AccessContext): Promise<AssessmentTemplateDto> {
+    assertCanWriteOrganizationResource(access);
+    const create = requireMethod(this.prisma.assessmentTemplate.create, "assessmentTemplate.create");
+    const template = await create({
       data: {
         title: requireNonEmpty(input.title, "Template title is required."),
         description: input.description,
         roleType: requireNonEmpty(input.roleType, "Template role type is required."),
         timeLimitMin: input.timeLimitMin,
         scoringRules: input.scoringRules,
-        createdById: requireNonEmpty(input.createdById, "Template creator is required."),
-        organizationId: input.organizationId,
+        createdById: access?.userId ?? requireNonEmpty(input.createdById, "Template creator is required."),
+        organizationId: resolveWritableOrganizationId(input.organizationId, access),
         modules: { create: (input.modules ?? []).map(toPrismaModuleCreate) },
       },
       include: TEMPLATE_INCLUDE,
@@ -123,14 +151,17 @@ export class TemplatesService {
     return toTemplateDto(template);
   }
 
-  async updateTemplate(id: string, input: UpdateTemplateInput): Promise<AssessmentTemplateDto> {
+  async updateTemplate(id: string, input: UpdateTemplateInput, access?: AccessContext): Promise<AssessmentTemplateDto> {
+    assertCanWriteOrganizationResource(access);
+    await this.assertTemplateAccess(id, access);
+
     const data: Record<string, unknown> = {};
     if (input.title !== undefined) data.title = requireNonEmpty(input.title, "Template title is required.");
     if (input.description !== undefined) data.description = input.description;
     if (input.roleType !== undefined) data.roleType = requireNonEmpty(input.roleType, "Template role type is required.");
     if (input.timeLimitMin !== undefined) data.timeLimitMin = input.timeLimitMin;
     if (input.scoringRules !== undefined) data.scoringRules = input.scoringRules;
-    if (input.organizationId !== undefined) data.organizationId = input.organizationId;
+    if (input.organizationId !== undefined || access) data.organizationId = resolveWritableOrganizationId(input.organizationId, access);
     if (input.modules !== undefined) {
       data.modules = {
         deleteMany: {},
@@ -138,7 +169,8 @@ export class TemplatesService {
       };
     }
 
-    const template = await this.prisma.assessmentTemplate.update({
+    const update = requireMethod(this.prisma.assessmentTemplate.update, "assessmentTemplate.update");
+    const template = await update({
       where: { id },
       data,
       include: TEMPLATE_INCLUDE,
@@ -147,10 +179,31 @@ export class TemplatesService {
     return toTemplateDto(template);
   }
 
-  async deleteTemplate(id: string): Promise<{ id: string; deleted: true }> {
-    const deleted = await this.prisma.assessmentTemplate.delete({ where: { id } });
+  async deleteTemplate(id: string, access?: AccessContext): Promise<{ id: string; deleted: true }> {
+    assertCanWriteOrganizationResource(access);
+    await this.assertTemplateAccess(id, access);
+
+    const deleteTemplate = requireMethod(this.prisma.assessmentTemplate.delete, "assessmentTemplate.delete");
+    const deleted = await deleteTemplate({ where: { id } });
     return { id: deleted.id, deleted: true };
   }
+
+  private async assertTemplateAccess(id: string, access?: AccessContext): Promise<void> {
+    if (!access || access.role === "admin") return;
+    const findFirst = requireMethod(this.prisma.assessmentTemplate.findFirst, "assessmentTemplate.findFirst");
+    const template = await findFirst({ where: mergeWhere({ id }, buildTemplateOwnershipWhere(access)) });
+    if (!template) throw forbiddenResourceError("Template");
+  }
+}
+
+function buildListTemplateWhere(options: ListTemplatesOptions): Record<string, unknown> | undefined {
+  const requested = options.organizationId ? { organizationId: options.organizationId } : undefined;
+  return mergeWhere(requested, buildTemplateOwnershipWhere(options.access));
+}
+
+function resolveWritableOrganizationId(requestedOrganizationId: string | undefined, access?: AccessContext): string | undefined {
+  if (!access || access.role === "admin") return requestedOrganizationId;
+  return requireOrganizationId(access);
 }
 
 function toPrismaModuleCreate(module: TemplateModuleInput) {
@@ -231,4 +284,9 @@ function requireNonEmpty(value: string | undefined, message: string): string {
   const trimmed = value?.trim();
   if (!trimmed) throw new Error(message);
   return trimmed;
+}
+
+function requireMethod<T extends (...args: any[]) => any>(method: T | undefined, name: string): T {
+  if (!method) throw new Error(`${name} is not available.`);
+  return method;
 }

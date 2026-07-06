@@ -1,5 +1,6 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
-import { JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
+import { BadRequestException, Body, Controller, Get, Param, Post, Req, UseGuards } from "@nestjs/common";
+import { toAccessContext } from "../auth/access-control";
+import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { type SaveResponseInput, ResponsesService } from "./responses.service";
 
 @Controller("responses")
@@ -9,9 +10,9 @@ export class ResponsesController {
 
   @Post()
   @Roles("admin", "organization", "interviewer", "candidate")
-  async submit(@Body() body: SaveResponseInput) {
+  async submit(@Body() body: SaveResponseInput, @Req() request: AuthenticatedRequest) {
     try {
-      return await this.responsesService.saveResponse(body);
+      return await this.responsesService.saveResponse(body, toAccessContext(request.user));
     } catch (error) {
       throw new BadRequestException(error instanceof Error ? error.message : "Response save failed.");
     }
@@ -19,7 +20,7 @@ export class ResponsesController {
 
   @Get("session/:sessionId")
   @Roles("admin", "organization", "interviewer", "candidate")
-  findBySession(@Param("sessionId") sessionId: string) {
-    return this.responsesService.listResponsesBySession(sessionId);
+  findBySession(@Param("sessionId") sessionId: string, @Req() request: AuthenticatedRequest) {
+    return this.responsesService.listResponsesBySession(sessionId, toAccessContext(request.user));
   }
 }

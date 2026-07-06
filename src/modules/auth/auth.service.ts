@@ -11,6 +11,7 @@ export interface AuthUserRecord {
   email: string;
   passwordHash: string;
   role: UserRole;
+  organizationId?: string;
 }
 
 export interface AuthUserRepository {
@@ -23,6 +24,7 @@ export interface RegisterInput {
   email?: string;
   password?: string;
   role?: UserRole;
+  organizationId?: string;
 }
 
 export interface LoginInput {
@@ -41,12 +43,16 @@ interface PrismaUserRow {
   email: string;
   passwordHash: string;
   role: PrismaRole;
+  organizationId?: string | null;
 }
 
 interface PrismaUserClient {
   user: {
     findUnique(args: { where: { email: string }; select: Record<keyof PrismaUserRow, true> }): Promise<PrismaUserRow | null>;
-    create(args: { data: { name: string; email: string; passwordHash: string; role: PrismaRole }; select: Record<keyof PrismaUserRow, true> }): Promise<PrismaUserRow>;
+    create(args: {
+      data: { name: string; email: string; passwordHash: string; role: PrismaRole; organizationId?: string };
+      select: Record<keyof PrismaUserRow, true>;
+    }): Promise<PrismaUserRow>;
   };
 }
 
@@ -56,6 +62,7 @@ const USER_SELECT: Record<keyof PrismaUserRow, true> = {
   email: true,
   passwordHash: true,
   role: true,
+  organizationId: true,
 };
 
 const SALT_ROUNDS = 12;
@@ -80,6 +87,7 @@ export class PrismaAuthRepository implements AuthUserRepository {
         email: normalizeEmail(data.email),
         passwordHash: data.passwordHash,
         role: toPrismaRole(data.role),
+        organizationId: data.organizationId,
       },
       select: USER_SELECT,
     });
@@ -107,7 +115,7 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-    const user = await this.users.createUser({ name, email, passwordHash, role });
+    const user = await this.users.createUser({ name, email, passwordHash, role, organizationId: input.organizationId });
     return this.toAuthResult(user);
   }
 
@@ -131,6 +139,7 @@ export class AuthService {
           sub: user.id,
           email: user.email,
           role: user.role,
+          organizationId: user.organizationId,
         },
         this.jwtSecret,
         { expiresIn: "1d" },
@@ -163,6 +172,7 @@ function stripPasswordHash(user: AuthUserRecord): Omit<AuthUserRecord, "password
     name: user.name,
     email: user.email,
     role: user.role,
+    organizationId: user.organizationId,
   };
 }
 
@@ -190,5 +200,6 @@ function toAuthUserRecord(user: PrismaUserRow): AuthUserRecord {
     email: user.email,
     passwordHash: user.passwordHash,
     role: fromPrismaRole(user.role),
+    organizationId: user.organizationId ?? undefined,
   };
 }

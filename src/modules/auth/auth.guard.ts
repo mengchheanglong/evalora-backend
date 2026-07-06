@@ -10,6 +10,7 @@ export interface AuthenticatedUser {
   id: string;
   email: string;
   role: UserRole;
+  organizationId?: string;
 }
 
 export interface AuthenticatedRequest {
@@ -22,6 +23,8 @@ interface JwtRolePayload {
   id?: string;
   email?: string;
   role?: string;
+  organizationId?: string;
+  orgId?: string;
 }
 
 export const Roles = (...roles: UserRole[]) => SetMetadata(ROLES_KEY, roles);
@@ -65,7 +68,8 @@ export function extractAuthUserFromHeader(authorization: string | string[] | und
       throw new Error("Invalid token payload.");
     }
 
-    return { id, email: payload.email, role: payload.role };
+    const organizationId = payload.organizationId ?? payload.orgId;
+    return organizationId ? { id, email: payload.email, role: payload.role, organizationId } : { id, email: payload.email, role: payload.role };
   } catch {
     throw new UnauthorizedException("Authentication required.");
   }

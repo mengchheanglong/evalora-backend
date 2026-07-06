@@ -50,7 +50,8 @@ Implemented first core logic slice:
   - `PrismaAuthRepository` persists users through Prisma.
   - `test/auth.service.test.ts` verifies password hashing and JWT role claims.
 - Auth guard/RBAC slice:
-  - `src/modules/auth/auth.guard.ts` verifies Bearer JWTs, attaches `{ id, email, role }` to requests, and provides `Roles`/`RolesGuard` helpers.
+  - `src/modules/auth/auth.guard.ts` verifies Bearer JWTs, attaches `{ id, email, role, organizationId }` to requests, and provides `Roles`/`RolesGuard` helpers.
+  - `src/modules/auth/access-control.ts` derives ownership scopes used by persisted routes.
   - `GET /api/auth/me` now requires a valid JWT.
   - `test/auth.guard.test.ts` verifies token parsing and role rejection.
 - Template persistence slice:
@@ -68,15 +69,19 @@ Implemented first core logic slice:
   - autosave updates an existing `sessionId` + `questionId` answer when present, otherwise creates a new response.
   - `src/modules/responses/responses.controller.ts` now uses the service instead of mock response data.
   - `test/responses.service.test.ts` verifies create/update autosave and session response listing without Neon credentials.
+- Ownership hardening slice:
+  - templates are scoped by organization for organization/interviewer users.
+  - sessions are scoped by organization for organization/interviewer users and by `candidateId` for candidates.
+  - responses are scoped through the parent session before listing or autosave writes.
+  - `test/ownership.service.test.ts` verifies scoped Prisma where clauses without Neon credentials.
 
 ## Next Member 1 slices
 
 Work in this order:
 
-1. Enforce organization/candidate ownership filters for templates, sessions, and responses once organization membership is connected.
-2. Add candidate access-code lookup/reconnect flow if needed by frontend.
-3. Apply JWT/role guards to persisted report and admin endpoints as they become real database routes.
-4. Replace deterministic evaluation with a DeepSeek V4 Flash provider adapter while keeping the same output contract.
+1. Add candidate access-code lookup/reconnect flow if needed by frontend.
+2. Apply JWT/role guards to persisted report and admin endpoints as they become real database routes.
+3. Replace deterministic evaluation with a DeepSeek V4 Flash provider adapter while keeping the same output contract.
 
 ## Rules
 

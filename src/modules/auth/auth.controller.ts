@@ -8,6 +8,7 @@ interface RegisterRequest {
   email?: string;
   password?: string;
   role?: UserRole;
+  organizationId?: string;
 }
 
 interface LoginRequest {

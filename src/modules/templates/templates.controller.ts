@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Post, Put, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Post, Put, Query, Req, UseGuards } from "@nestjs/common";
+import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { type CreateTemplateInput, TemplatesService, type UpdateTemplateInput } from "./templates.service";
 
@@ -9,15 +10,15 @@ export class TemplatesController {
 
   @Get()
   @Roles("admin", "organization", "interviewer")
-  findAll() {
-    return this.templatesService.listTemplates();
+  findAll(@Req() request: AuthenticatedRequest, @Query("organizationId") organizationId?: string) {
+    return this.templatesService.listTemplates({ organizationId, access: toAccessContext(request.user) });
   }
 
   @Post()
   @Roles("admin", "organization")
   async create(@Body() body: CreateTemplateInput, @Req() request: AuthenticatedRequest) {
     try {
-      return await this.templatesService.createTemplate({ ...body, createdById: request.user?.id });
+      return await this.templatesService.createTemplate(body, toAccessContext(request.user));
     } catch (error) {
       throw new BadRequestException(error instanceof Error ? error.message : "Template creation failed.");
     }
@@ -25,17 +26,17 @@ export class TemplatesController {
 
   @Get(":id")
   @Roles("admin", "organization", "interviewer")
-  async findOne(@Param("id") id: string) {
-    const template = await this.templatesService.getTemplate(id);
+  async findOne(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
+    const template = await this.templatesService.getTemplate(id, toAccessContext(request.user));
     if (!template) throw new NotFoundException("Template not found.");
     return template;
   }
 
   @Put(":id")
   @Roles("admin", "organization")
-  async update(@Param("id") id: string, @Body() body: UpdateTemplateInput) {
+  async update(@Param("id") id: string, @Body() body: UpdateTemplateInput, @Req() request: AuthenticatedRequest) {
     try {
-      return await this.templatesService.updateTemplate(id, body);
+      return await this.templatesService.updateTemplate(id, body, toAccessContext(request.user));
     } catch (error) {
       throw new BadRequestException(error instanceof Error ? error.message : "Template update failed.");
     }
@@ -43,7 +44,7 @@ export class TemplatesController {
 
   @Delete(":id")
   @Roles("admin", "organization")
-  remove(@Param("id") id: string) {
-    return this.templatesService.deleteTemplate(id);
+  remove(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
+    return this.templatesService.deleteTemplate(id, toAccessContext(request.user));
   }
 }

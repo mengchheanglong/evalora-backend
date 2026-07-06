@@ -15,6 +15,7 @@ Implemented auth persistence slice:
 - `src/modules/auth/auth.service.ts` exposes `register` and `login` over a repository boundary.
 - `PrismaAuthRepository` writes/reads `User` records through Prisma using Evalora's `passwordHash` and role enum fields.
 - `src/modules/auth/auth.guard.ts` parses `Authorization: Bearer JWT_TOKEN`, attaches the authenticated user to the request, and provides role-access checks.
+- `src/modules/auth/access-control.ts` derives reusable ownership scopes from authenticated `{ userId, role, organizationId }` context.
 - `GET /api/auth/me` is protected by `JwtAuthGuard`.
 
 Next auth tasks:
@@ -39,10 +40,10 @@ Implemented template persistence slice:
 - `PUT /api/templates/:id` replaces nested modules/questions so edits stay in sync with the template editor.
 - `GET /api/templates` and `GET /api/templates/:id` return nested module/question DTOs.
 - Template routes require JWT auth; write routes are restricted to `admin` and `organization` roles.
+- Ownership hardening: admins can query broadly, while organization/interviewer users are scoped to their JWT `organizationId`.
 
-Next template tasks:
+Next template task:
 
-- Enforce organization ownership in query filters once organization membership is fully connected.
 - Add duplicate-template endpoint if needed by the frontend workflow.
 
 ## Sessions
@@ -61,11 +62,11 @@ Implemented session persistence slice:
 - Session DTOs include candidate/template labels from Prisma relations when available.
 - `PUT /api/sessions/:id/start` writes `IN_PROGRESS` and `startedAt`.
 - `PUT /api/sessions/:id/complete` writes `COMPLETED` and `completedAt`.
-- Session routes require JWT auth; create/list routes are restricted to `admin`, `organization`, and `interviewer` roles.
+- Session routes require JWT auth; create routes are restricted to `admin`, `organization`, and `interviewer` roles.
+- Ownership hardening: organization/interviewer users are scoped to their JWT `organizationId`; candidates can only read/update assigned sessions.
 
-Next session tasks:
+Next session task:
 
-- Enforce organization/candidate ownership filters before exposing broad session lists.
 - Add candidate access-code lookup/reconnect flow if the frontend needs link-based entry.
 
 ## Responses
@@ -81,11 +82,11 @@ Implemented response persistence/autosave slice:
 - `POST /api/responses` creates a response when no existing `sessionId` + `questionId` answer exists.
 - `POST /api/responses` updates the existing `sessionId` + `questionId` answer for autosave.
 - `GET /api/responses/session/:sessionId` returns responses ordered by creation time.
-- Response routes require JWT auth and currently allow `admin`, `organization`, `interviewer`, and `candidate` roles pending ownership filters.
+- Response routes require JWT auth and allow `admin`, `organization`, `interviewer`, and `candidate` roles.
+- Ownership hardening: organization/interviewer users are scoped through the response session's `organizationId`; candidates are scoped through the response session's `candidateId` before autosave writes.
 
-Next response tasks:
+Next response task:
 
-- Enforce candidate/session ownership before exposing response lists.
 - Add per-module validation when frontend DTOs are finalized.
 
 ## AI
