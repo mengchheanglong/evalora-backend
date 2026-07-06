@@ -1,24 +1,18 @@
 import { Controller, Get, Param, Post } from "@nestjs/common";
-import { demoReport } from "../mock-data";
+import { ReportsService } from "./reports.service";
 
 @Controller("reports")
 export class ReportsController {
+  constructor(private readonly reportsService: ReportsService) {}
+
   @Get(":sessionId")
   findOne(@Param("sessionId") sessionId: string) {
-    return {
-      ...demoReport,
-      sessionId,
-    };
+    return this.reportsService.buildDemoReport(sessionId).report;
   }
 
   @Post(":sessionId/generate")
   generate(@Param("sessionId") sessionId: string) {
-    return {
-      ...demoReport,
-      sessionId,
-      generatedAt: new Date().toISOString(),
-      message: "Report generation scaffold. Add evaluation aggregation and persistence.",
-    };
+    return this.reportsService.generateAndPersistDemoReport(sessionId);
   }
 
   @Get(":sessionId/export")
