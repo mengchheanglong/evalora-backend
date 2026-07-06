@@ -3,6 +3,8 @@ import { AnalyticsController } from "./modules/analytics/analytics.controller";
 import { AppController } from "./app.controller";
 import { AiController } from "./modules/ai/ai.controller";
 import { AuthController } from "./modules/auth/auth.controller";
+import { JwtAuthGuard, RolesGuard } from "./modules/auth/auth.guard";
+import { AuthService, PrismaAuthRepository } from "./modules/auth/auth.service";
 import { CodeController } from "./modules/code/code.controller";
 import { ReportsController } from "./modules/reports/reports.controller";
 import { ReportsService } from "./modules/reports/reports.service";
@@ -26,6 +28,13 @@ import { PrismaService } from "./prisma/prisma.service";
   ],
   providers: [
     PrismaService,
+    JwtAuthGuard,
+    RolesGuard,
+    {
+      provide: AuthService,
+      useFactory: (prisma: PrismaService) => new AuthService(new PrismaAuthRepository(prisma)),
+      inject: [PrismaService],
+    },
     {
       provide: ReportsService,
       useFactory: (prisma: PrismaService) => new ReportsService(prisma),
