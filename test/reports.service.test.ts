@@ -3,6 +3,8 @@ import { strict as assert } from "node:assert";
 import { ReportsService } from "../src/modules/reports/reports.service";
 import { generateCandidateReport, type EvaluationResultDto } from "../src/modules/ai/evaluation.service";
 
+const organizationAccess = { userId: "org-user-1", role: "organization" as const, organizationId: "org-1" };
+
 function sampleEvaluation(overrides: Partial<EvaluationResultDto> = {}): EvaluationResultDto {
   return {
     moduleId: "module-ai",
@@ -83,4 +85,62 @@ test("persistReport skips persistence when no Prisma client is available", async
   const result = await service.persistReport({ report, evaluations });
 
   assert.deepEqual(result, { status: "skipped", reason: "database client unavailable" });
+});
+
+test("generateAndPersistDemoReport checks organization ownership before writing report data", async () => {
+  const calls: Array<{ action: string; args: unknown }> = [];
+  const fakePrisma = {
+    interviewSession: {
+      findFirst: async (args: unknown) => {
+        calls.push({ action: "interviewSession.findFirst", args });
+        return { id: "session-1", organizationId: "org-1" };
+      },
+    },
+    evaluation: {
+      deleteMany: async (args: unknown) => {
+        calls.push({ action: "evaluation.deleteMany", args });
+        return { count: 0 };
+      },
+      createMany: async (args: unknown) => {
+        calls.push({ action: "evaluation.createMany", args });
+        return { count: 3 };
+      },
+    },
+    candidateReport: {
+      upsert: async (args: unknown) => {
+        calls.push({ action: "candidateReport.upsert", args });
+        return { id: "report-1" };
+      },
+    },
+    $transaction: async <T>(operations: Array<Promise<T>>) => Promise.all(operations),
+  };
+  const service = new ReportsService(fakePrisma as any);
+
+  const result = await (service as any).generateAndPersistDemoReport("session-1", organizationAccess);
+
+  assert.equal(result.persistence.status, "persisted");
+  assert.deepEqual(calls[0], {
+    action: "interviewSession.findFirst",
+    args: { where: { id: "session-1", organizationId: "org-1" } },
+  });
+  assert.deepEqual(calls.map((call) => call.action), [
+    "interviewSession.findFirst",
+    "evaluation.deleteMany",
+    "evaluation.createMany",
+    "candidateReport.upsert",
+  ]);
+});
+
+test("getReport rejects inaccessible report sessions", async () => {
+  const fakePrisma = {
+    interviewSession: {
+      findFirst: async (args: unknown) => {
+        assert.deepEqual(args, { where: { id: "session-1", organizationId: "org-1" } });
+        return null;
+      },
+    },
+  };
+  const service = new ReportsService(fakePrisma as any);
+
+  await assert.rejects(() => (service as any).getReport("session-1", organizationAccess), /not found or access denied/i);
 });

@@ -1,7 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import { evaluateResponse, generateCandidateReport, type EvaluationResultDto, type GeneratedCandidateReport } from "../ai/evaluation.service";
+import { buildSessionOwnershipWhere, forbiddenResourceError, mergeWhere, type AccessContext } from "../auth/access-control";
 
 interface ReportPersistenceClient {
+  interviewSession?: {
+    findFirst?(args: unknown): Promise<unknown | null>;
+  };
   evaluation: {
     deleteMany(args: unknown): Promise<unknown>;
     createMany(args: unknown): Promise<unknown>;
@@ -26,6 +30,11 @@ interface PersistReportInput {
 export class ReportsService {
   constructor(private readonly prisma?: ReportPersistenceClient) {}
 
+  async getReport(sessionId: string, access?: AccessContext): Promise<GeneratedCandidateReport> {
+    await this.assertReportAccess(sessionId, access);
+    return this.buildDemoReport(sessionId).report;
+  }
+
   buildDemoReport(sessionId: string) {
     const evaluations = this.buildDemoEvaluations();
     const report = generateCandidateReport({
@@ -40,7 +49,8 @@ export class ReportsService {
     return { report, evaluations };
   }
 
-  async generateAndPersistDemoReport(sessionId: string) {
+  async generateAndPersistDemoReport(sessionId: string, access?: AccessContext) {
+    await this.assertReportAccess(sessionId, access);
     const { report, evaluations } = this.buildDemoReport(sessionId);
     const persistence = await this.persistReport({ report, evaluations });
 
@@ -49,6 +59,15 @@ export class ReportsService {
       generatedAt: new Date().toISOString(),
       persistence,
       message: persistence.status === "persisted" ? "Report generated and persisted." : `Report generated without persistence: ${persistence.reason}.`,
+    };
+  }
+
+  async exportReport(sessionId: string, access?: AccessContext) {
+    await this.assertReportAccess(sessionId, access);
+    return {
+      sessionId,
+      status: "not_implemented",
+      message: "PDF/export support is a future improvement unless prioritized.",
     };
   }
 
@@ -100,6 +119,13 @@ export class ReportsService {
     }
   }
 
+  private async assertReportAccess(sessionId: string, access?: AccessContext): Promise<void> {
+    if (!access) return;
+    const findFirst = requireMethod(this.prisma?.interviewSession?.findFirst, "interviewSession.findFirst");
+    const session = await findFirst({ where: mergeWhere({ id: sessionId }, buildSessionOwnershipWhere(access)) });
+    if (!session) throw forbiddenResourceError("Report");
+  }
+
   private buildDemoEvaluations(): EvaluationResultDto[] {
     return [
       evaluateResponse({
@@ -125,4 +151,9 @@ export class ReportsService {
       }),
     ];
   }
+}
+
+function requireMethod<T extends (...args: any[]) => any>(method: T | undefined, name: string): T {
+  if (!method) throw new Error(`${name} is not available.`);
+  return method;
 }

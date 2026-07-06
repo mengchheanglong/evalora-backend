@@ -1,26 +1,28 @@
-import { Controller, Get, Param, Post } from "@nestjs/common";
+import { Controller, Get, Param, Post, Req, UseGuards } from "@nestjs/common";
+import { toAccessContext } from "../auth/access-control";
+import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { ReportsService } from "./reports.service";
 
 @Controller("reports")
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
   @Get(":sessionId")
-  findOne(@Param("sessionId") sessionId: string) {
-    return this.reportsService.buildDemoReport(sessionId).report;
+  @Roles("admin", "organization", "interviewer")
+  findOne(@Param("sessionId") sessionId: string, @Req() request: AuthenticatedRequest) {
+    return this.reportsService.getReport(sessionId, toAccessContext(request.user));
   }
 
   @Post(":sessionId/generate")
-  generate(@Param("sessionId") sessionId: string) {
-    return this.reportsService.generateAndPersistDemoReport(sessionId);
+  @Roles("admin", "organization", "interviewer")
+  generate(@Param("sessionId") sessionId: string, @Req() request: AuthenticatedRequest) {
+    return this.reportsService.generateAndPersistDemoReport(sessionId, toAccessContext(request.user));
   }
 
   @Get(":sessionId/export")
-  exportReport(@Param("sessionId") sessionId: string) {
-    return {
-      sessionId,
-      status: "not_implemented",
-      message: "PDF/export support is a future improvement unless prioritized.",
-    };
+  @Roles("admin", "organization", "interviewer")
+  exportReport(@Param("sessionId") sessionId: string, @Req() request: AuthenticatedRequest) {
+    return this.reportsService.exportReport(sessionId, toAccessContext(request.user));
   }
 }

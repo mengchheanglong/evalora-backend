@@ -171,6 +171,8 @@ If `sessionId` + `questionId` already has a saved response, the backend updates 
 | POST | `/reports/:sessionId/generate` | Generate or regenerate report. |
 | GET | `/reports/:sessionId/export` | Export report if supported. |
 
+Report routes require a Bearer JWT and are limited to `admin`, `organization`, and `interviewer` roles. Admins can access reports broadly; organization/interviewer users are scoped through the report session's `organizationId`. Candidates cannot read generated evaluation reports in the MVP API.
+
 `POST /api/reports/:sessionId/generate` returns generated report fields plus:
 
 ```json

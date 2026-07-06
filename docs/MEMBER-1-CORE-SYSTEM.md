@@ -44,6 +44,10 @@ Implemented first core logic slice:
   - `src/prisma/prisma.service.ts` owns Prisma connection lifecycle.
   - `src/modules/reports/reports.service.ts` generates reports and persists `Evaluation` + `CandidateReport` records when a database session exists.
   - `test/reports.service.test.ts` verifies Prisma write mapping without needing real Neon credentials.
+- Report privacy slice:
+  - report read/generate/export routes require JWT auth and `admin`, `organization`, or `interviewer` role.
+  - organization/interviewer users are scoped through the report session's `organizationId` before reading or generating reports.
+  - candidates are intentionally blocked from generated evaluation reports in the MVP API.
 - Auth persistence slice:
   - logic adapted from the Coorad backend auth flow.
   - `src/modules/auth/auth.service.ts` normalizes email, hashes passwords with bcrypt, verifies login passwords, signs JWTs with role claims, and strips `passwordHash` from responses.
@@ -80,8 +84,8 @@ Implemented first core logic slice:
 Work in this order:
 
 1. Add candidate access-code lookup/reconnect flow if needed by frontend.
-2. Apply JWT/role guards to persisted report and admin endpoints as they become real database routes.
-3. Replace deterministic evaluation with a DeepSeek V4 Flash provider adapter while keeping the same output contract.
+2. Replace deterministic evaluation with a DeepSeek V4 Flash provider adapter while keeping the same output contract.
+3. Add persisted report readback from `CandidateReport` rows instead of generated demo report fallback when frontend/report UI is ready.
 
 ## Rules
 

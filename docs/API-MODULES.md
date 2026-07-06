@@ -18,9 +18,8 @@ Implemented auth persistence slice:
 - `src/modules/auth/access-control.ts` derives reusable ownership scopes from authenticated `{ userId, role, organizationId }` context.
 - `GET /api/auth/me` is protected by `JwtAuthGuard`.
 
-Next auth tasks:
+Next auth task:
 
-- Apply JWT/role guards to real session, report, template, and admin endpoints as they move from demo data to persistence.
 - Add refresh-token/logout persistence if the project needs server-side session invalidation.
 
 ## Templates
@@ -106,6 +105,8 @@ Implemented first Member 1 slice:
 - `GET /api/reports/:sessionId` returns a generated evidence-based demo report.
 - `POST /api/reports/:sessionId/generate` generates the report, attempts to persist `Evaluation` and `CandidateReport` records through Prisma, and returns `persistence.status`.
 - Persistence succeeds only when the `sessionId` exists in the database; demo/nonexistent sessions return generated report data with a failed/skipped persistence status instead of crashing.
+- Report routes require JWT auth and are restricted to `admin`, `organization`, and `interviewer` roles.
+- Ownership hardening: organization/interviewer users are scoped through the report session's `organizationId`; candidates are intentionally blocked from generated evaluation reports in the MVP API.
 
 ## Code execution
 
