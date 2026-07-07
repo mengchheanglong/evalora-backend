@@ -155,7 +155,7 @@ If `sessionId` + `questionId` already has a saved response, the backend updates 
 | POST | `/ai/evaluate` | Evaluate one response/module using rubric and DeepSeek V4 Flash when configured. |
 | POST | `/ai/report` | Generate final report summary from module evaluations. |
 
-AI routes call the internal `AiService` boundary. DeepSeek provider failures do not crash evaluation; the service returns the same DTO shape with deterministic fallback rubric evaluation and an advisory notice.
+AI routes call the internal `AiService` boundary. DeepSeek provider failures do not crash evaluation; the service returns the same DTO shape with deterministic fallback rubric evaluation and an advisory notice. If a request omits `rubric`, the backend applies module-specific defaults for AI interview, coding/debugging, work-style/behavioral, leadership, communication, or problem-solving modules.
 
 `POST /api/ai/evaluate` returns:
 

@@ -16,6 +16,7 @@ Do not commit API keys. Keep provider settings in `.env` / hosting environment v
 - `src/modules/ai/ai.service.ts` owns the internal service boundary and deterministic fallback behavior.
 - `src/modules/ai/deepseek.provider.ts` owns the DeepSeek chat-completions HTTP adapter.
 - `src/modules/ai/evaluation.service.ts` remains the safe deterministic rubric/report helper used for fallback and aggregation.
+- `getModuleEvaluationProfile(moduleType)` centralizes module-specific rubrics, focus areas, and safety guidance for AI interview, coding, debugging, work-style, behavioral, leadership, communication, and problem-solving modules.
 
 ## Required operations
 
@@ -46,6 +47,19 @@ If AI provider fails:
 - Allow retry where possible.
 - Do not crash the session.
 - Mark evaluation/report as pending if needed.
+
+## Module-specific evaluation profiles
+
+Default rubrics are provided when the frontend/template does not send a custom rubric:
+
+- AI interview: technical clarity, role relevance, problem solving, evidence, reflection.
+- Coding/debugging: correctness or root-cause analysis, execution/debugging evidence, readability/method, validation, prevention/complexity.
+- Work-style/behavioral: collaboration, ownership, adaptability, self-awareness, learning, professional judgment.
+- Leadership: decision-making, conflict resolution, prioritization, accountability, stakeholder communication.
+- Communication: clarity, active listening, empathy, professionalism, follow-up.
+- Problem-solving: root-cause analysis, trade-off reasoning, structured approach, validation, impact measurement.
+
+Coding assessment UI/execution remains a separate module lane. Member 1 backend AI work only evaluates submitted code text plus sandbox/execution result evidence; it must never run untrusted code inside the API process.
 
 ## Safety rules
 

@@ -32,11 +32,12 @@ Implemented first core logic slice:
   - strengths and improvement areas.
   - advisory AI notice.
   - weighted candidate report aggregation.
+  - module-specific evaluation profiles for AI interview, coding, debugging, work-style, behavioral, leadership, communication, and problem-solving rubrics.
 - DeepSeek AI adapter slice:
   - `src/modules/ai/ai.service.ts` owns the AI service boundary, preserves DTO contracts, and falls back safely when provider calls fail.
   - `src/modules/ai/deepseek.provider.ts` calls DeepSeek V4 Flash chat completions and parses JSON evaluation output.
   - `src/modules/ai/ai.controller.ts` calls `AiService` for interview questions, follow-ups, response evaluation, and report aggregation.
-  - `test/ai.service.test.ts` verifies provider-backed evaluation, deterministic fallback, and DeepSeek request/JSON parsing behavior.
+  - `test/ai.service.test.ts` verifies provider-backed evaluation, deterministic fallback, module-default rubric forwarding, and DeepSeek request/JSON parsing behavior.
 - `test/evaluation.service.test.ts`
   - tests bounded deterministic evaluation output.
   - tests weighted report score aggregation and evidence merge.
@@ -85,9 +86,9 @@ Implemented first core logic slice:
 
 Work in this order:
 
-1. Expand module-specific rubrics/prompts for leadership, behavioral/work-style, communication, problem-solving, and coding-result evaluation.
-2. Add persisted report readback from `CandidateReport` rows instead of generated demo report fallback when frontend/report UI is ready.
-3. Support candidate access-code lookup/reconnect only if frontend integration explicitly needs Member 1 backend help.
+1. Add persisted report readback from `CandidateReport` rows instead of generated demo report fallback when frontend/report UI is ready.
+2. Support candidate access-code lookup/reconnect only if frontend integration explicitly needs Member 1 backend help.
+3. Add deeper module-specific prompt examples only if frontend templates need stricter question generation.
 
 ## Rules
 

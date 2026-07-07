@@ -5,6 +5,71 @@ const REPORT_ADVISORY_NOTICE = "AI feedback is advisory and not a final hiring d
 
 type CriteriaScores = Record<string, number>;
 
+export interface ModuleEvaluationProfile {
+  moduleType: ModuleType;
+  title: string;
+  rubric: string[];
+  focusAreas: string[];
+  safetyGuidance: string[];
+}
+
+const COMMON_SAFETY_GUIDANCE = [
+  "Use only candidate response evidence and rubric criteria.",
+  "No final hiring decision.",
+  "No medical or mental-health diagnosis.",
+];
+
+const MODULE_EVALUATION_PROFILES: Record<ModuleType, Omit<ModuleEvaluationProfile, "moduleType">> = {
+  ai_interview: {
+    title: "AI Interview",
+    rubric: ["technical clarity", "role relevance", "problem solving", "evidence", "reflection"],
+    focusAreas: ["project depth", "trade-offs", "testing", "communication"],
+    safetyGuidance: COMMON_SAFETY_GUIDANCE,
+  },
+  coding: {
+    title: "Coding Assessment",
+    rubric: ["correctness", "execution result", "readability", "edge cases", "complexity"],
+    focusAreas: ["sandbox result", "algorithm choice", "failure cases", "code maintainability"],
+    safetyGuidance: [...COMMON_SAFETY_GUIDANCE, "Evaluate code from submitted text and sandbox output only."],
+  },
+  debugging: {
+    title: "Debugging Task",
+    rubric: ["root-cause analysis", "reproduction steps", "debugging method", "validation", "prevention"],
+    focusAreas: ["bug isolation", "test evidence", "fix verification", "future prevention"],
+    safetyGuidance: COMMON_SAFETY_GUIDANCE,
+  },
+  work_style: {
+    title: "Work-Style Assessment",
+    rubric: ["collaboration", "ownership", "adaptability", "self-awareness", "motivation"],
+    focusAreas: ["team behavior", "follow-through", "learning style", "deadline response"],
+    safetyGuidance: [...COMMON_SAFETY_GUIDANCE, "Do not infer personality disorders or health conditions."],
+  },
+  behavioral: {
+    title: "Behavioral Interview",
+    rubric: ["situation clarity", "ownership", "self-awareness", "learning", "professional judgment"],
+    focusAreas: ["STAR evidence", "responsibility", "reflection", "growth"],
+    safetyGuidance: [...COMMON_SAFETY_GUIDANCE, "Do not infer protected traits or health conditions."],
+  },
+  leadership: {
+    title: "Leadership Scenario",
+    rubric: ["decision-making", "conflict resolution", "prioritization", "accountability", "stakeholder communication"],
+    focusAreas: ["team alignment", "risk trade-offs", "decision ownership", "measured outcomes"],
+    safetyGuidance: COMMON_SAFETY_GUIDANCE,
+  },
+  communication: {
+    title: "Communication Roleplay",
+    rubric: ["clarity", "active listening", "empathy", "professionalism", "follow-up"],
+    focusAreas: ["audience awareness", "tone", "clarifying questions", "next steps"],
+    safetyGuidance: COMMON_SAFETY_GUIDANCE,
+  },
+  problem_solving: {
+    title: "Problem Solving",
+    rubric: ["root-cause analysis", "trade-off reasoning", "structured approach", "validation", "impact measurement"],
+    focusAreas: ["problem framing", "assumptions", "experiments", "measurable result"],
+    safetyGuidance: COMMON_SAFETY_GUIDANCE,
+  },
+};
+
 export interface EvaluateResponseInput {
   moduleId?: string;
   moduleTitle?: string;
@@ -41,6 +106,17 @@ export type GeneratedCandidateReport = CandidateReportDto & {
   completedAt?: string;
   reviewerSummary?: string;
 };
+
+export function getModuleEvaluationProfile(moduleType: ModuleType): ModuleEvaluationProfile {
+  const profile = MODULE_EVALUATION_PROFILES[moduleType];
+  return {
+    moduleType,
+    title: profile.title,
+    rubric: [...profile.rubric],
+    focusAreas: [...profile.focusAreas],
+    safetyGuidance: [...profile.safetyGuidance],
+  };
+}
 
 export function evaluateResponse(input: EvaluateResponseInput): EvaluationResultDto {
   const moduleTitle = input.moduleTitle ?? titleForModule(input.moduleType);
@@ -125,26 +201,11 @@ function weightedAverage(evaluations: EvaluationResultDto[]): number {
 }
 
 function defaultRubricFor(moduleType: ModuleType): string[] {
-  switch (moduleType) {
-    case "coding":
-    case "debugging":
-      return ["correctness", "readability", "edge cases", "debugging", "complexity"];
-    case "leadership":
-    case "communication":
-      return ["clarity", "empathy", "decision-making", "professionalism", "problem-solving"];
-    case "work_style":
-    case "behavioral":
-      return ["collaboration", "ownership", "adaptability", "motivation", "reflection"];
-    default:
-      return ["clarity", "relevance", "depth", "evidence", "reflection"];
-  }
+  return getModuleEvaluationProfile(moduleType).rubric;
 }
 
 function titleForModule(moduleType: ModuleType): string {
-  return moduleType
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+  return getModuleEvaluationProfile(moduleType).title;
 }
 
 function includesAny(source: string, terms: string[]): boolean {

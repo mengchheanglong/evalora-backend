@@ -1,6 +1,6 @@
 import { getAiProviderConfig, type RuntimeEnv } from "../../config/runtime.config";
 import type { CodeSubmissionEvaluationInput, GeneratedFollowUp, GeneratedInterviewQuestion, InterviewQuestionInput, FollowUpInput } from "./ai.service";
-import type { EvaluateResponseInput, EvaluationResultDto } from "./evaluation.service";
+import { getModuleEvaluationProfile, type EvaluateResponseInput, type EvaluationResultDto } from "./evaluation.service";
 
 export interface DeepSeekProviderConfig {
   baseUrl: string;
@@ -65,15 +65,19 @@ export class DeepSeekAiProvider {
   }
 
   async evaluateCodeSubmission(input: CodeSubmissionEvaluationInput): Promise<Partial<EvaluationResultDto>> {
+    const codingProfile = getModuleEvaluationProfile("coding");
+    const rubric = input.rubric?.length ? input.rubric : codingProfile.rubric;
     return this.chatJson("Evaluate one coding assessment submission for Evalora using the execution result as evidence.", {
-      outputShape: evaluationOutputShape(input.rubric ?? ["correctness", "readability", "edge cases", "complexity"]),
+      outputShape: evaluationOutputShape(rubric),
       moduleType: "coding",
-      moduleTitle: input.moduleTitle ?? "Coding Assessment",
+      moduleTitle: input.moduleTitle ?? codingProfile.title,
       problem: input.problem,
       language: input.language,
       sourceCode: input.sourceCode,
       executionResult: input.executionResult ?? "not provided",
-      rubric: input.rubric ?? ["correctness", "readability", "edge cases", "complexity"],
+      rubric,
+      focusAreas: codingProfile.focusAreas,
+      safetyGuidance: codingProfile.safetyGuidance,
     });
   }
 
@@ -122,13 +126,17 @@ export function createDeepSeekProviderFromEnv(env: RuntimeEnv = process.env): De
 }
 
 function evaluationPayload(input: EvaluateResponseInput) {
+  const profile = getModuleEvaluationProfile(input.moduleType);
+  const rubric = input.rubric?.length ? input.rubric : profile.rubric;
   return {
-    outputShape: evaluationOutputShape(input.rubric ?? []),
+    outputShape: evaluationOutputShape(rubric),
     moduleId: input.moduleId,
-    moduleTitle: input.moduleTitle,
+    moduleTitle: input.moduleTitle ?? profile.title,
     moduleType: input.moduleType,
     responseText: input.responseText,
-    rubric: input.rubric ?? [],
+    rubric,
+    focusAreas: profile.focusAreas,
+    safetyGuidance: profile.safetyGuidance,
     weight: input.weight,
   };
 }

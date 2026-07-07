@@ -95,9 +95,10 @@ Keep provider details hidden behind a service adapter. Controllers call `AiServi
 Implemented Member 1 slices:
 
 - `src/modules/ai/evaluation.service.ts` keeps deterministic rubric evaluation and report aggregation as a safe fallback.
-- `src/modules/ai/ai.service.ts` preserves the evaluation/report DTO contract while routing to a provider when available.
-- `src/modules/ai/deepseek.provider.ts` calls the OpenAI-compatible DeepSeek V4 Flash `/chat/completions` endpoint and parses JSON evaluation output.
-- `POST /api/ai/evaluate` returns score, criteria scores, feedback, strengths, improvement areas, evidence, and advisory notice.
+- `getModuleEvaluationProfile(moduleType)` centralizes default rubrics/focus areas for AI interview, coding, debugging, work-style, behavioral, leadership, communication, and problem-solving modules.
+- `src/modules/ai/ai.service.ts` preserves the evaluation/report DTO contract while routing to a provider when available and filling module-specific default rubrics when callers omit them.
+- `src/modules/ai/deepseek.provider.ts` calls the OpenAI-compatible DeepSeek V4 Flash `/chat/completions` endpoint and sends module profile guidance for JSON evaluation output.
+- `POST /api/ai/evaluate` returns score, criteria scores, feedback, strengths, improvement areas, evidence, and advisory notice using custom or module-default rubrics.
 - `POST /api/ai/report` aggregates module evaluations into a candidate report.
 - Provider failures fall back to deterministic rubric evaluation instead of crashing the candidate flow.
 

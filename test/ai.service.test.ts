@@ -20,6 +20,15 @@ class ProviderStub implements AiProviderClient {
   }
 }
 
+class CapturingProviderStub implements AiProviderClient {
+  captured?: EvaluateResponseInput;
+
+  async evaluateResponse(input: EvaluateResponseInput) {
+    this.captured = input;
+    return { score: 4 };
+  }
+}
+
 test("AiService uses provider output while preserving the evaluation DTO contract", async () => {
   const service = new AiService(
     new ProviderStub({
@@ -56,6 +65,21 @@ test("AiService falls back to deterministic rubric evaluation when provider eval
   assert.match(result.feedback, /fallback/i);
   assert.ok(result.evidence.length > 0);
   assert.match(result.advisoryNotice, /advisory/i);
+});
+
+test("AiService sends module-specific default rubrics to the provider when callers omit rubrics", async () => {
+  const provider = new CapturingProviderStub();
+  const service = new AiService(provider);
+
+  const result = await service.evaluateResponse({
+    moduleType: "problem_solving",
+    responseText: "I would isolate the root cause, compare trade-offs, test the riskiest assumption, and measure the result.",
+  });
+
+  assert.ok(provider.captured?.rubric?.includes("root-cause analysis"));
+  assert.ok(provider.captured?.rubric?.includes("trade-off reasoning"));
+  assert.ok(Object.keys(result.criteriaScores).includes("root-cause analysis"));
+  assert.equal(result.moduleTitle, "Problem Solving");
 });
 
 test("DeepSeekAiProvider posts OpenAI-compatible chat completions and parses JSON output", async () => {

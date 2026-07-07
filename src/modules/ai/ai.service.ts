@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import {
   evaluateResponse as deterministicEvaluateResponse,
   generateCandidateReport as deterministicGenerateCandidateReport,
+  getModuleEvaluationProfile,
   type EvaluateResponseInput,
   type EvaluationResultDto,
   type GenerateCandidateReportInput,
@@ -91,11 +92,12 @@ export class AiService {
   }
 
   async evaluateResponse(input: EvaluateResponseInput): Promise<EvaluationResultDto> {
-    const fallback = deterministicEvaluateResponse(input);
+    const normalizedInput = withModuleDefaults(input);
+    const fallback = deterministicEvaluateResponse(normalizedInput);
     if (!this.provider) return fallback;
 
     try {
-      const providerResult = await this.provider.evaluateResponse(input);
+      const providerResult = await this.provider.evaluateResponse(normalizedInput);
       return mergeEvaluation(fallback, providerResult);
     } catch {
       return {
@@ -106,9 +108,10 @@ export class AiService {
   }
 
   async evaluateCodeSubmission(input: CodeSubmissionEvaluationInput): Promise<EvaluationResultDto> {
+    const codingProfile = getModuleEvaluationProfile("coding");
     const fallbackInput: EvaluateResponseInput = {
       moduleId: input.moduleId,
-      moduleTitle: input.moduleTitle ?? "Coding Assessment",
+      moduleTitle: input.moduleTitle ?? codingProfile.title,
       moduleType: "coding",
       responseText: [
         `Problem: ${input.problem}`,
@@ -116,7 +119,7 @@ export class AiService {
         `Source code: ${input.sourceCode}`,
         input.executionResult ? `Execution result: ${input.executionResult}` : "Execution result: not provided",
       ].join("\n\n"),
-      rubric: input.rubric ?? ["correctness", "readability", "edge cases", "complexity"],
+      rubric: input.rubric?.length ? input.rubric : codingProfile.rubric,
       weight: input.weight,
     };
 
@@ -136,6 +139,15 @@ export class AiService {
   generateCandidateReport(input: GenerateCandidateReportInput): GeneratedCandidateReport {
     return deterministicGenerateCandidateReport(input);
   }
+}
+
+function withModuleDefaults(input: EvaluateResponseInput): EvaluateResponseInput {
+  const profile = getModuleEvaluationProfile(input.moduleType);
+  return {
+    ...input,
+    moduleTitle: input.moduleTitle ?? profile.title,
+    rubric: input.rubric?.length ? input.rubric : profile.rubric,
+  };
 }
 
 function mergeEvaluation(fallback: EvaluationResultDto, providerResult: Partial<EvaluationResultDto>): EvaluationResultDto {

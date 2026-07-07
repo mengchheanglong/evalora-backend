@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { evaluateResponse, generateCandidateReport } from "../src/modules/ai/evaluation.service";
+import { evaluateResponse, generateCandidateReport, getModuleEvaluationProfile } from "../src/modules/ai/evaluation.service";
 
 test("evaluateResponse returns bounded rubric output with evidence and advisory notice", () => {
   const result = evaluateResponse({
@@ -68,4 +68,20 @@ test("generateCandidateReport computes weighted overall score and aggregates evi
   assert.ok(report.evidence.includes("Handled edge cases"));
   assert.ok(report.reviewerSummary?.includes("Good candidate"));
   assert.match(report.advisoryNotice, /not a final hiring decision/i);
+});
+
+test("getModuleEvaluationProfile returns module-specific rubrics and safe guidance", () => {
+  const leadership = getModuleEvaluationProfile("leadership");
+  const behavioral = getModuleEvaluationProfile("behavioral");
+  const problemSolving = getModuleEvaluationProfile("problem_solving");
+  const communication = getModuleEvaluationProfile("communication");
+  const coding = getModuleEvaluationProfile("coding");
+
+  assert.ok(leadership.rubric.includes("conflict resolution"));
+  assert.ok(behavioral.rubric.includes("self-awareness"));
+  assert.ok(problemSolving.rubric.includes("root-cause analysis"));
+  assert.ok(communication.rubric.includes("active listening"));
+  assert.ok(coding.rubric.includes("execution result"));
+  assert.match(behavioral.safetyGuidance.join(" "), /no medical or mental-health diagnosis/i);
+  assert.match(leadership.safetyGuidance.join(" "), /no final hiring decision/i);
 });
