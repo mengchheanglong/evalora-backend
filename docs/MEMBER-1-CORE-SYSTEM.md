@@ -46,7 +46,8 @@ Implemented first core logic slice:
 - Persistence slice:
   - `src/prisma/prisma.service.ts` owns Prisma connection lifecycle.
   - `src/modules/reports/reports.service.ts` generates reports and persists `Evaluation` + `CandidateReport` records when a database session exists.
-  - `test/reports.service.test.ts` verifies Prisma write mapping without needing real Neon credentials.
+  - `GET /api/reports/:sessionId` now reads persisted `CandidateReport` data first and falls back to generated report data only when no persisted report exists.
+  - `test/reports.service.test.ts` verifies Prisma write mapping and persisted report readback without needing real Neon credentials.
 - Report privacy slice:
   - report read/generate/export routes require JWT auth and `admin`, `organization`, or `interviewer` role.
   - organization/interviewer users are scoped through the report session's `organizationId` before reading or generating reports.
@@ -86,9 +87,9 @@ Implemented first core logic slice:
 
 Work in this order:
 
-1. Add persisted report readback from `CandidateReport` rows instead of generated demo report fallback when frontend/report UI is ready.
-2. Support candidate access-code lookup/reconnect only if frontend integration explicitly needs Member 1 backend help.
-3. Add deeper module-specific prompt examples only if frontend templates need stricter question generation.
+1. Support candidate access-code lookup/reconnect only if frontend integration explicitly needs Member 1 backend help.
+2. Add deeper module-specific prompt examples only if frontend templates need stricter question generation.
+3. Add final frontend integration smoke tests when report UI routes are available.
 
 ## Rules
 

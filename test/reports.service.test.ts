@@ -87,6 +87,53 @@ test("persistReport skips persistence when no Prisma client is available", async
   assert.deepEqual(result, { status: "skipped", reason: "database client unavailable" });
 });
 
+test("getReport returns a persisted CandidateReport when one exists", async () => {
+  const calls: Array<{ action: string; args: unknown }> = [];
+  const completedAt = new Date("2026-07-07T10:00:00.000Z");
+  const fakePrisma = {
+    interviewSession: {
+      findFirst: async (args: unknown) => {
+        calls.push({ action: "interviewSession.findFirst", args });
+        return { id: "session-1", organizationId: "org-1" };
+      },
+    },
+    candidateReport: {
+      findUnique: async (args: unknown) => {
+        calls.push({ action: "candidateReport.findUnique", args });
+        return {
+          sessionId: "session-1",
+          overallScore: 4.6,
+          moduleScores: { "AI Interview": 4.7, "Coding Assessment": 4.5 },
+          summary: "Persisted report summary.",
+          strengths: ["Clear reasoning"],
+          improvementAreas: ["Add more metrics"],
+          evidence: ["Explained trade-offs"],
+          reviewerSummary: "Human reviewer note.",
+          session: {
+            completedAt,
+            candidate: { name: "Sophea Candidate" },
+            template: { title: "Backend Engineer Assessment" },
+          },
+        };
+      },
+    },
+  };
+  const service = new ReportsService(fakePrisma as any);
+
+  const report = await service.getReport("session-1", organizationAccess);
+
+  assert.deepEqual(calls.map((call) => call.action), ["interviewSession.findFirst", "candidateReport.findUnique"]);
+  assert.equal(report.sessionId, "session-1");
+  assert.equal(report.candidateName, "Sophea Candidate");
+  assert.equal(report.assessmentName, "Backend Engineer Assessment");
+  assert.equal(report.completedAt, completedAt.toISOString());
+  assert.equal(report.overallScore, 4.6);
+  assert.deepEqual(report.moduleScores, { "AI Interview": 4.7, "Coding Assessment": 4.5 });
+  assert.deepEqual(report.strengths, ["Clear reasoning"]);
+  assert.equal(report.reviewerSummary, "Human reviewer note.");
+  assert.match(report.advisoryNotice, /not a final hiring decision/i);
+});
+
 test("generateAndPersistDemoReport checks organization ownership before writing report data", async () => {
   const calls: Array<{ action: string; args: unknown }> = [];
   const fakePrisma = {

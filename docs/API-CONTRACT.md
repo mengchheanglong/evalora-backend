@@ -186,8 +186,8 @@ AI routes call the internal `AiService` boundary. DeepSeek provider failures do 
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| GET | `/reports/:sessionId` | Get candidate report. |
-| POST | `/reports/:sessionId/generate` | Generate or regenerate report. |
+| GET | `/reports/:sessionId` | Get the persisted candidate report when available; otherwise return generated fallback report data. |
+| POST | `/reports/:sessionId/generate` | Generate or regenerate report and persist `Evaluation`/`CandidateReport` records when the session exists. |
 | GET | `/reports/:sessionId/export` | Export report if supported. |
 
 Report routes require a Bearer JWT and are limited to `admin`, `organization`, and `interviewer` roles. Admins can access reports broadly; organization/interviewer users are scoped through the report session's `organizationId`. Candidates cannot read generated evaluation reports in the MVP API.
@@ -204,6 +204,8 @@ Report routes require a Bearer JWT and are limited to `admin`, `organization`, a
 ```
 
 Persistence status may be `persisted`, `skipped`, or `failed`. A failed persistence status means report generation completed, but the database write did not complete.
+
+`GET /api/reports/:sessionId` first reads the saved `CandidateReport` row with session candidate/template metadata. If no persisted report exists, the endpoint keeps the existing generated fallback response shape.
 
 ## Analytics
 
