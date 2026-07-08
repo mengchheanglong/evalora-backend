@@ -17,6 +17,7 @@ Before any AI agent changes this repository, read `AGENTS.md` first.
 pnpm install
 cp .env.example .env
 pnpm prisma:generate
+pnpm seed:prebuilt
 pnpm dev
 ```
 
@@ -26,7 +27,7 @@ Health check: <http://localhost:4000/api/health>
 
 ## Current state
 
-This backend now includes Prisma-backed core APIs, JWT/RBAC auth, ownership scoping, report privacy, deterministic AI fallback logic, and a DeepSeek V4 Flash AI service adapter. Some frontend-driven flows and production integrations remain MVP follow-up work.
+This backend now includes Prisma-backed core APIs, JWT/RBAC auth, ownership scoping, report privacy, deterministic AI fallback logic, a DeepSeek V4 Flash AI service adapter, module-specific evaluation profiles, persisted report readback, and seeded prebuilt assessment templates for HR Generalist, Software Engineer, and Team Leader roles. Some frontend-driven flows and production integrations remain MVP follow-up work.
 
 ## Module map
 

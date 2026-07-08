@@ -12,7 +12,8 @@
     "lint": "eslint \"src/**/*.ts\"",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
-    "prisma:format": "prisma format"
+    "prisma:format": "prisma format",
+    "seed:prebuilt": "tsx scripts/seed-prebuilt-templates.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

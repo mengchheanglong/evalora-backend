@@ -99,6 +99,8 @@ Template routes require a Bearer JWT. `GET` routes allow `admin`, `organization`
 
 The backend uses the authenticated JWT user as `createdById`. For organization users, the backend also uses the JWT `organizationId` instead of trusting a client-supplied organization. Clients must not send password or secret fields in template payloads.
 
+Prebuilt starter tests are available through the seed script `pnpm seed:prebuilt`. It inserts editable templates for HR Generalist, Software Engineer, and Team Leader assessments with modules, questions, weights, and rubrics. After seeding, these templates are returned by `GET /api/templates` for the seeded organization/admin scope.
+
 ## Interview sessions
 
 | Method | Endpoint | Description |

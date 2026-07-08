@@ -62,11 +62,14 @@ Implemented first core logic slice:
   - `src/modules/auth/access-control.ts` derives ownership scopes used by persisted routes.
   - `GET /api/auth/me` now requires a valid JWT.
   - `test/auth.guard.test.ts` verifies token parsing and role rejection.
-- Template persistence slice:
+- Template persistence/prebuilt test slice:
   - `src/modules/templates/templates.service.ts` maps template DTOs to Prisma nested writes for `AssessmentTemplate`, `AssessmentModule`, and `Question`.
   - `src/modules/templates/templates.controller.ts` now uses the service instead of mock template data.
+  - `src/modules/templates/prebuilt-templates.ts` provides editable starter tests for HR Generalist, Software Engineer, and Team Leader roles.
+  - `scripts/seed-prebuilt-templates.ts` upserts those prebuilt tests into Neon with modules, questions, weights, and rubrics.
   - Template routes require JWT auth; write routes require `admin` or `organization` role.
   - `test/templates.service.test.ts` verifies nested create/update mapping and DTO conversion without Neon credentials.
+  - `test/prebuilt-templates.test.ts` verifies prebuilt template coverage and Prisma seed mapping.
 - Session persistence slice:
   - `src/modules/sessions/sessions.service.ts` creates and reads `InterviewSession` records linked to candidate user IDs and template IDs.
   - session creation generates an access code and starts with `not_started` status.
@@ -88,7 +91,7 @@ Implemented first core logic slice:
 Work in this order:
 
 1. Support candidate access-code lookup/reconnect only if frontend integration explicitly needs Member 1 backend help.
-2. Add deeper module-specific prompt examples only if frontend templates need stricter question generation.
+2. Add duplicate-template/edit-from-prebuilt workflow only if the frontend wants a separate clone endpoint instead of editing a seeded template.
 3. Add final frontend integration smoke tests when report UI routes are available.
 
 ## Rules

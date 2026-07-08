@@ -18,7 +18,11 @@ Never commit a real Neon password or full production connection string.
 pnpm prisma:validate
 pnpm prisma:format
 pnpm prisma:generate
+pnpm exec prisma db push
+pnpm seed:prebuilt
 ```
+
+`pnpm seed:prebuilt` upserts editable starter assessment templates for HR Generalist, Software Engineer, and Team Leader roles into Neon. It creates a seed organization/owner only when needed and does not print secrets.
 
 When database access is ready, add migration scripts such as:
 
