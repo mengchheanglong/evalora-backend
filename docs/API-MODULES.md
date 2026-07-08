@@ -110,8 +110,8 @@ Implemented first Member 1 slice:
 
 - `GET /api/reports/:sessionId` reads a persisted `CandidateReport` row first and maps session candidate/template metadata into the report DTO.
 - If no persisted report exists, `GET /api/reports/:sessionId` keeps the generated evidence-based fallback report shape.
-- `POST /api/reports/:sessionId/generate` generates the report, attempts to persist `Evaluation` and `CandidateReport` records through Prisma, and returns `persistence.status`.
-- Persistence succeeds only when the `sessionId` exists in the database; demo/nonexistent sessions return generated report data with a failed/skipped persistence status instead of crashing.
+- `POST /api/reports/:sessionId/generate` loads the saved session responses with their questions/modules, groups answers by module, evaluates each module through `AiService` with deterministic fallback, then persists fresh `Evaluation` rows and one `CandidateReport`.
+- Report generation requires a real saved session. Sessions with no candidate responses return generated report data with `persistence.status = "skipped"` and reason `no candidate responses`.
 - Report routes require JWT auth and are restricted to `admin`, `organization`, and `interviewer` roles.
 - Ownership hardening: organization/interviewer users are scoped through the report session's `organizationId`; candidates are intentionally blocked from generated evaluation reports in the MVP API.
 

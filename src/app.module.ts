@@ -46,8 +46,8 @@ import { PrismaService } from "./prisma/prisma.service";
     },
     {
       provide: ReportsService,
-      useFactory: (prisma: PrismaService) => new ReportsService(prisma),
-      inject: [PrismaService],
+      useFactory: (prisma: PrismaService, aiService: AiService) => new ReportsService(prisma, aiService),
+      inject: [PrismaService, AiService],
     },
     {
       provide: TemplatesService,

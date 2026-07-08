@@ -44,4 +44,4 @@ pnpm prisma migrate dev --name init
 - Use enums for role/status/module/question types.
 - Keep AI evidence JSON attached to evaluations and reports.
 - Keep report access role-restricted.
-- `ReportsService.persistReport()` deletes old module evaluations for a session, writes fresh `Evaluation` rows, and upserts one `CandidateReport` for the same session.
+- `ReportsService.generateAndPersistReport()` evaluates saved session responses grouped by module, then `persistReport()` deletes old module evaluations for the session, writes fresh `Evaluation` rows, and upserts one `CandidateReport` for the same session.

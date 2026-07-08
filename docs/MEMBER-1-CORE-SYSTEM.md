@@ -42,12 +42,12 @@ Implemented first core logic slice:
   - tests bounded deterministic evaluation output.
   - tests weighted report score aggregation and evidence merge.
 - `src/modules/reports/reports.controller.ts`
-  - report endpoints now use generated module evaluations instead of a static report object.
+  - `POST /api/reports/:sessionId/generate` now generates from saved candidate responses instead of a static report object.
 - Persistence slice:
   - `src/prisma/prisma.service.ts` owns Prisma connection lifecycle.
-  - `src/modules/reports/reports.service.ts` generates reports and persists `Evaluation` + `CandidateReport` records when a database session exists.
+  - `src/modules/reports/reports.service.ts` loads session responses with their questions/modules, groups responses by module, evaluates each module through `AiService`, then persists `Evaluation` + `CandidateReport` records.
   - `GET /api/reports/:sessionId` now reads persisted `CandidateReport` data first and falls back to generated report data only when no persisted report exists.
-  - `test/reports.service.test.ts` verifies Prisma write mapping and persisted report readback without needing real Neon credentials.
+  - `test/reports.service.test.ts` verifies saved-response module grouping, Prisma write mapping, and persisted report readback without needing real Neon credentials.
 - Report privacy slice:
   - report read/generate/export routes require JWT auth and `admin`, `organization`, or `interviewer` role.
   - organization/interviewer users are scoped through the report session's `organizationId` before reading or generating reports.

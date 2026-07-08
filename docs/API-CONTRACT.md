@@ -189,12 +189,12 @@ AI routes call the internal `AiService` boundary. DeepSeek provider failures do 
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | GET | `/reports/:sessionId` | Get the persisted candidate report when available; otherwise return generated fallback report data. |
-| POST | `/reports/:sessionId/generate` | Generate or regenerate report and persist `Evaluation`/`CandidateReport` records when the session exists. |
+| POST | `/reports/:sessionId/generate` | Generate or regenerate a report from saved candidate responses and persist `Evaluation`/`CandidateReport` records. |
 | GET | `/reports/:sessionId/export` | Export report if supported. |
 
 Report routes require a Bearer JWT and are limited to `admin`, `organization`, and `interviewer` roles. Admins can access reports broadly; organization/interviewer users are scoped through the report session's `organizationId`. Candidates cannot read generated evaluation reports in the MVP API.
 
-`POST /api/reports/:sessionId/generate` returns generated report fields plus:
+`POST /api/reports/:sessionId/generate` loads saved responses for the session, groups them by assessment module, evaluates each module through `AiService` using the module/question rubrics, persists fresh module-level `Evaluation` rows, and upserts one `CandidateReport`. It returns generated report fields plus:
 
 ```json
 {
@@ -205,7 +205,7 @@ Report routes require a Bearer JWT and are limited to `admin`, `organization`, a
 }
 ```
 
-Persistence status may be `persisted`, `skipped`, or `failed`. A failed persistence status means report generation completed, but the database write did not complete.
+Persistence status may be `persisted`, `skipped`, or `failed`. `skipped` is used when a real session exists but has no saved candidate responses. A failed persistence status means report generation completed, but the database write did not complete.
 
 `GET /api/reports/:sessionId` first reads the saved `CandidateReport` row with session candidate/template metadata. If no persisted report exists, the endpoint keeps the existing generated fallback response shape.
 

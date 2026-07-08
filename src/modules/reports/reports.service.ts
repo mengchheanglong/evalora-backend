@@ -1,5 +1,7 @@
 import { Injectable } from "@nestjs/common";
-import { evaluateResponse, generateCandidateReport, type EvaluationResultDto, type GeneratedCandidateReport } from "../ai/evaluation.service";
+import type { JsonValue, ModuleType } from "../../domain/evalora.types";
+import type { AiService } from "../ai/ai.service";
+import { evaluateResponse, generateCandidateReport, type EvaluateResponseInput, type EvaluationResultDto, type GeneratedCandidateReport } from "../ai/evaluation.service";
 import { buildSessionOwnershipWhere, forbiddenResourceError, mergeWhere, type AccessContext } from "../auth/access-control";
 
 interface ReportPersistenceClient {
@@ -33,6 +35,45 @@ interface PersistedCandidateReportRow {
   } | null;
 }
 
+interface EvaluationModuleRow {
+  id?: unknown;
+  title?: unknown;
+  moduleType?: unknown;
+  weight?: unknown;
+}
+
+interface EvaluationQuestionRow {
+  id?: unknown;
+  questionText?: unknown;
+  rubric?: unknown;
+  module?: EvaluationModuleRow | null;
+}
+
+interface EvaluationResponseRow {
+  id?: unknown;
+  responseText?: unknown;
+  responseJson?: JsonValue | null;
+  question?: EvaluationQuestionRow | null;
+}
+
+interface EvaluationSessionRow {
+  id?: unknown;
+  completedAt?: unknown;
+  candidate?: { name?: unknown } | null;
+  template?: { title?: unknown } | null;
+  responses?: EvaluationResponseRow[] | null;
+}
+
+interface GroupedResponseEntry {
+  question: EvaluationQuestionRow;
+  response: EvaluationResponseRow;
+}
+
+interface GroupedModuleResponses {
+  module: EvaluationModuleRow;
+  entries: GroupedResponseEntry[];
+}
+
 export type ReportPersistenceResult =
   | { status: "persisted"; evaluationCount: number }
   | { status: "skipped"; reason: string }
@@ -45,9 +86,27 @@ interface PersistReportInput {
 
 const REPORT_ADVISORY_NOTICE = "AI feedback is advisory and not a final hiring decision.";
 
+const REPORT_EVALUATION_SESSION_INCLUDE = {
+  candidate: { select: { name: true } },
+  template: { select: { title: true } },
+  responses: {
+    include: {
+      question: {
+        include: {
+          module: true,
+        },
+      },
+    },
+    orderBy: { createdAt: "asc" },
+  },
+};
+
 @Injectable()
 export class ReportsService {
-  constructor(private readonly prisma?: ReportPersistenceClient) {}
+  constructor(
+    private readonly prisma?: ReportPersistenceClient,
+    private readonly aiService?: Pick<AiService, "evaluateResponse">,
+  ) {}
 
   async getReport(sessionId: string, access?: AccessContext): Promise<GeneratedCandidateReport> {
     await this.assertReportAccess(sessionId, access);
@@ -78,6 +137,27 @@ export class ReportsService {
       generatedAt: new Date().toISOString(),
       persistence,
       message: persistence.status === "persisted" ? "Report generated and persisted." : `Report generated without persistence: ${persistence.reason}.`,
+    };
+  }
+
+  async generateAndPersistReport(sessionId: string, access?: AccessContext) {
+    const session = await this.loadSessionForEvaluation(sessionId, access);
+    const evaluations = await this.evaluateSessionResponses(session);
+    const report = generateCandidateReport({
+      sessionId,
+      candidateName: stringValue(session.candidate?.name, "Candidate"),
+      assessmentName: stringValue(session.template?.title, "Assessment"),
+      completedAt: isoDateString(session.completedAt),
+      evaluations,
+      reviewerNotes: ["Reviewer should validate AI feedback against the original candidate responses."],
+    });
+    const persistence = evaluations.length ? await this.persistReport({ report, evaluations }) : { status: "skipped" as const, reason: "no candidate responses" };
+
+    return {
+      ...report,
+      generatedAt: new Date().toISOString(),
+      persistence,
+      message: persistence.status === "persisted" ? "Report generated from saved candidate responses and persisted." : `Report generated without persistence: ${persistence.reason}.`,
     };
   }
 
@@ -169,6 +249,45 @@ export class ReportsService {
     if (!session) throw forbiddenResourceError("Report");
   }
 
+  private async loadSessionForEvaluation(sessionId: string, access?: AccessContext): Promise<EvaluationSessionRow> {
+    const findFirst = requireMethod(this.prisma?.interviewSession?.findFirst, "interviewSession.findFirst");
+    const session = (await findFirst({
+      where: mergeWhere({ id: sessionId }, buildSessionOwnershipWhere(access)),
+      include: REPORT_EVALUATION_SESSION_INCLUDE,
+    })) as EvaluationSessionRow | null;
+    if (!session) throw forbiddenResourceError("Report");
+    return session;
+  }
+
+  private async evaluateSessionResponses(session: EvaluationSessionRow): Promise<EvaluationResultDto[]> {
+    const groups = groupResponsesByModule(session.responses ?? []);
+    const evaluations: EvaluationResultDto[] = [];
+
+    for (const group of Array.from(groups.values())) {
+      const input: EvaluateResponseInput = {
+        moduleId: optionalString(group.module.id),
+        moduleTitle: optionalString(group.module.title),
+        moduleType: fromPrismaModuleType(group.module.moduleType),
+        responseText: buildModuleResponseText(group.entries),
+        rubric: unique(group.entries.flatMap((entry) => stringArray(entry.question.rubric))),
+        weight: numberValue(group.module.weight, 1),
+      };
+      evaluations.push(await this.evaluateModuleResponse(input));
+    }
+
+    return evaluations;
+  }
+
+  private async evaluateModuleResponse(input: EvaluateResponseInput): Promise<EvaluationResultDto> {
+    if (!this.aiService) return evaluateResponse(input);
+
+    try {
+      return await this.aiService.evaluateResponse(input);
+    } catch {
+      return evaluateResponse(input);
+    }
+  }
+
   private buildDemoEvaluations(): EvaluationResultDto[] {
     return [
       evaluateResponse({
@@ -211,6 +330,54 @@ function mapPersistedReport(row: PersistedCandidateReportRow): GeneratedCandidat
     reviewerSummary: optionalString(row.reviewerSummary),
     advisoryNotice: REPORT_ADVISORY_NOTICE,
   };
+}
+
+function groupResponsesByModule(responses: EvaluationResponseRow[]): Map<string, GroupedModuleResponses> {
+  const groups = new Map<string, GroupedModuleResponses>();
+
+  for (const response of responses) {
+    const question = response.question;
+    const module = question?.module;
+    const responseText = optionalString(response.responseText);
+    if (!question || !module || !responseText) continue;
+
+    const key = optionalString(module.id) ?? `${optionalString(module.title) ?? "module"}:${optionalString(module.moduleType) ?? "unknown"}`;
+    const group = groups.get(key) ?? { module, entries: [] };
+    group.entries.push({ question, response });
+    groups.set(key, group);
+  }
+
+  return groups;
+}
+
+function buildModuleResponseText(entries: GroupedResponseEntry[]): string {
+  return entries
+    .map((entry) => {
+      const lines = [`Question: ${stringValue(entry.question.questionText, "Untitled question")}`, `Answer: ${stringValue(entry.response.responseText, "")}`];
+      const structuredResponse = formatJson(entry.response.responseJson);
+      if (structuredResponse) lines.push(`Structured response: ${structuredResponse}`);
+      return lines.join("\n");
+    })
+    .join("\n\n");
+}
+
+function fromPrismaModuleType(value: unknown): ModuleType {
+  const normalized = optionalString(value)?.toLowerCase() as ModuleType | undefined;
+  const knownTypes: ModuleType[] = ["ai_interview", "coding", "debugging", "work_style", "behavioral", "leadership", "communication", "problem_solving"];
+  return normalized && knownTypes.includes(normalized) ? normalized : "ai_interview";
+}
+
+function unique(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function formatJson(value: JsonValue | null | undefined): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
 }
 
 function numberRecord(value: unknown): Record<string, number> {

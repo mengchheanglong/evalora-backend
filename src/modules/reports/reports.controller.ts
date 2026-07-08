@@ -17,7 +17,7 @@ export class ReportsController {
   @Post(":sessionId/generate")
   @Roles("admin", "organization", "interviewer")
   generate(@Param("sessionId") sessionId: string, @Req() request: AuthenticatedRequest) {
-    return this.reportsService.generateAndPersistDemoReport(sessionId, toAccessContext(request.user));
+    return this.reportsService.generateAndPersistReport(sessionId, toAccessContext(request.user));
   }
 
   @Get(":sessionId/export")

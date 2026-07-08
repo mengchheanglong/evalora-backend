@@ -17,6 +17,7 @@ Do not commit API keys. Keep provider settings in `.env` / hosting environment v
 - `src/modules/ai/deepseek.provider.ts` owns the DeepSeek chat-completions HTTP adapter.
 - `src/modules/ai/evaluation.service.ts` remains the safe deterministic rubric/report helper used for fallback and aggregation.
 - `getModuleEvaluationProfile(moduleType)` centralizes module-specific rubrics, focus areas, and safety guidance for AI interview, coding, debugging, work-style, behavioral, leadership, communication, and problem-solving modules.
+- `src/modules/reports/reports.service.ts` uses `AiService.evaluateResponse()` to evaluate saved candidate responses grouped by assessment module before persisting module-level evaluations and the final candidate report.
 
 ## Required operations
 
