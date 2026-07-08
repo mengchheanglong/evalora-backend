@@ -38,7 +38,7 @@ Implemented template persistence slice:
 - `POST /api/templates` creates nested modules/questions and stores scoring rules.
 - `PUT /api/templates/:id` replaces nested modules/questions so edits stay in sync with the template editor.
 - `GET /api/templates` and `GET /api/templates/:id` return nested module/question DTOs.
-- `src/modules/templates/prebuilt-templates.ts` defines researched starter banks for HR Generalist, Software Engineer, and Team Leader tests with modules, questions, candidate subset sizing, weights, and rubrics.
+- `src/modules/templates/prebuilt-templates.ts` re-exports researched starter banks from `src/modules/templates/prebuilt/`, where each role/module has its own file for maintainability.
 - `pnpm seed:prebuilt` upserts those prebuilt tests into Neon for the seeded organization scope.
 - Template routes require JWT auth; write routes are restricted to `admin` and `organization` roles.
 - Ownership hardening: admins can query broadly, while organization/interviewer users are scoped to their JWT `organizationId`.

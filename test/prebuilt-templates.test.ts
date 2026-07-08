@@ -1,6 +1,45 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { PREBUILT_ASSESSMENT_TEMPLATES, buildPrebuiltTemplateCreateData, buildPrebuiltTemplateUpdateData } from "../src/modules/templates/prebuilt-templates";
+
+test("prebuilt template definitions are split into per-role module files", () => {
+  const expectedModuleFiles = [
+    "hr-generalist/ai-ethics.ts",
+    "hr-generalist/behavioral.ts",
+    "hr-generalist/communication.ts",
+    "hr-generalist/index.ts",
+    "hr-generalist/leadership.ts",
+    "hr-generalist/problem-solving.ts",
+    "hr-generalist/work-style.ts",
+    "software-engineer/ai-interview.ts",
+    "software-engineer/behavioral.ts",
+    "software-engineer/coding.ts",
+    "software-engineer/communication.ts",
+    "software-engineer/debugging.ts",
+    "software-engineer/index.ts",
+    "software-engineer/system-design.ts",
+    "software-engineer/work-style.ts",
+    "team-leader/ai-interview.ts",
+    "team-leader/behavioral.ts",
+    "team-leader/communication.ts",
+    "team-leader/index.ts",
+    "team-leader/leadership.ts",
+    "team-leader/problem-solving.ts",
+    "team-leader/work-style.ts",
+    "index.ts",
+    "seed-mappers.ts",
+    "types.ts",
+  ];
+
+  for (const relativePath of expectedModuleFiles) {
+    assert.ok(
+      existsSync(join(process.cwd(), "src/modules/templates/prebuilt", relativePath)),
+      `${relativePath} should exist under src/modules/templates/prebuilt`,
+    );
+  }
+});
 
 function templateByRole(roleType: string) {
   const template = PREBUILT_ASSESSMENT_TEMPLATES.find((item) => item.roleType === roleType);
