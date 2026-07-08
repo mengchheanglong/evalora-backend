@@ -1,6 +1,6 @@
 # Evalora Database Design
 
-Evalora uses PostgreSQL with Prisma.
+Evalora uses PostgreSQL on Neon with Prisma.
 
 ## Main entities
 

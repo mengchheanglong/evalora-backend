@@ -25,6 +25,37 @@ Frontend code should read the backend URL from `NEXT_PUBLIC_API_URL` and default
 | POST | `/auth/logout` | End session/token client-side or server-side when implemented. |
 | GET | `/auth/me` | Return current authenticated user. |
 
+`POST /api/auth/register` request:
+
+```json
+{
+  "name": "Demo User",
+  "email": "demo@example.com",
+  "password": "minimum-8-characters",
+  "role": "candidate",
+  "organizationId": "org-id-for-organization-or-interviewer-users"
+}
+```
+
+`POST /api/auth/login` request:
+
+```json
+{
+  "email": "demo@example.com",
+  "password": "minimum-8-characters"
+}
+```
+
+Both successful routes return a signed JWT and safe user object. The response must never include `passwordHash`.
+
+Protected routes, including `GET /api/auth/me`, require:
+
+```http
+Authorization: Bearer JWT_TOKEN
+```
+
+JWT payloads carry `sub`, `email`, `role`, and `organizationId` when the user belongs to an organization. Role-restricted routes should use the same role values as the SRS: `candidate`, `interviewer`, `organization`, or `admin`.
+
 ## Assessment templates
 
 | Method | Endpoint | Description |
@@ -34,6 +65,41 @@ Frontend code should read the backend URL from `NEXT_PUBLIC_API_URL` and default
 | GET | `/templates/:id` | Get template details including modules/questions. |
 | PUT | `/templates/:id` | Update template. |
 | DELETE | `/templates/:id` | Delete template. |
+
+Template routes require a Bearer JWT. `GET` routes allow `admin`, `organization`, and `interviewer`; write routes allow `admin` and `organization`. Admins can query across organizations; organization/interviewer users are scoped to their JWT `organizationId`.
+
+`POST /api/templates` request:
+
+```json
+{
+  "title": "Backend Engineer Assessment",
+  "description": "Technical backend screen",
+  "roleType": "Backend Engineer",
+  "timeLimitMin": 60,
+  "scoringRules": { "passScore": 3.5 },
+  "organizationId": "org-id-if-applicable",
+  "modules": [
+    {
+      "type": "ai_interview",
+      "title": "AI Interview",
+      "description": "Scenario questions",
+      "weight": 1.25,
+      "orderIndex": 1,
+      "questions": [
+        {
+          "questionText": "Tell us about a production incident.",
+          "questionType": "scenario",
+          "rubric": ["clarity", "ownership"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+The backend uses the authenticated JWT user as `createdById`. For organization users, the backend also uses the JWT `organizationId` instead of trusting a client-supplied organization. Clients must not send password or secret fields in template payloads.
+
+Prebuilt starter tests are available through the seed script `pnpm seed:prebuilt`. It inserts editable, researched question banks for HR Generalist, Software Engineer, and Team Leader assessments with modules, candidate subset sizing, questions, weights, and rubrics. After seeding, these templates are returned by `GET /api/templates` for the seeded organization/admin scope.
 
 ## Interview sessions
 
@@ -45,6 +111,21 @@ Frontend code should read the backend URL from `NEXT_PUBLIC_API_URL` and default
 | PUT | `/sessions/:id/start` | Mark session in progress. |
 | PUT | `/sessions/:id/complete` | Complete session and trigger evaluation/report workflow. |
 
+Session routes require a Bearer JWT. Create routes allow `admin`, `organization`, and `interviewer`. List/detail/start/complete routes additionally allow `candidate` for assigned candidate flows. Admins can query broadly; organization/interviewer users are scoped to their JWT `organizationId`; candidates are scoped to their own `candidateId`.
+
+`POST /api/sessions` request:
+
+```json
+{
+  "candidateId": "candidate-user-id",
+  "templateId": "assessment-template-id",
+  "organizationId": "org-id-if-applicable",
+  "expiresAt": "2026-08-01T00:00:00.000Z"
+}
+```
+
+The backend generates a unique-style access code and starts sessions as `not_started`. Session responses include candidate/template labels when Prisma relation data is available.
+
 ## Responses
 
 | Method | Endpoint | Description |
@@ -52,14 +133,48 @@ Frontend code should read the backend URL from `NEXT_PUBLIC_API_URL` and default
 | POST | `/responses` | Submit or autosave candidate response. |
 | GET | `/responses/session/:sessionId` | Get responses for one session. |
 
+Response routes require a Bearer JWT. `POST /api/responses` accepts candidate autosaves and reviewer/admin corrections. Admins can query broadly; organization/interviewer users are scoped through the response session's `organizationId`; candidates are scoped through the response session's `candidateId`.
+
+`POST /api/responses` request:
+
+```json
+{
+  "sessionId": "interview-session-id",
+  "questionId": "question-id-if-applicable",
+  "responseText": "Candidate answer text",
+  "responseJson": { "confidence": 4 }
+}
+```
+
+If `sessionId` + `questionId` already has a saved response, the backend updates that row for autosave. Otherwise it creates a new response. The response includes `savedAt` from the persisted row timestamp.
+
 ## AI
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | POST | `/ai/interview-question` | Generate role/template-based interview question. |
 | POST | `/ai/follow-up` | Generate follow-up based on candidate answer. |
-| POST | `/ai/evaluate` | Evaluate one response/module using rubric. |
-| POST | `/ai/report` | Generate final report summary. |
+| POST | `/ai/evaluate` | Evaluate one response/module using rubric and DeepSeek V4 Flash when configured. |
+| POST | `/ai/report` | Generate final report summary from module evaluations. |
+
+AI routes call the internal `AiService` boundary. DeepSeek provider failures do not crash evaluation; the service returns the same DTO shape with deterministic fallback rubric evaluation and an advisory notice. If a request omits `rubric`, the backend applies module-specific defaults for AI interview, coding/debugging, work-style/behavioral, leadership, communication, or problem-solving modules.
+
+`POST /api/ai/evaluate` returns:
+
+```json
+{
+  "moduleType": "leadership",
+  "score": 4.4,
+  "criteriaScores": {
+    "clarity": 4.4
+  },
+  "feedback": "Evidence-based feedback.",
+  "strengths": ["Uses clear reasoning"],
+  "improvementAreas": ["Add measurable impact"],
+  "evidence": ["candidate response evidence"],
+  "advisoryNotice": "This AI feedback is advisory and must be reviewed by a human interviewer."
+}
+```
 
 ## Coding
 
@@ -73,9 +188,26 @@ Frontend code should read the backend URL from `NEXT_PUBLIC_API_URL` and default
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| GET | `/reports/:sessionId` | Get candidate report. |
-| POST | `/reports/:sessionId/generate` | Generate or regenerate report. |
+| GET | `/reports/:sessionId` | Get the persisted candidate report when available; otherwise return generated fallback report data. |
+| POST | `/reports/:sessionId/generate` | Generate or regenerate a report from saved candidate responses and persist `Evaluation`/`CandidateReport` records. |
 | GET | `/reports/:sessionId/export` | Export report if supported. |
+
+Report routes require a Bearer JWT and are limited to `admin`, `organization`, and `interviewer` roles. Admins can access reports broadly; organization/interviewer users are scoped through the report session's `organizationId`. Candidates cannot read generated evaluation reports in the MVP API.
+
+`POST /api/reports/:sessionId/generate` loads saved responses for the session, groups them by assessment module, evaluates each module through `AiService` using the module/question rubrics, persists fresh module-level `Evaluation` rows, and upserts one `CandidateReport`. It returns generated report fields plus:
+
+```json
+{
+  "generatedAt": "2026-07-01T00:00:00.000Z",
+  "persistence": {
+    "status": "persisted"
+  }
+}
+```
+
+Persistence status may be `persisted`, `skipped`, or `failed`. `skipped` is used when a real session exists but has no saved candidate responses. A failed persistence status means report generation completed, but the database write did not complete.
+
+`GET /api/reports/:sessionId` first reads the saved `CandidateReport` row with session candidate/template metadata. If no persisted report exists, the endpoint keeps the existing generated fallback response shape.
 
 ## Analytics
 

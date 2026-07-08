@@ -1,40 +1,60 @@
 import { Body, Controller, Post } from "@nestjs/common";
+import { AiService, type FollowUpInput, type InterviewQuestionInput } from "./ai.service";
+import type { EvaluateResponseInput, EvaluationResultDto } from "./evaluation.service";
 
 @Controller("ai")
 export class AiController {
+  constructor(private readonly aiService: AiService) {}
+
   @Post("interview-question")
-  interviewQuestion(@Body() body: { roleType?: string }) {
-    return {
-      question: `Tell me about a project you built for a ${body.roleType ?? "target"} role and the hardest problem you solved.`,
-      rubric: ["clarity", "technical depth", "problem solving", "reflection"],
-    };
+  async interviewQuestion(@Body() body: InterviewQuestionInput) {
+    return this.aiService.generateInterviewQuestion(body);
   }
 
   @Post("follow-up")
-  followUp(@Body() body: { answer?: string }) {
-    return {
-      question: "What trade-off did you consider, and how did you decide between options?",
-      basedOn: body.answer ? "candidate_answer" : "default_follow_up",
-    };
+  async followUp(@Body() body: FollowUpInput) {
+    return this.aiService.generateFollowUp(body);
   }
 
   @Post("evaluate")
-  evaluate() {
-    return {
-      score: 4,
-      summary: "Demo evaluation. Replace with provider-backed rubric evaluation.",
-      strengths: ["Clear explanation", "Practical approach"],
-      improvementAreas: ["Add more measurable evidence"],
-      evidence: ["Uses a structured answer with action and result."],
-      advisoryNotice: "AI feedback is advisory and must be reviewed by a human interviewer.",
-    };
+  async evaluate(@Body() body: Partial<EvaluateResponseInput>) {
+    return this.aiService.evaluateResponse({
+      moduleId: body.moduleId,
+      moduleTitle: body.moduleTitle,
+      moduleType: body.moduleType ?? "ai_interview",
+      responseText: body.responseText ?? "",
+      rubric: body.rubric,
+      weight: body.weight,
+    });
   }
 
   @Post("report")
-  report() {
-    return {
-      summary: "Demo AI report summary. Replace with evidence-based report generator.",
-      advisoryNotice: "AI feedback is advisory and not a final hiring decision.",
-    };
+  async report(
+    @Body()
+    body: {
+      sessionId?: string;
+      candidateName?: string;
+      assessmentName?: string;
+      completedAt?: string;
+      evaluations?: EvaluationResultDto[];
+      reviewerNotes?: string[];
+    },
+  ) {
+    return this.aiService.generateCandidateReport({
+      sessionId: body.sessionId ?? "demo-session",
+      candidateName: body.candidateName ?? "Demo Candidate",
+      assessmentName: body.assessmentName ?? "Evalora Assessment",
+      completedAt: body.completedAt,
+      evaluations: body.evaluations?.length
+        ? body.evaluations
+        : [
+            await this.aiService.evaluateResponse({
+              moduleType: "ai_interview",
+              moduleTitle: "AI Interview",
+              responseText: "Candidate explained project trade-offs, testing steps, and communication decisions.",
+            }),
+          ],
+      reviewerNotes: body.reviewerNotes,
+    });
   }
 }

@@ -1,42 +1,43 @@
-import { Body, Controller, Get, Post } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Post, Req, UnauthorizedException, UseGuards } from "@nestjs/common";
 import type { UserRole } from "../../domain/evalora.types";
+import { type AuthenticatedRequest, JwtAuthGuard } from "./auth.guard";
+import { AuthService } from "./auth.service";
 
 interface RegisterRequest {
   name?: string;
   email?: string;
+  password?: string;
   role?: UserRole;
+  organizationId?: string;
 }
 
 interface LoginRequest {
   email?: string;
+  password?: string;
 }
 
 @Controller("auth")
 export class AuthController {
+  constructor(private readonly authService: AuthService) {}
+
   @Post("register")
-  register(@Body() body: RegisterRequest) {
-    return {
-      message: "Registration scaffold. Add password hashing, Prisma persistence, and JWT issuance.",
-      user: {
-        id: "user-demo",
-        name: body.name ?? "Demo User",
-        email: body.email ?? "demo@example.com",
-        role: body.role ?? "candidate",
-      },
-    };
+  async register(@Body() body: RegisterRequest) {
+    try {
+      const result = await this.authService.register(body);
+      return { ...result, message: "Registration successful." };
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : "Registration failed.");
+    }
   }
 
   @Post("login")
-  login(@Body() body: LoginRequest) {
-    return {
-      token: "demo-jwt-token",
-      user: {
-        id: "user-demo",
-        email: body.email ?? "demo@example.com",
-        role: "organization",
-      },
-      message: "Login scaffold. Replace with hashed password verification and signed JWT.",
-    };
+  async login(@Body() body: LoginRequest) {
+    try {
+      const result = await this.authService.login(body);
+      return { ...result, message: "Login successful." };
+    } catch {
+      throw new UnauthorizedException("Invalid email or password.");
+    }
   }
 
   @Post("logout")
@@ -45,12 +46,8 @@ export class AuthController {
   }
 
   @Get("me")
-  me() {
-    return {
-      id: "user-demo",
-      name: "Demo Organization User",
-      email: "demo@example.com",
-      role: "organization",
-    };
+  @UseGuards(JwtAuthGuard)
+  me(@Req() request: AuthenticatedRequest) {
+    return request.user;
   }
 }

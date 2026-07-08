@@ -1,29 +1,26 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Param, Post, Req, UseGuards } from "@nestjs/common";
+import { toAccessContext } from "../auth/access-control";
+import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
+import { type SaveResponseInput, ResponsesService } from "./responses.service";
 
 @Controller("responses")
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class ResponsesController {
+  constructor(private readonly responsesService: ResponsesService) {}
+
   @Post()
-  submit(@Body() body: { sessionId?: string; questionId?: string; responseText?: string }) {
-    return {
-      id: "response-demo",
-      sessionId: body.sessionId ?? "demo-session",
-      questionId: body.questionId ?? "question-demo",
-      responseText: body.responseText ?? "",
-      savedAt: new Date().toISOString(),
-      message: "Response save scaffold. Add autosave/upsert behavior with Prisma.",
-    };
+  @Roles("admin", "organization", "interviewer", "candidate")
+  async submit(@Body() body: SaveResponseInput, @Req() request: AuthenticatedRequest) {
+    try {
+      return await this.responsesService.saveResponse(body, toAccessContext(request.user));
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : "Response save failed.");
+    }
   }
 
   @Get("session/:sessionId")
-  findBySession(@Param("sessionId") sessionId: string) {
-    return [
-      {
-        id: "response-demo",
-        sessionId,
-        questionId: "question-demo",
-        responseText: "Demo response text",
-        createdAt: new Date().toISOString(),
-      },
-    ];
+  @Roles("admin", "organization", "interviewer", "candidate")
+  findBySession(@Param("sessionId") sessionId: string, @Req() request: AuthenticatedRequest) {
+    return this.responsesService.listResponsesBySession(sessionId, toAccessContext(request.user));
   }
 }

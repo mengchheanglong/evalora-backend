@@ -12,6 +12,18 @@ export type ModuleType =
   | "communication"
   | "problem_solving";
 
+export type QuestionType = "mcq" | "scale" | "short_answer" | "coding" | "scenario" | "roleplay";
+
+export type JsonValue = any;
+
+export interface QuestionDto {
+  id: string;
+  questionText: string;
+  questionType: QuestionType;
+  options?: JsonValue;
+  rubric?: JsonValue;
+}
+
 export interface AssessmentModuleDto {
   id: string;
   type: ModuleType;
@@ -19,6 +31,8 @@ export interface AssessmentModuleDto {
   description: string;
   weight: number;
   orderIndex: number;
+  settings?: JsonValue;
+  questions?: QuestionDto[];
 }
 
 export interface AssessmentTemplateDto {
@@ -26,26 +40,51 @@ export interface AssessmentTemplateDto {
   title: string;
   description: string;
   roleType: string;
+  timeLimitMin?: number;
+  scoringRules?: JsonValue;
+  createdById?: string;
+  organizationId?: string;
   modules: AssessmentModuleDto[];
 }
 
 export interface InterviewSessionDto {
   id: string;
+  candidateId?: string;
   candidateName: string;
+  candidateEmail?: string;
   templateId: string;
+  templateTitle?: string;
+  organizationId?: string;
   status: SessionStatus;
   accessCode: string;
+  startedAt?: string;
+  completedAt?: string;
+  expiresAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CandidateResponseDto {
+  id: string;
+  sessionId: string;
+  questionId?: string;
+  responseText: string;
+  responseJson?: JsonValue;
+  savedAt?: string;
+  createdAt?: string;
 }
 
 export interface CandidateReportDto {
   sessionId: string;
   candidateName: string;
   assessmentName: string;
+  completedAt?: string;
   overallScore: number;
   moduleScores: Record<string, number>;
   summary: string;
   strengths: string[];
   improvementAreas: string[];
   evidence: string[];
+  reviewerSummary?: string;
   advisoryNotice: string;
 }

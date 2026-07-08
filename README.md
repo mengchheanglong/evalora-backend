@@ -2,12 +2,22 @@
 
 Standalone NestJS + TypeScript backend for Evalora.
 
+MVP provider choices:
+
+- AI: DeepSeek V4 Flash.
+- Database: PostgreSQL on Neon.
+
+## AI agent start rule
+
+Before any AI agent changes this repository, read `AGENTS.md` first.
+
 ## Run locally
 
 ```bash
 pnpm install
 cp .env.example .env
 pnpm prisma:generate
+pnpm seed:prebuilt
 pnpm dev
 ```
 
@@ -17,7 +27,7 @@ Health check: <http://localhost:4000/api/health>
 
 ## Current state
 
-This backend is a scaffold with route contracts and demo responses. Replace demo data with Prisma services as features are implemented.
+This backend now includes Prisma-backed core APIs, JWT/RBAC auth, ownership scoping, report privacy, deterministic AI fallback logic, a DeepSeek V4 Flash AI service adapter, module-specific evaluation profiles, saved-response report generation, persisted report readback, and seeded researched prebuilt assessment banks for HR Generalist, Software Engineer, and Team Leader roles. The seeded banks hold 30 HR questions, 39 software-engineer questions, and 30 team-leader questions; the product should assign only a candidate-sized subset per assessment. Some frontend-driven flows and production integrations remain MVP follow-up work.
 
 ## Module map
 
@@ -42,10 +52,11 @@ This backend is a scaffold with route contracts and demo responses. Replace demo
 ## Verification
 
 ```bash
+pnpm test
 pnpm typecheck
 pnpm lint
 pnpm build
-DATABASE_URL='postgresql://postgres:postgres@localhost:5432/evalora' pnpm prisma:validate
+DATABASE_URL='postgresql://postgres:***@localhost:5432/evalora' pnpm prisma:validate
 ```
 
 ## Separate repository note

@@ -21,6 +21,11 @@ Use repo-relative paths in docs and code. Do not commit machine-specific absolut
 
 Build a secure, modular NestJS API for Evalora. The backend owns data protection, RBAC, AI evaluation boundaries, report generation, and code execution safety.
 
+MVP provider choices:
+
+- AI provider: DeepSeek V4 Flash.
+- Database: PostgreSQL on Neon.
+
 ## API conventions
 
 - Global prefix: `/api`.

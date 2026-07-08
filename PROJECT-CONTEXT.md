@@ -30,8 +30,9 @@ Those belong in the frontend repository.
 - NestJS.
 - TypeScript.
 - Prisma.
-- PostgreSQL.
+- PostgreSQL on Neon.
 - JWT auth.
+- DeepSeek V4 Flash for AI provider integration.
 
 ## Important docs in this repo
 
