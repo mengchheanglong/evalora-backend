@@ -65,8 +65,8 @@ Implemented first core logic slice:
 - Template persistence/prebuilt test slice:
   - `src/modules/templates/templates.service.ts` maps template DTOs to Prisma nested writes for `AssessmentTemplate`, `AssessmentModule`, and `Question`.
   - `src/modules/templates/templates.controller.ts` now uses the service instead of mock template data.
-  - `src/modules/templates/prebuilt-templates.ts` provides editable starter tests for HR Generalist, Software Engineer, and Team Leader roles.
-  - `scripts/seed-prebuilt-templates.ts` upserts those prebuilt tests into Neon with modules, questions, weights, and rubrics.
+  - `src/modules/templates/prebuilt-templates.ts` provides editable researched question banks for HR Generalist, Software Engineer, and Team Leader roles.
+  - `scripts/seed-prebuilt-templates.ts` upserts those prebuilt tests into Neon with modules, candidate subset sizing, questions, weights, and rubrics.
   - Template routes require JWT auth; write routes require `admin` or `organization` role.
   - `test/templates.service.test.ts` verifies nested create/update mapping and DTO conversion without Neon credentials.
   - `test/prebuilt-templates.test.ts` verifies prebuilt template coverage and Prisma seed mapping.

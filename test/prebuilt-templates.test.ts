@@ -14,15 +14,21 @@ test("prebuilt templates cover HR, software engineer, and team leader assessment
     ["HR Generalist", "Software Engineer", "Team Leader"],
   );
 
+  const allQuestionIds = new Set<string>();
   for (const template of PREBUILT_ASSESSMENT_TEMPLATES) {
     assert.match(template.id, /^prebuilt-/);
     assert.ok(template.title.includes("Assessment"));
     assert.ok((template.timeLimitMin ?? 0) >= 45);
-    assert.ok(template.modules.length >= 4, `${template.title} should have several modules`);
+    assert.ok(template.modules.length >= 6, `${template.title} should have a production-sized module set`);
+    assert.equal(template.scoringRules.source, "prebuilt-researched-v2");
+    assert.ok(template.scoringRules.recommendedCandidateQuestionCount, `${template.title} should define candidate subset size`);
 
     for (const module of template.modules) {
-      assert.ok(module.questions.length >= 1, `${module.title} should include questions`);
+      assert.ok(module.questions.length >= 3, `${module.title} should include a meaningful question bank`);
       for (const question of module.questions) {
+        assert.ok(question.id.startsWith("prebuilt-"));
+        assert.ok(!allQuestionIds.has(question.id), `${question.id} should be unique`);
+        allQuestionIds.add(question.id);
         assert.ok(question.questionText.length > 20);
         assert.ok(Array.isArray(question.rubric));
         assert.ok(question.rubric.length >= 3, `${question.questionText} should include a useful rubric`);
@@ -31,18 +37,32 @@ test("prebuilt templates cover HR, software engineer, and team leader assessment
   }
 });
 
+test("prebuilt templates include researched question-bank depth and candidate subset sizing", () => {
+  const hr = templateByRole("HR Generalist");
+  assert.ok(hr.modules.flatMap((module) => module.questions).length >= 25);
+  assert.deepEqual(hr.scoringRules.recommendedCandidateQuestionCount, { min: 10, max: 14 });
+
+  const software = templateByRole("Software Engineer");
+  assert.ok(software.modules.flatMap((module) => module.questions).length >= 35);
+  assert.deepEqual(software.scoringRules.recommendedCandidateQuestionCount, { min: 10, max: 15, practicalTasks: 1 });
+
+  const leader = templateByRole("Team Leader");
+  assert.ok(leader.modules.flatMap((module) => module.questions).length >= 25);
+  assert.deepEqual(leader.scoringRules.recommendedCandidateQuestionCount, { min: 10, max: 14 });
+});
+
 test("prebuilt templates include the expected role/module coverage", () => {
   assert.deepEqual(
     templateByRole("HR Generalist").modules.map((module) => module.type),
-    ["behavioral", "communication", "work_style", "problem_solving"],
+    ["behavioral", "communication", "work_style", "problem_solving", "leadership", "ai_interview"],
   );
   assert.deepEqual(
     templateByRole("Software Engineer").modules.map((module) => module.type),
-    ["ai_interview", "coding", "debugging", "communication"],
+    ["ai_interview", "coding", "debugging", "problem_solving", "communication", "work_style", "behavioral"],
   );
   assert.deepEqual(
     templateByRole("Team Leader").modules.map((module) => module.type),
-    ["leadership", "communication", "behavioral", "problem_solving"],
+    ["leadership", "communication", "behavioral", "problem_solving", "work_style", "ai_interview"],
   );
 });
 
