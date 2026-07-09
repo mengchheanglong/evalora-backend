@@ -192,9 +192,13 @@ AI routes call the internal `AiService` boundary. DeepSeek provider failures do 
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| POST | `/code/run` | Run candidate code in sandbox. |
-| POST | `/code/submit` | Save final candidate code. |
+| GET | `/code/questions` | List coding questions (public sample only; hidden grading test cases are never returned, `testCaseCount` indicates how many exist). |
+| POST | `/code/run` | Run candidate code in the sandbox against optional stdin. Rate limited per client IP. |
+| POST | `/code/grade` | Grade code against a question's hidden test cases without persisting. Rate limited per client IP. |
+| POST | `/code/submit` | Grade and persist a candidate submission for a session. Rejected (409) if the session is completed, (410) if expired. Rate limited per client IP. |
 | GET | `/code/submissions/:sessionId` | List code submissions for one session. |
+
+Code execution requests cap `sourceCode` at 64,000 and `stdin` at 16,000 characters. A sandbox outage returns 503; a database outage returns 503.
 
 ## Reports
 

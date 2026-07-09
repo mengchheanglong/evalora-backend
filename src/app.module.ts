@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { ConfigModule } from "@nestjs/config";
 import { AnalyticsController } from "./modules/analytics/analytics.controller";
 import { AppController } from "./app.controller";
 import { AiController } from "./modules/ai/ai.controller";
@@ -7,7 +8,7 @@ import { createDeepSeekProviderFromEnv } from "./modules/ai/deepseek.provider";
 import { AuthController } from "./modules/auth/auth.controller";
 import { JwtAuthGuard, RolesGuard } from "./modules/auth/auth.guard";
 import { AuthService, PrismaAuthRepository } from "./modules/auth/auth.service";
-import { CodeController } from "./modules/code/code.controller";
+import { CodeModule } from "./modules/code/code.module";
 import { ReportsController } from "./modules/reports/reports.controller";
 import { ReportsService } from "./modules/reports/reports.service";
 import { CandidateResponsesAccessController, ResponsesController } from "./modules/responses/responses.controller";
@@ -19,7 +20,7 @@ import { TemplatesService } from "./modules/templates/templates.service";
 import { PrismaService } from "./prisma/prisma.service";
 
 @Module({
-  imports: [],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), CodeModule],
   controllers: [
     AppController,
     AuthController,
@@ -29,7 +30,6 @@ import { PrismaService } from "./prisma/prisma.service";
     ResponsesController,
     CandidateResponsesAccessController,
     AiController,
-    CodeController,
     ReportsController,
     AnalyticsController,
   ],

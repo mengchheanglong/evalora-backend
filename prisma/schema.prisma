@@ -173,16 +173,24 @@ model AIMessage {
 }
 
 model CodeSubmission {
-  id              String           @id @default(uuid())
-  sessionId       String           @map("session_id")
-  session         InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  language        String
-  sourceCode      String           @map("source_code")
-  executionOutput String?          @map("execution_output")
-  executionStatus String?          @map("execution_status")
-  testResults     Json?            @map("test_results")
-  isFinal         Boolean          @default(false) @map("is_final")
-  createdAt       DateTime         @default(now()) @map("created_at")
+  id             String           @id @default(uuid())
+  sessionId      String           @map("session_id")
+  session        InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  questionId     String           @map("question_id")
+  language       String
+  sourceCode     String           @map("source_code")
+  stdout         String           @default("")
+  stderr         String           @default("")
+  compileOutput  String           @default("") @map("compile_output")
+  status         String
+  executionTime  Float            @default(0) @map("execution_time")
+  score          Float            @default(0)
+  testResults    Json?            @map("test_results")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  @@index([sessionId])
+  @@index([questionId])
 
   @@map("code_submissions")
 }

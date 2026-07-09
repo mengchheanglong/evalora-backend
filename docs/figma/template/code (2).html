@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Assessment Templates - Evalora</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-surface-variant": "#464554",
+                      "on-primary-container": "#fffbff",
+                      "inverse-surface": "#213145",
+                      "on-secondary": "#ffffff",
+                      "inverse-primary": "#c0c1ff",
+                      "on-background": "#0b1c30",
+                      "surface-container": "#e5eeff",
+                      "tertiary-fixed": "#ffdcc5",
+                      "on-tertiary": "#ffffff",
+                      "on-secondary-container": "#fffbff",
+                      "surface-container-low": "#eff4ff",
+                      "secondary": "#6b38d4",
+                      "surface": "#f8f9ff",
+                      "tertiary": "#904900",
+                      "tertiary-fixed-dim": "#ffb783",
+                      "on-tertiary-fixed-variant": "#703700",
+                      "surface-container-high": "#dce9ff",
+                      "secondary-container": "#8455ef",
+                      "primary-container": "#6063ee",
+                      "on-tertiary-fixed": "#301400",
+                      "on-primary-fixed": "#07006c",
+                      "on-secondary-fixed-variant": "#5516be",
+                      "outline": "#767586",
+                      "primary-fixed": "#e1e0ff",
+                      "on-surface": "#0b1c30",
+                      "surface-container-highest": "#d3e4fe",
+                      "error-container": "#ffdad6",
+                      "surface-tint": "#494bd6",
+                      "on-tertiary-container": "#fffbff",
+                      "on-primary-fixed-variant": "#2f2ebe",
+                      "tertiary-container": "#b55d00",
+                      "inverse-on-surface": "#eaf1ff",
+                      "surface-variant": "#d3e4fe",
+                      "error": "#ba1a1a",
+                      "on-primary": "#ffffff",
+                      "background": "#f8f9ff",
+                      "surface-bright": "#f8f9ff",
+                      "on-error-container": "#93000a",
+                      "surface-dim": "#cbdbf5",
+                      "secondary-fixed-dim": "#d0bcff",
+                      "on-error": "#ffffff",
+                      "primary": "#4648d4",
+                      "surface-container-lowest": "#ffffff",
+                      "primary-fixed-dim": "#c0c1ff",
+                      "outline-variant": "#c7c4d7",
+                      "on-secondary-fixed": "#23005c",
+                      "secondary-fixed": "#e9ddff"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "base": "8px",
+                      "gutter": "24px",
+                      "container-max": "1280px",
+                      "margin-mobile": "20px",
+                      "margin-desktop": "48px"
+              },
+              "fontFamily": {
+                      "headline-xl": [
+                              "Inter"
+                      ],
+                      "body-md": [
+                              "Inter"
+                      ],
+                      "label-sm": [
+                              "Inter"
+                      ],
+                      "label-md": [
+                              "Inter"
+                      ],
+                      "headline-md": [
+                              "Inter"
+                      ],
+                      "headline-lg": [
+                              "Inter"
+                      ],
+                      "headline-lg-mobile": [
+                              "Inter"
+                      ],
+                      "body-lg": [
+                              "Inter"
+                      ]
+              },
+              "fontSize": {
+                      "headline-xl": [
+                              "36px",
+                              {
+                                      "lineHeight": "44px",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "700"
+                              }
+                      ],
+                      "body-md": [
+                              "16px",
+                              {
+                                      "lineHeight": "24px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "label-sm": [
+                              "12px",
+                              {
+                                      "lineHeight": "16px",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "label-md": [
+                              "14px",
+                              {
+                                      "lineHeight": "20px",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "headline-md": [
+                              "24px",
+                              {
+                                      "lineHeight": "32px",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "headline-lg": [
+                              "30px",
+                              {
+                                      "lineHeight": "38px",
+                                      "letterSpacing": "-0.01em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "headline-lg-mobile": [
+                              "24px",
+                              {
+                                      "lineHeight": "32px",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "body-lg": [
+                              "18px",
+                              {
+                                      "lineHeight": "28px",
+                                      "fontWeight": "400"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+      </script>
+<style>
+        .ai-border {
+            border-left: 2px solid #8B5CF6;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md min-h-screen">
+<!-- SideNavBar -->
+<nav class="bg-surface dark:bg-inverse-surface h-screen w-64 fixed left-0 top-0 border-r border-outline-variant dark:border-outline shadow-sm flex flex-col h-full py-base z-50 md:flex hidden">
+<div class="px-gutter mb-8 mt-4 flex items-center gap-3">
+<div class="w-10 h-10 rounded-lg bg-primary-container flex items-center justify-center text-on-primary-container font-bold text-lg">E</div>
+<div>
+<h1 class="text-headline-md font-headline-md text-primary dark:text-inverse-primary">Evalora</h1>
+<p class="text-label-sm font-label-sm text-on-surface-variant">AI Assessment</p>
+</div>
+</div>
+<ul class="flex-1 space-y-2 px-4">
+<li>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant dark:text-surface-variant hover:bg-surface-container dark:hover:bg-on-surface-variant/10 transition-colors duration-200 ease-in-out font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+                    Dashboard
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-primary dark:text-inverse-primary font-bold border-r-4 border-primary dark:border-inverse-primary bg-primary-container/10 transition-colors duration-200 ease-in-out font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined">description</span>
+                    Templates
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant dark:text-surface-variant hover:bg-surface-container dark:hover:bg-on-surface-variant/10 transition-colors duration-200 ease-in-out font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined">timer</span>
+                    Sessions
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant dark:text-surface-variant hover:bg-surface-container dark:hover:bg-on-surface-variant/10 transition-colors duration-200 ease-in-out font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined">group</span>
+                    Candidates
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant dark:text-surface-variant hover:bg-surface-container dark:hover:bg-on-surface-variant/10 transition-colors duration-200 ease-in-out font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined">assessment</span>
+                    Reports
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant dark:text-surface-variant hover:bg-surface-container dark:hover:bg-on-surface-variant/10 transition-colors duration-200 ease-in-out font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined">analytics</span>
+                    Analytics
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant dark:text-surface-variant hover:bg-surface-container dark:hover:bg-on-surface-variant/10 transition-colors duration-200 ease-in-out font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined">settings</span>
+                    Settings
+                </a>
+</li>
+</ul>
+</nav>
+<!-- TopNavBar -->
+<header class="bg-surface/80 dark:bg-inverse-surface/80 backdrop-blur-md fixed top-0 right-0 w-full md:w-[calc(100%-16rem)] h-16 border-b border-outline-variant dark:border-outline flex justify-between items-center px-gutter md:ml-64 z-40">
+<div class="flex items-center w-full max-w-md">
+<div class="relative w-full focus-within:ring-2 focus-within:ring-primary/20 rounded-md">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant">search</span>
+<input class="w-full pl-10 pr-4 py-2 border border-outline-variant rounded-md text-body-md focus:outline-none focus:border-primary bg-surface-container-lowest" placeholder="Search templates..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="text-on-surface-variant dark:text-surface-variant hover:text-primary dark:hover:text-inverse-primary transition-colors">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="text-on-surface-variant dark:text-surface-variant hover:text-primary dark:hover:text-inverse-primary transition-colors">
+<span class="material-symbols-outlined">help</span>
+</button>
+<div class="w-8 h-8 rounded-full overflow-hidden border border-outline-variant">
+<img alt="User profile avatar" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDkygbVTb4zfVN09HDKnx54a4IfzANUkll0VYESPd7LekYWeeUl031NB9YFHmmcn5Pp-0AWCwKqU9CmUJ7M-4U7pjXqdz3iPaFnADbYDmNRH86dk-lnbi-33KQqRxbG-YgTWmVI7chI_UcZICdVhRw8KURQiSyN5ds3peOF7lWG2lachrXcav22sd7BqYlUgzz5AmfjP8GPo_deWB1pb3l7K5YQrub03P1Y7eIRLC0i6okM89Vwo9rCzWgjG-99CO2vqm_zgPoUClaA"/>
+</div>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="pt-24 pb-12 px-margin-mobile md:px-margin-desktop md:ml-64 max-w-container-max mx-auto">
+<!-- Page Header -->
+<div class="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4">
+<div>
+<h1 class="font-headline-xl text-headline-xl text-on-surface mb-2">Assessment Templates</h1>
+<p class="font-body-lg text-body-lg text-on-surface-variant">Create reusable assessments for different candidate roles.</p>
+</div>
+<div class="flex items-center gap-3 w-full md:w-auto">
+<div class="relative">
+<select class="appearance-none border border-outline-variant rounded-md py-2 pl-4 pr-10 bg-surface-container-lowest text-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary h-11 w-full md:w-48">
+<option>Role Type</option>
+<option>Engineering</option>
+<option>Management</option>
+<option>Support</option>
+</select>
+<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-on-surface-variant">expand_more</span>
+</div>
+<button class="bg-primary text-on-primary px-6 h-11 rounded-md font-label-md text-label-md flex items-center justify-center gap-2 hover:bg-primary/90 transition-colors whitespace-nowrap shadow-sm">
+<span class="material-symbols-outlined text-lg">add</span>
+                    Create Template
+                </button>
+</div>
+</div>
+<!-- Templates Grid (Bento style) -->
+<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+<!-- Card 1 -->
+<div class="bg-surface-container-lowest rounded-xl p-8 shadow-[0px_4px_20px_rgba(0,0,0,0.03)] border border-outline-variant flex flex-col h-full ai-border hover:shadow-[0px_10px_32px_rgba(15,23,42,0.08)] transition-shadow duration-300 group">
+<div class="flex justify-between items-start mb-4">
+<h3 class="font-headline-md text-headline-md text-on-surface group-hover:text-primary transition-colors">Software Engineer Assessment</h3>
+<span class="bg-primary-container/10 text-primary px-3 py-1 rounded-full font-label-sm text-label-sm border border-primary-container/20">Active</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant mb-6 flex-grow">Evaluate technical proficiency, algorithmic thinking, and debugging skills for full-stack developers.</p>
+<div class="mb-6 space-y-3">
+<div class="flex flex-wrap gap-2">
+<span class="bg-surface-container text-on-surface px-3 py-1 rounded-md font-label-sm text-label-sm">AI Interview</span>
+<span class="bg-surface-container text-on-surface px-3 py-1 rounded-md font-label-sm text-label-sm">Coding Test</span>
+<span class="bg-surface-container text-on-surface px-3 py-1 rounded-md font-label-sm text-label-sm">Debugging</span>
+</div>
+</div>
+<div class="flex items-center justify-between pt-4 border-t border-outline-variant mb-6">
+<div class="flex items-center gap-2 text-on-surface-variant font-label-md text-label-md">
+<span class="material-symbols-outlined text-xl">schedule</span>
+                        60 min
+                    </div>
+<div class="flex items-center gap-2 text-on-surface-variant font-label-md text-label-md">
+<span class="material-symbols-outlined text-xl">group</span>
+                        42 Candidates
+                    </div>
+</div>
+<div class="flex gap-3 mt-auto">
+<button class="flex-1 border border-outline-variant bg-surface-container-lowest text-on-surface hover:bg-surface-container px-4 py-2 rounded-md font-label-md text-label-md transition-colors h-11">Edit</button>
+<button class="flex-1 bg-surface-variant text-on-surface hover:bg-surface-dim px-4 py-2 rounded-md font-label-md text-label-md transition-colors h-11">Assign</button>
+<button class="w-11 h-11 flex items-center justify-center border border-outline-variant rounded-md text-on-surface-variant hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined">more_horiz</span>
+</button>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="bg-surface-container-lowest rounded-xl p-8 shadow-[0px_4px_20px_rgba(0,0,0,0.03)] border border-outline-variant flex flex-col h-full hover:shadow-[0px_10px_32px_rgba(15,23,42,0.08)] transition-shadow duration-300 group">
+<div class="flex justify-between items-start mb-4">
+<h3 class="font-headline-md text-headline-md text-on-surface group-hover:text-primary transition-colors">Project Manager Assessment</h3>
+<span class="bg-primary-container/10 text-primary px-3 py-1 rounded-full font-label-sm text-label-sm border border-primary-container/20">Active</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant mb-6 flex-grow">Assess leadership qualities, strategic planning capabilities, and team communication.</p>
+<div class="mb-6 space-y-3">
+<div class="flex flex-wrap gap-2">
+<span class="bg-surface-container text-on-surface px-3 py-1 rounded-md font-label-sm text-label-sm">Leadership</span>
+<span class="bg-surface-container text-on-surface px-3 py-1 rounded-md font-label-sm text-label-sm">Communication</span>
+<span class="bg-surface-container text-on-surface px-3 py-1 rounded-md font-label-sm text-label-sm">Planning</span>
+</div>
+</div>
+<div class="flex items-center justify-between pt-4 border-t border-outline-variant mb-6">
+<div class="flex items-center gap-2 text-on-surface-variant font-label-md text-label-md">
+<span class="material-symbols-outlined text-xl">schedule</span>
+                        45 min
+                    </div>
+<div class="flex items-center gap-2 text-on-surface-variant font-label-md text-label-md">
+<span class="material-symbols-outlined text-xl">group</span>
+                        28 Candidates
+                    </div>
+</div>
+<div class="flex gap-3 mt-auto">
+<button class="flex-1 border border-outline-variant bg-surface-container-lowest text-on-surface hover:bg-surface-container px-4 py-2 rounded-md font-label-md text-label-md transition-colors h-11">Edit</button>
+<button class="flex-1 bg-surface-variant text-on-surface hover:bg-surface-dim px-4 py-2 rounded-md font-label-md text-label-md transition-colors h-11">Assign</button>
+<button class="w-11 h-11 flex items-center justify-center border border-outline-variant rounded-md text-on-surface-variant hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined">more_horiz</span>
+</button>
+</div>
+</div>
+<!-- Card 3 -->
+<div class="bg-surface-container-lowest rounded-xl p-8 shadow-[0px_4px_20px_rgba(0,0,0,0.03)] border border-outline-variant flex flex-col h-full hover:shadow-[0px_10px_32px_rgba(15,23,42,0.08)] transition-shadow duration-300 group opacity-80">
+<div class="flex justify-between items-start mb-4">
+<h3 class="font-headline-md text-headline-md text-on-surface group-hover:text-primary transition-colors">General Candidate Assessment</h3>
+<span class="bg-surface-variant text-on-surface-variant px-3 py-1 rounded-full font-label-sm text-label-sm border border-outline-variant">Draft</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant mb-6 flex-grow">Baseline behavioral evaluation for general applicant pool screening.</p>
+<div class="mb-6 space-y-3">
+<div class="flex flex-wrap gap-2">
+<span class="bg-surface-container text-on-surface px-3 py-1 rounded-md font-label-sm text-label-sm">Work Style</span>
+<span class="bg-surface-container text-on-surface px-3 py-1 rounded-md font-label-sm text-label-sm">Problem Solving</span>
+<span class="bg-surface-container text-on-surface px-3 py-1 rounded-md font-label-sm text-label-sm">AI Interview</span>
+</div>
+</div>
+<div class="flex items-center justify-between pt-4 border-t border-outline-variant mb-6">
+<div class="flex items-center gap-2 text-on-surface-variant font-label-md text-label-md">
+<span class="material-symbols-outlined text-xl">schedule</span>
+                        35 min
+                    </div>
+<div class="flex items-center gap-2 text-on-surface-variant font-label-md text-label-md">
+<span class="material-symbols-outlined text-xl">group</span>
+                        0 Candidates
+                    </div>
+</div>
+<div class="flex gap-3 mt-auto">
+<button class="flex-1 border border-outline-variant bg-surface-container-lowest text-on-surface hover:bg-surface-container px-4 py-2 rounded-md font-label-md text-label-md transition-colors h-11">Continue Editing</button>
+<button class="w-11 h-11 flex items-center justify-center border border-outline-variant rounded-md text-on-surface-variant hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined">more_horiz</span>
+</button>
+</div>
+</div>
+<!-- Card 4 -->
+<div class="bg-surface-container-lowest rounded-xl p-8 shadow-[0px_4px_20px_rgba(0,0,0,0.03)] border border-outline-variant flex flex-col h-full hover:shadow-[0px_10px_32px_rgba(15,23,42,0.08)] transition-shadow duration-300 group">
+<div class="flex justify-between items-start mb-4">
+<h3 class="font-headline-md text-headline-md text-on-surface group-hover:text-primary transition-colors">Customer Support Assessment</h3>
+<span class="bg-primary-container/10 text-primary px-3 py-1 rounded-full font-label-sm text-label-sm border border-primary-container/20">Active</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant mb-6 flex-grow">Evaluate empathy, conflict resolution, and communication skills in simulated scenarios.</p>
+<div class="mb-6 space-y-3">
+<div class="flex flex-wrap gap-2">
+<span class="bg-surface-container text-on-surface px-3 py-1 rounded-md font-label-sm text-label-sm">Roleplay</span>
+<span class="bg-surface-container text-on-surface px-3 py-1 rounded-md font-label-sm text-label-sm">Empathy</span>
+<span class="bg-surface-container text-on-surface px-3 py-1 rounded-md font-label-sm text-label-sm">Problem Solving</span>
+</div>
+</div>
+<div class="flex items-center justify-between pt-4 border-t border-outline-variant mb-6">
+<div class="flex items-center gap-2 text-on-surface-variant font-label-md text-label-md">
+<span class="material-symbols-outlined text-xl">schedule</span>
+                        40 min
+                    </div>
+<div class="flex items-center gap-2 text-on-surface-variant font-label-md text-label-md">
+<span class="material-symbols-outlined text-xl">group</span>
+                        15 Candidates
+                    </div>
+</div>
+<div class="flex gap-3 mt-auto">
+<button class="flex-1 border border-outline-variant bg-surface-container-lowest text-on-surface hover:bg-surface-container px-4 py-2 rounded-md font-label-md text-label-md transition-colors h-11">Edit</button>
+<button class="flex-1 bg-surface-variant text-on-surface hover:bg-surface-dim px-4 py-2 rounded-md font-label-md text-label-md transition-colors h-11">Assign</button>
+<button class="w-11 h-11 flex items-center justify-center border border-outline-variant rounded-md text-on-surface-variant hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined">more_horiz</span>
+</button>
+</div>
+</div>
+</div>
+</main>
+</body></html>
