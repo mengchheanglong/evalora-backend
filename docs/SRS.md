@@ -68,11 +68,11 @@ After a candidate completes an assessment, Evalora generates a report containing
 
 ### 2.2 User roles
 
-| Role | Characteristics |
+| Role / access type | Characteristics |
 | --- | --- |
-| Candidate | Completes assigned assessment sessions and submits responses. |
-| Interviewer / Organization User | Creates templates, assigns sessions, reviews reports, and adds notes. |
-| Administrator | Manages users, roles, permissions, data, and platform analytics. |
+| Candidate | Invitation-based participant who completes one assigned assessment through a secure link or access code. Candidates do not register for platform accounts and lose assessment access after completion/expiry. |
+| Interviewer / Organization User | Registered product user who creates templates, assigns sessions, invites candidates, reviews reports, and adds notes. |
+| Administrator | Private/platform account that manages users, roles, permissions, data, and platform analytics. Admin accounts are seeded or created privately, not through public registration. |
 
 ### 2.3 Operating environment
 
@@ -115,7 +115,9 @@ The coding assessment is primarily designed for desktop and laptop use.
 
 ### 3.1 Authentication and RBAC
 
-- Users can register with name, email, password, and role.
+- Public registration creates interviewer/organization-user accounts only.
+- Administrator accounts are created privately by the platform team.
+- Candidates do not register or log in to the platform; they access only their assigned assessment through an invitation link or access code.
 - Users can log in securely.
 - Users can log out.
 - Passwords are hashed before storage.
@@ -209,7 +211,7 @@ Evaluation criteria include clarity, empathy, accountability, decision-making, p
 
 Interviewers can create and manage sessions with:
 
-- Candidate information.
+- Candidate information or an existing candidate record.
 - Selected assessment template.
 - Unique session link or access code.
 - Session status: `not_started`, `in_progress`, `completed`, `expired`.
@@ -218,7 +220,9 @@ Interviewers can create and manage sessions with:
 - Candidate responses.
 - Evaluation results.
 
-The system should save progress and support reconnect handling where possible.
+Candidates can open, start, autosave, and complete only their assigned assessment through the access code. After the session is completed or expired, the candidate access code no longer grants platform access. Authorized admins/interviewers still retain candidate session data, responses, evaluations, and reports.
+
+The system should save progress and support reconnect handling while the assigned session is still active.
 
 ### 3.9 AI evaluation and scoring
 
@@ -333,10 +337,10 @@ Use modular structure:
 
 The MVP is successful if:
 
-1. Users can register and log in.
+1. Interviewers can register and log in; admins can log in through private/seeded accounts.
 2. Roles and permissions work correctly.
 3. Organizations can create assessment templates.
-4. Candidates can complete assigned sessions.
+4. Candidates can complete assigned sessions through invite link/access code without platform login.
 5. At least one AI interview module works.
 6. At least one coding assessment works.
 7. At least one non-technical assessment works.

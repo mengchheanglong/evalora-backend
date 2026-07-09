@@ -15,7 +15,7 @@ export class TemplatesController {
   }
 
   @Post()
-  @Roles("admin", "organization")
+  @Roles("admin", "organization", "interviewer")
   async create(@Body() body: CreateTemplateInput, @Req() request: AuthenticatedRequest) {
     try {
       return await this.templatesService.createTemplate(body, toAccessContext(request.user));
@@ -33,7 +33,7 @@ export class TemplatesController {
   }
 
   @Put(":id")
-  @Roles("admin", "organization")
+  @Roles("admin", "organization", "interviewer")
   async update(@Param("id") id: string, @Body() body: UpdateTemplateInput, @Req() request: AuthenticatedRequest) {
     try {
       return await this.templatesService.updateTemplate(id, body, toAccessContext(request.user));
@@ -43,7 +43,7 @@ export class TemplatesController {
   }
 
   @Delete(":id")
-  @Roles("admin", "organization")
+  @Roles("admin", "organization", "interviewer")
   remove(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
     return this.templatesService.deleteTemplate(id, toAccessContext(request.user));
   }

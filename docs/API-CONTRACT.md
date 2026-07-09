@@ -20,7 +20,7 @@ Frontend code should read the backend URL from `NEXT_PUBLIC_API_URL` and default
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| POST | `/auth/register` | Register user with name, email, password, role. |
+| POST | `/auth/register` | Register an interviewer/organization-user account. |
 | POST | `/auth/login` | Log in and receive token/user info. |
 | POST | `/auth/logout` | End session/token client-side or server-side when implemented. |
 | GET | `/auth/me` | Return current authenticated user. |
@@ -32,10 +32,12 @@ Frontend code should read the backend URL from `NEXT_PUBLIC_API_URL` and default
   "name": "Demo User",
   "email": "demo@example.com",
   "password": "minimum-8-characters",
-  "role": "candidate",
+  "role": "interviewer",
   "organizationId": "org-id-for-organization-or-interviewer-users"
 }
 ```
+
+Public registration does **not** create candidate accounts or admin accounts. Omit `role` for the default interviewer account. `admin` registration is private/seeded, and candidates use session invitation links/access codes instead of platform login.
 
 `POST /api/auth/login` request:
 
@@ -54,7 +56,7 @@ Protected routes, including `GET /api/auth/me`, require:
 Authorization: Bearer JWT_TOKEN
 ```
 
-JWT payloads carry `sub`, `email`, `role`, and `organizationId` when the user belongs to an organization. Role-restricted routes should use the same role values as the SRS: `candidate`, `interviewer`, `organization`, or `admin`.
+JWT payloads carry `sub`, `email`, `role`, and `organizationId` when the user belongs to an organization. Platform JWT roles are `interviewer`, `organization`, and `admin`. The `candidate` enum remains for invite-only participant records, but candidates are not public platform-login users in the MVP.
 
 ## Assessment templates
 
@@ -66,7 +68,7 @@ JWT payloads carry `sub`, `email`, `role`, and `organizationId` when the user be
 | PUT | `/templates/:id` | Update template. |
 | DELETE | `/templates/:id` | Delete template. |
 
-Template routes require a Bearer JWT. `GET` routes allow `admin`, `organization`, and `interviewer`; write routes allow `admin` and `organization`. Admins can query across organizations; organization/interviewer users are scoped to their JWT `organizationId`.
+Template routes require a Bearer JWT. `GET` and write routes allow `admin`, `organization`, and `interviewer`. Admins can query across organizations; organization/interviewer users are scoped to their JWT `organizationId`.
 
 `POST /api/templates` request:
 
@@ -110,21 +112,27 @@ Prebuilt starter tests are available through the seed script `pnpm seed:prebuilt
 | GET | `/sessions/:id` | Get session details. |
 | PUT | `/sessions/:id/start` | Mark session in progress. |
 | PUT | `/sessions/:id/complete` | Complete session and trigger evaluation/report workflow. |
+| GET | `/sessions/access/:accessCode` | Candidate opens assigned assessment through invite/access code. |
+| PUT | `/sessions/access/:accessCode/start` | Candidate starts assigned assessment through invite/access code. |
+| PUT | `/sessions/access/:accessCode/complete` | Candidate completes assigned assessment through invite/access code. |
 
-Session routes require a Bearer JWT. Create routes allow `admin`, `organization`, and `interviewer`. List/detail/start/complete routes additionally allow `candidate` for assigned candidate flows. Admins can query broadly; organization/interviewer users are scoped to their JWT `organizationId`; candidates are scoped to their own `candidateId`.
+Platform session routes require a Bearer JWT. Create routes allow `admin`, `organization`, and `interviewer`. Admins can query broadly; organization/interviewer users are scoped to their JWT `organizationId`.
+
+Candidate access-code routes do not require a platform JWT. They only allow the active assigned session to be opened, started, or completed. Once the session is completed or expired, the access code no longer grants candidate access.
 
 `POST /api/sessions` request:
 
 ```json
 {
-  "candidateId": "candidate-user-id",
+  "candidateName": "Dara Candidate",
+  "candidateEmail": "dara@example.com",
   "templateId": "assessment-template-id",
   "organizationId": "org-id-if-applicable",
   "expiresAt": "2026-08-01T00:00:00.000Z"
 }
 ```
 
-The backend generates a unique-style access code and starts sessions as `not_started`. Session responses include candidate/template labels when Prisma relation data is available.
+The backend accepts either an existing `candidateId` or `candidateName` + `candidateEmail`. When name/email are provided, the backend creates/reuses an invite-only candidate record and generates a secure random password hash that is not used for login. The backend generates a unique-style access code and starts sessions as `not_started`. Session responses include candidate/template labels when Prisma relation data is available.
 
 ## Responses
 
@@ -132,8 +140,12 @@ The backend generates a unique-style access code and starts sessions as `not_sta
 | --- | --- | --- |
 | POST | `/responses` | Submit or autosave candidate response. |
 | GET | `/responses/session/:sessionId` | Get responses for one session. |
+| POST | `/responses/access/:accessCode` | Candidate autosaves/submits by invite/access code without login. |
+| GET | `/responses/access/:accessCode` | Candidate reloads saved responses while the assigned session is active. |
 
-Response routes require a Bearer JWT. `POST /api/responses` accepts candidate autosaves and reviewer/admin corrections. Admins can query broadly; organization/interviewer users are scoped through the response session's `organizationId`; candidates are scoped through the response session's `candidateId`.
+Platform response routes require a Bearer JWT and are for admin/interviewer review/corrections. Admins can query broadly; organization/interviewer users are scoped through the response session's `organizationId`.
+
+Candidate response writes use `/api/responses/access/:accessCode`. The access code must match an active assigned session and stops working after completion/expiry.
 
 `POST /api/responses` request:
 
@@ -180,9 +192,13 @@ AI routes call the internal `AiService` boundary. DeepSeek provider failures do 
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| POST | `/code/run` | Run candidate code in sandbox. |
-| POST | `/code/submit` | Save final candidate code. |
+| GET | `/code/questions` | List coding questions (public sample only; hidden grading test cases are never returned, `testCaseCount` indicates how many exist). |
+| POST | `/code/run` | Run candidate code in the sandbox against optional stdin. Rate limited per client IP. |
+| POST | `/code/grade` | Grade code against a question's hidden test cases without persisting. Rate limited per client IP. |
+| POST | `/code/submit` | Grade and persist a candidate submission for a session. Rejected (409) if the session is completed, (410) if expired. Rate limited per client IP. |
 | GET | `/code/submissions/:sessionId` | List code submissions for one session. |
+
+Code execution requests cap `sourceCode` at 64,000 and `stdin` at 16,000 characters. A sandbox outage returns 503; a database outage returns 503.
 
 ## Reports
 

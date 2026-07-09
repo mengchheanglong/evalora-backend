@@ -1,40 +1,39 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Param, Post, UseGuards } from "@nestjs/common";
+import { CodeService } from "./code.service";
+import { GradeCodeDto } from "./dto/grade-code.dto";
+import { RunCodeDto } from "./dto/run-code.dto";
+import { SubmitCodeDto } from "./dto/submit-code.dto";
+import { CodeRateLimitGuard } from "./guards/rate-limit.guard";
 
 @Controller("code")
 export class CodeController {
+  constructor(@Inject(CodeService) private readonly codeService: CodeService) {}
+
   @Post("run")
-  run(@Body() body: { language?: string; sourceCode?: string }) {
-    return {
-      language: body.language ?? "javascript",
-      status: "sandbox_not_configured",
-      stdout: "Code execution sandbox is not connected yet.",
-      stderr: "",
-      timeoutMs: 5000,
-      safetyNotice: "Do not execute untrusted candidate code directly in the API process.",
-    };
+  @UseGuards(CodeRateLimitGuard)
+  run(@Body() body: RunCodeDto) {
+    return this.codeService.runCode(body);
+  }
+
+  @Post("grade")
+  @UseGuards(CodeRateLimitGuard)
+  grade(@Body() body: GradeCodeDto) {
+    return this.codeService.gradeCode(body);
   }
 
   @Post("submit")
-  submit(@Body() body: { sessionId?: string; language?: string; sourceCode?: string }) {
-    return {
-      id: "code-submission-demo",
-      sessionId: body.sessionId ?? "demo-session",
-      language: body.language ?? "javascript",
-      saved: true,
-      submittedAt: new Date().toISOString(),
-    };
+  @UseGuards(CodeRateLimitGuard)
+  submit(@Body() body: SubmitCodeDto) {
+    return this.codeService.submitCode(body);
+  }
+
+  @Get("questions")
+  questions() {
+    return this.codeService.getQuestions();
   }
 
   @Get("submissions/:sessionId")
   submissions(@Param("sessionId") sessionId: string) {
-    return [
-      {
-        id: "code-submission-demo",
-        sessionId,
-        language: "javascript",
-        executionStatus: "not_run",
-        createdAt: new Date().toISOString(),
-      },
-    ];
+    return this.codeService.listSubmissions(sessionId);
   }
 }

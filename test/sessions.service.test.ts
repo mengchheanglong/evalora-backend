@@ -21,6 +21,27 @@ const sessionRow = {
   updatedAt: now,
 };
 
+const interviewerAccess = { userId: "interviewer-1", role: "interviewer" as const, organizationId: "org-1" };
+
+const candidateModuleRow = {
+  id: "module-1",
+  moduleType: "DEBUGGING",
+  title: "Debugging",
+  description: "Find root causes",
+  weight: 1,
+  orderIndex: 1,
+  settings: null,
+  questions: [
+    {
+      id: "question-1",
+      questionText: "What would you check first?",
+      questionType: "SHORT_ANSWER",
+      options: null,
+      rubric: { criteria: ["evidence"] },
+    },
+  ],
+};
+
 test("createSession generates an access code and maps candidate/template assignment to Prisma", async () => {
   const calls: unknown[] = [];
   const service = new SessionsService(
@@ -63,6 +84,103 @@ test("createSession generates an access code and maps candidate/template assignm
       template: { select: { title: true } },
     },
   });
+});
+
+test("createSession can create an invite-only candidate record from name and email", async () => {
+  const calls: Array<{ method: string; args: any }> = [];
+  const service = new SessionsService(
+    {
+      user: {
+        findUnique: async (args: any) => {
+          calls.push({ method: "user.findUnique", args });
+          return null;
+        },
+        create: async (args: any) => {
+          calls.push({ method: "user.create", args });
+          return { id: "candidate-1", name: "Demo Candidate", email: "candidate@example.com", role: "CANDIDATE" };
+        },
+      },
+      interviewSession: {
+        create: async (args: any) => {
+          calls.push({ method: "session.create", args });
+          return sessionRow;
+        },
+      },
+    } as any,
+    { generateAccessCode: () => "EV-123456", now: () => now },
+  );
+
+  const result = await service.createSession(
+    {
+      candidateName: "Demo Candidate",
+      candidateEmail: "candidate@example.com",
+      templateId: "template-1",
+      expiresAt,
+    },
+    interviewerAccess,
+  );
+
+  assert.equal(result.candidateId, "candidate-1");
+  assert.equal(calls[0].method, "user.findUnique");
+  assert.deepEqual(calls[0].args, {
+    where: { email: "candidate@example.com" },
+    select: { id: true, role: true },
+  });
+  assert.equal(calls[1].method, "user.create");
+  assert.equal(calls[1].args.data.name, "Demo Candidate");
+  assert.equal(calls[1].args.data.email, "candidate@example.com");
+  assert.equal(calls[1].args.data.role, "CANDIDATE");
+  assert.equal(calls[1].args.data.organizationId, "org-1");
+  assert.match(calls[1].args.data.passwordHash, /^\$2/);
+  assert.equal(calls[2].method, "session.create");
+  assert.equal(calls[2].args.data.candidateId, "candidate-1");
+  assert.equal(calls[2].args.data.organizationId, "org-1");
+});
+
+test("candidate invite access code opens, starts, and completes only the assigned assessment", async () => {
+  const calls: Array<{ method: string; args: any }> = [];
+  const service = new SessionsService(
+    {
+      interviewSession: {
+        findFirst: async (args: any) => {
+          calls.push({ method: "findFirst", args });
+          return { ...sessionRow, template: { title: "Backend Engineer Assessment", modules: [candidateModuleRow] } };
+        },
+        update: async (args: any) => {
+          calls.push({ method: "update", args });
+          return {
+            ...sessionRow,
+            status: args.data.status,
+            startedAt: args.data.startedAt ?? null,
+            completedAt: args.data.completedAt ?? null,
+            template: { title: "Backend Engineer Assessment", modules: [candidateModuleRow] },
+          };
+        },
+      },
+    } as any,
+    { generateAccessCode: () => "EV-123456", now: () => now },
+  );
+
+  const opened = await service.getSessionByAccessCode(" ev-123456 ");
+  const started = await service.startSessionByAccessCode("EV-123456");
+  const completed = await service.completeSessionByAccessCode("EV-123456");
+
+  assert.equal(opened.id, "session-1");
+  assert.equal(opened.template.modules[0].questions?.[0].questionText, "What would you check first?");
+  assert.equal(started.status, "in_progress");
+  assert.equal(completed.status, "completed");
+  assert.deepEqual(calls.map((call) => call.method), ["findFirst", "findFirst", "update", "findFirst", "update"]);
+  assert.deepEqual(calls[0].args.where, { accessCode: "EV-123456" });
+});
+
+test("candidate invite access code is closed after completion", async () => {
+  const service = new SessionsService({
+    interviewSession: {
+      findFirst: async () => ({ ...sessionRow, status: "COMPLETED" }),
+    },
+  } as any);
+
+  await assert.rejects(() => service.getSessionByAccessCode("EV-123456"), /no longer available/i);
 });
 
 test("startSession and completeSession write status timestamps through Prisma", async () => {

@@ -13,6 +13,13 @@ const responseRow = {
   createdAt,
 };
 
+const accessSessionRow = {
+  id: "session-1",
+  accessCode: "EV-123456",
+  status: "IN_PROGRESS",
+  expiresAt: new Date("2026-08-01T00:00:00.000Z"),
+};
+
 test("saveResponse creates a new answer when no existing session/question response exists", async () => {
   const calls: unknown[] = [];
   const service = new ResponsesService({
@@ -120,4 +127,62 @@ test("listResponsesBySession maps saved responses to API DTOs", async () => {
   assert.equal(responses[0].questionId, "question-1");
   assert.equal(responses[1].questionId, undefined);
   assert.equal(responses[1].responseJson, undefined);
+});
+
+test("saveResponseByAccessCode autosaves by invite code without candidate login", async () => {
+  const calls: Array<{ method: string; args: any }> = [];
+  const service = new ResponsesService({
+    interviewSession: {
+      findFirst: async (args: any) => {
+        calls.push({ method: "session.findFirst", args });
+        return accessSessionRow;
+      },
+    },
+    response: {
+      findFirst: async (args: any) => {
+        calls.push({ method: "response.findFirst", args });
+        return null;
+      },
+      create: async (args: any) => {
+        calls.push({ method: "response.create", args });
+        return { ...responseRow, responseText: "Candidate answer", responseJson: null };
+      },
+    },
+  } as any);
+
+  const result = await service.saveResponseByAccessCode(" ev-123456 ", {
+    questionId: "question-1",
+    responseText: "Candidate answer",
+  });
+
+  assert.equal(result.sessionId, "session-1");
+  assert.deepEqual(calls, [
+    { method: "session.findFirst", args: { where: { accessCode: "EV-123456" } } },
+    { method: "response.findFirst", args: { where: { sessionId: "session-1", questionId: "question-1" }, orderBy: { createdAt: "desc" } } },
+    {
+      method: "response.create",
+      args: {
+        data: {
+          sessionId: "session-1",
+          questionId: "question-1",
+          responseText: "Candidate answer",
+          responseJson: undefined,
+        },
+      },
+    },
+  ]);
+});
+
+test("candidate invite access cannot save after session completion", async () => {
+  const service = new ResponsesService({
+    interviewSession: {
+      findFirst: async () => ({ ...accessSessionRow, status: "COMPLETED" }),
+    },
+    response: {},
+  } as any);
+
+  await assert.rejects(
+    () => service.saveResponseByAccessCode("EV-123456", { questionId: "question-1", responseText: "Late answer" }),
+    /no longer available/i,
+  );
 });

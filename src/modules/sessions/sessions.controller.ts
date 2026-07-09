@@ -32,7 +32,7 @@ export class SessionsController {
   }
 
   @Get()
-  @Roles("admin", "organization", "interviewer", "candidate")
+  @Roles("admin", "organization", "interviewer")
   findAll(
     @Req() request: AuthenticatedRequest,
     @Query("organizationId") organizationId?: string,
@@ -45,7 +45,7 @@ export class SessionsController {
   }
 
   @Get(":id")
-  @Roles("admin", "organization", "interviewer", "candidate")
+  @Roles("admin", "organization", "interviewer")
   async findOne(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
     const session = await this.sessionsService.getSession(id, toAccessContext(request.user));
     if (!session) throw new NotFoundException("Session not found.");
@@ -53,14 +53,34 @@ export class SessionsController {
   }
 
   @Put(":id/start")
-  @Roles("admin", "organization", "interviewer", "candidate")
+  @Roles("admin", "organization", "interviewer")
   start(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
     return this.sessionsService.startSession(id, toAccessContext(request.user));
   }
 
   @Put(":id/complete")
-  @Roles("admin", "organization", "interviewer", "candidate")
+  @Roles("admin", "organization", "interviewer")
   complete(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
     return this.sessionsService.completeSession(id, toAccessContext(request.user));
+  }
+}
+
+@Controller("sessions/access")
+export class CandidateSessionAccessController {
+  constructor(private readonly sessionsService: SessionsService) {}
+
+  @Get(":accessCode")
+  findByAccessCode(@Param("accessCode") accessCode: string) {
+    return this.sessionsService.getSessionByAccessCode(accessCode);
+  }
+
+  @Put(":accessCode/start")
+  startByAccessCode(@Param("accessCode") accessCode: string) {
+    return this.sessionsService.startSessionByAccessCode(accessCode);
+  }
+
+  @Put(":accessCode/complete")
+  completeByAccessCode(@Param("accessCode") accessCode: string) {
+    return this.sessionsService.completeSessionByAccessCode(accessCode);
   }
 }

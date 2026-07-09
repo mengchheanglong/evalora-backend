@@ -1,0 +1,1058 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Evalora Coding Assessment Test</title>
+  <style>
+    :root {
+      --bg: #f8f9ff;
+      --surface: #ffffff;
+      --surface-soft: #eff4ff;
+      --surface-strong: #dce9ff;
+      --text: #0b1c30;
+      --muted: #464554;
+      --border: #c7c4d7;
+      --primary: #4648d4;
+      --primary-strong: #6063ee;
+      --success: #0f9d58;
+      --danger: #ba1a1a;
+      --shadow: 0 10px 32px rgba(15, 23, 42, 0.08);
+      --radius-lg: 18px;
+      --radius-md: 12px;
+      --radius-sm: 8px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, Arial, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(96, 99, 238, 0.12), transparent 28%),
+        radial-gradient(circle at top right, rgba(107, 56, 212, 0.10), transparent 24%),
+        var(--bg);
+    }
+
+    .page {
+      max-width: 1320px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .shell {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 24px;
+      min-height: calc(100vh - 48px);
+    }
+
+    .panel {
+      background: rgba(255, 255, 255, 0.88);
+      backdrop-filter: blur(10px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .brand {
+      padding: 24px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(135deg, rgba(96, 99, 238, 0.10), rgba(139, 92, 246, 0.06));
+    }
+
+    .brand h1 {
+      margin: 0 0 8px;
+      font-size: 20px;
+      letter-spacing: -0.02em;
+    }
+
+    .brand p, .muted { color: var(--muted); }
+
+    .nav {
+      display: grid;
+      gap: 10px;
+      padding: 18px;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px;
+      border-radius: var(--radius-md);
+      border: 1px solid transparent;
+      background: var(--surface-soft);
+    }
+
+    .nav-item.active {
+      border-color: rgba(70, 72, 212, 0.25);
+      background: linear-gradient(135deg, rgba(70, 72, 212, 0.12), rgba(96, 99, 238, 0.08));
+    }
+
+    .content {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      min-width: 0;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.82);
+    }
+
+    .status-row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      font-size: 13px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .chip.primary {
+      color: var(--primary);
+      border-color: rgba(70, 72, 212, 0.22);
+      background: rgba(70, 72, 212, 0.08);
+    }
+
+    .chip.success {
+      color: var(--success);
+      border-color: rgba(15, 157, 88, 0.22);
+      background: rgba(15, 157, 88, 0.08);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      min-height: 0;
+    }
+
+    .section {
+      padding: 24px;
+      min-width: 0;
+    }
+
+    .section + .section {
+      border-left: 1px solid var(--border);
+    }
+
+    h2 {
+      margin: 0 0 10px;
+      font-size: 30px;
+      letter-spacing: -0.02em;
+    }
+
+    h3 {
+      margin: 28px 0 12px;
+      font-size: 18px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 18px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+    }
+
+    .callout {
+      border-left: 3px solid #8b5cf6;
+      background: rgba(139, 92, 246, 0.06);
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .codebox {
+      background: #1e1e1e;
+      color: #f3f4f6;
+      border-radius: var(--radius-md);
+      padding: 18px;
+      overflow: auto;
+      font-family: Consolas, Monaco, monospace;
+      font-size: 14px;
+      line-height: 1.6;
+      min-height: 320px;
+      white-space: pre-wrap;
+    }
+
+    #monacoEditor {
+      width: 100%;
+      height: 520px;
+      border-radius: var(--radius-md);
+      border: 1px solid #404040;
+      overflow: hidden;
+    }
+
+    textarea.codebox {
+      width: 100%;
+      resize: vertical;
+      border: 1px solid #404040;
+      outline: none;
+      font: inherit;
+      font-family: Consolas, Monaco, monospace;
+    }
+
+    .editor-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .button-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 12px 16px;
+      font: inherit;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+    }
+
+    button:hover { transform: translateY(-1px); }
+    .primary-btn {
+      color: white;
+      background: linear-gradient(135deg, var(--primary), var(--primary-strong));
+      box-shadow: 0 10px 24px rgba(70, 72, 212, 0.22);
+    }
+    .secondary-btn {
+      background: var(--surface-soft);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .metric {
+      background: linear-gradient(180deg, var(--surface), var(--surface-soft));
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 20px;
+      margin-bottom: 4px;
+    }
+
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding: 18px 24px 24px;
+      border-top: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.78);
+    }
+
+    .progress {
+      display: grid;
+      gap: 8px;
+      min-width: 260px;
+      width: 40%;
+    }
+
+    .bar {
+      height: 8px;
+      border-radius: 999px;
+      background: #e5eeff;
+      overflow: hidden;
+    }
+
+    .bar > span {
+      display: block;
+      width: 72%;
+      height: 100%;
+      background: linear-gradient(90deg, var(--primary), #8b5cf6);
+      border-radius: inherit;
+    }
+
+    .small {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .connection {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .connection-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .connection-row input {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      font: inherit;
+      background: var(--surface);
+      color: var(--text);
+      outline: none;
+    }
+
+    .connection-row input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 4px rgba(70, 72, 212, 0.12);
+    }
+
+    .log {
+      margin-top: 14px;
+      padding: 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: Consolas, Monaco, monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      min-height: 110px;
+      max-height: 220px;
+      overflow: auto;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #94a3b8;
+      box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.12);
+    }
+
+    .status-dot.connected {
+      background: var(--success);
+      box-shadow: 0 0 0 4px rgba(15, 157, 88, 0.14);
+    }
+
+    .status-dot.error {
+      background: var(--danger);
+      box-shadow: 0 0 0 4px rgba(186, 26, 26, 0.14);
+    }
+
+    .status-dot.warning {
+      background: #d97706;
+      box-shadow: 0 0 0 4px rgba(217, 119, 6, 0.14);
+    }
+
+    .submission-tests {
+      margin-top: 14px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .terminal-shell {
+      border-radius: 16px;
+      border: 1px solid #1f2937;
+      background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      overflow: hidden;
+    }
+
+    .terminal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+      color: #cbd5e1;
+      font-size: 13px;
+    }
+
+    .terminal-dots {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .terminal-dots span {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #475569;
+    }
+
+    .terminal-dots span:first-child { background: #ef4444; }
+    .terminal-dots span:nth-child(2) { background: #f59e0b; }
+    .terminal-dots span:nth-child(3) { background: #22c55e; }
+
+    .terminal-body {
+      padding: 16px;
+      color: #e2e8f0;
+      font-family: Consolas, Monaco, monospace;
+      white-space: pre-wrap;
+      min-height: 180px;
+      max-height: 340px;
+      overflow: auto;
+      line-height: 1.6;
+    }
+
+    .terminal-body.error {
+      color: #fca5a5;
+    }
+
+    .terminal-body.success {
+      color: #bbf7d0;
+    }
+
+    .test-row {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 12px;
+      align-items: start;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .test-row.pass {
+      border-color: rgba(15, 157, 88, 0.24);
+      background: rgba(15, 157, 88, 0.05);
+    }
+
+    .test-row.fail {
+      border-color: rgba(186, 26, 26, 0.24);
+      background: rgba(186, 26, 26, 0.05);
+    }
+
+    .test-row pre {
+      margin: 0;
+      white-space: pre-wrap;
+      font-family: Consolas, Monaco, monospace;
+      font-size: 13px;
+    }
+
+    .test-row strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .expired-overlay {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(15, 23, 42, 0.58);
+      backdrop-filter: blur(8px);
+      z-index: 1000;
+      padding: 24px;
+    }
+
+    .expired-overlay.visible {
+      display: flex;
+    }
+
+    .expired-card {
+      max-width: 420px;
+      width: 100%;
+      background: white;
+      border-radius: 20px;
+      padding: 28px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+      text-align: center;
+    }
+
+    .expired-card h2 {
+      margin-top: 0;
+    }
+
+    @media (max-width: 1100px) {
+      .shell, .layout { grid-template-columns: 1fr; }
+      .section + .section { border-left: 0; border-top: 1px solid var(--border); }
+      .progress { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="shell">
+      <aside class="panel sidebar">
+        <div class="brand">
+          <h1>Evalora Coding Assessment</h1>
+          <p>Standalone HTML test page for the current Figma task.</p>
+        </div>
+        <div class="nav">
+          <div class="nav-item">Assessment overview <span>01</span></div>
+          <div class="nav-item active">Coding challenge <span>02</span></div>
+          <div class="nav-item">Submission result <span>03</span></div>
+          <div class="nav-item">Deployment check <span>04</span></div>
+        </div>
+      </aside>
+
+      <section class="panel content">
+        <div class="topbar">
+          <div>
+            <div class="small">Current page: docs/figma/coding-assesment/code.html</div>
+            <h2 style="margin:6px 0 0; font-size:24px;">Coding Assessment Preview</h2>
+          </div>
+          <div class="status-row">
+            <span class="chip primary">Module 2 of 4</span>
+            <span class="chip success">Judge0 ready</span>
+            <span id="timerChip" class="chip">45:00 remaining</span>
+          </div>
+        </div>
+
+        <div class="layout">
+          <article class="section">
+            <div class="chip primary" style="margin-bottom:14px;">Easy</div>
+            <h2>Two Sum</h2>
+            <p class="muted" style="line-height:1.7; max-width: 64ch;">
+              Given an array of integers and a target, return the two indices whose values add up to the target.
+              This test page is designed to verify the coding assessment layout and response flow.
+            </p>
+
+            <h3>Problem Details</h3>
+            <div class="card callout">
+              <strong>What this page covers</strong>
+              <p class="muted" style="margin:8px 0 0; line-height:1.6;">
+                Run code, submit solution, show test case feedback, and preview the result area the backend will fill.
+              </p>
+            </div>
+
+          </article>
+
+          <article class="section">
+            <div class="editor-toolbar">
+              <div>
+                <strong>Editor</strong>
+                <div class="small">javascript</div>
+              </div>
+              <div class="button-row">
+                <button id="formatButton" class="secondary-btn" type="button">Format</button>
+                <button id="resetButton" class="secondary-btn" type="button">Reset</button>
+                <button id="runButton" class="primary-btn" type="button">Run Code</button>
+              </div>
+            </div>
+
+            <div id="monacoEditor" aria-label="Code editor"></div>
+
+            <h3>Terminal</h3>
+            <div class="terminal-shell">
+              <div class="terminal-header">
+                <div class="terminal-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+                <div id="resultStatus">Ready</div>
+                <div class="small" style="color:#94a3b8;">backend output</div>
+              </div>
+              <div id="resultOutput" class="terminal-body">Run or submit code to see the backend response here.</div>
+            </div>
+            <div id="submissionTests" class="submission-tests" hidden></div>
+          </article>
+        </div>
+
+        <div class="footer">
+          <div class="progress">
+            <div class="small">Submission progress</div>
+            <div class="bar"><span id="progressBar"></span></div>
+          </div>
+          <div class="button-row">
+            <button id="saveDraftButton" class="secondary-btn" type="button">Save Draft</button>
+            <button id="submitButton" class="primary-btn" type="button">Submit Code</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div id="expiredOverlay" class="expired-overlay" aria-live="polite" aria-hidden="true">
+    <div class="expired-card">
+      <h2>Challenge ended</h2>
+      <p class="muted" style="line-height:1.7;">
+        The 45-minute coding challenge has expired. You can no longer run or submit code on this page.
+      </p>
+      <button id="expiredDismissButton" class="primary-btn" type="button">Acknowledge</button>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.49.0/min/vs/loader.min.js"></script>
+
+  <script>
+    const challengeDurationMs = 45 * 60 * 1000;
+    const challengeStartKey = "evalora-code-challenge-started-at";
+    const pistonBaseUrl = "https://emkc.org/api/v2/piston";
+    const monacoEditorElement = document.getElementById("monacoEditor");
+    const sourceCode = {
+      value: "function twoSum(nums, target) {\n  const seen = new Map();\n\n  for (let index = 0; index < nums.length; index += 1) {\n    const value = nums[index];\n    const complement = target - value;\n\n    if (seen.has(complement)) {\n      return [seen.get(complement), index];\n    }\n\n    seen.set(value, index);\n  }\n\n  return [];\n}"
+    };
+    const resultStatus = document.getElementById("resultStatus");
+    const resultOutput = document.getElementById("resultOutput");
+    const submissionTests = document.getElementById("submissionTests");
+    const progressBar = document.getElementById("progressBar");
+    const timerChip = document.getElementById("timerChip");
+    const runButton = document.getElementById("runButton");
+    const submitButton = document.getElementById("submitButton");
+    const saveDraftButton = document.getElementById("saveDraftButton");
+    const formatButton = document.getElementById("formatButton");
+    const resetButton = document.getElementById("resetButton");
+    const expiredOverlay = document.getElementById("expiredOverlay");
+    const expiredDismissButton = document.getElementById("expiredDismissButton");
+
+    const initialSourceCode = sourceCode.value;
+    let monacoEditor = null;
+    let challengeTimer = null;
+    let challengeEnded = false;
+    let pistonRuntimeVersion = null;
+
+    const sharedPayload = () => ({
+      sessionId: "demo-session",
+      questionId: "sum-two-numbers",
+      language: "javascript",
+      sourceCode: sourceCode.value,
+    });
+
+    const mockRunResult = () => ({
+      stdout: "[0, 1]\n",
+      stderr: "",
+      compileOutput: "",
+      status: "Accepted",
+      executionTime: 0.05,
+    });
+
+    const mockSubmitResult = () => ({
+      submissionId: "submission-demo",
+      score: 100,
+      totalTestCases: 2,
+      passedTestCases: 2,
+      testResults: [
+        {
+          stdin: "2 7",
+          expectedOutput: "9\n",
+          actualOutput: "9\n",
+          passed: true,
+          status: "Accepted",
+        },
+        {
+          stdin: "3 2",
+          expectedOutput: "5\n",
+          actualOutput: "5\n",
+          passed: true,
+          status: "Accepted",
+        },
+      ],
+      ...mockRunResult(),
+    });
+
+    const mockFailSubmitResult = () => ({
+      submissionId: "submission-demo",
+      score: 50,
+      totalTestCases: 2,
+      passedTestCases: 1,
+      testResults: [
+        {
+          stdin: "2 7",
+          expectedOutput: "9\n",
+          actualOutput: "9\n",
+          passed: true,
+          status: "Accepted",
+        },
+        {
+          stdin: "3 2",
+          expectedOutput: "5\n",
+          actualOutput: "4\n",
+          passed: false,
+          status: "Wrong Answer",
+        },
+      ],
+      stdout: "9\n",
+      stderr: "",
+      compileOutput: "",
+      status: "Wrong Answer",
+      executionTime: 0.05,
+    });
+
+    const API_BASE_URL = "http://localhost:4000";
+
+    function getApiBaseUrl() {
+      return (window.EVALORA_API_BASE_URL || API_BASE_URL).replace(/\/$/, "");
+    }
+
+    // Option B: the editor template defines twoSum() but never calls it.
+    // Append a small driver so "Run" produces visible output. If the code
+    // doesn't define twoSum (e.g. a plain console.log), nothing is added.
+    const runDriver = [
+      "",
+      ";(function () {",
+      "  if (typeof twoSum === 'function') {",
+      "    console.log('twoSum([2, 7, 11, 15], 9) =>', JSON.stringify(twoSum([2, 7, 11, 15], 9)));",
+      "  }",
+      "})();",
+      "",
+    ].join("\n");
+
+    function buildRunnableSource(code) {
+      return `${code}\n${runDriver}`;
+    }
+
+    async function callApi(path, body) {
+      const apiBaseUrl = getApiBaseUrl();
+
+      if (!apiBaseUrl) {
+        throw new Error("API base URL not configured");
+      }
+
+      const response = await fetch(`${apiBaseUrl}${path}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+
+      return response.json();
+    }
+
+    async function getPistonRuntimeVersion(language) {
+      if (pistonRuntimeVersion) {
+        return pistonRuntimeVersion;
+      }
+
+      const response = await fetch(`${pistonBaseUrl}/runtimes`, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Piston runtimes request failed: ${response.status}`);
+      }
+
+      const runtimes = await response.json();
+      const runtime = Array.isArray(runtimes)
+        ? runtimes.find((entry) => entry.language === language || (Array.isArray(entry.aliases) && entry.aliases.includes("js")))
+        : null;
+
+      if (!runtime?.version) {
+        throw new Error(`No Piston runtime found for ${language}`);
+      }
+
+      pistonRuntimeVersion = runtime.version;
+      return pistonRuntimeVersion;
+    }
+
+    async function runWithPiston(code, stdin = "") {
+      const version = await getPistonRuntimeVersion("javascript");
+      const response = await fetch(`${pistonBaseUrl}/execute`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          language: "javascript",
+          version,
+          files: [
+            {
+              name: "main.js",
+              content: code,
+            },
+          ],
+          stdin,
+          args: [],
+          compile_timeout: 10000,
+          run_timeout: 3000,
+          compile_memory_limit: -1,
+          run_memory_limit: -1,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Piston execute failed: ${response.status}`);
+      }
+
+      return response.json();
+    }
+
+    function setControlsDisabled(disabled) {
+      [runButton, submitButton, saveDraftButton, formatButton, resetButton].forEach((element) => {
+        element.disabled = disabled;
+      });
+
+      if (monacoEditor) {
+        monacoEditor.updateOptions({ readOnly: disabled });
+      }
+    }
+
+    function updateTimerDisplay(remainingMs) {
+      const totalSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
+      const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
+      const seconds = String(totalSeconds % 60).padStart(2, "0");
+      timerChip.textContent = `${minutes}:${seconds} remaining`;
+      if (totalSeconds <= 60) {
+        timerChip.className = "chip warning";
+      } else if (totalSeconds <= 300) {
+        timerChip.className = "chip primary";
+      } else {
+        timerChip.className = "chip";
+      }
+    }
+
+    function endChallenge() {
+      if (challengeEnded) {
+        return;
+      }
+
+      challengeEnded = true;
+      if (challengeTimer) {
+        window.clearInterval(challengeTimer);
+      }
+
+      updateTimerDisplay(0);
+      setControlsDisabled(true);
+      expiredOverlay.classList.add("visible");
+      expiredOverlay.setAttribute("aria-hidden", "false");
+    }
+
+    function startChallengeTimer() {
+      const existingStart = Number(window.localStorage.getItem(challengeStartKey));
+      const hasLiveSession =
+        Number.isFinite(existingStart) &&
+        existingStart > 0 &&
+        Date.now() - existingStart < challengeDurationMs;
+      const startTime = hasLiveSession ? existingStart : Date.now();
+
+      window.localStorage.setItem(challengeStartKey, String(startTime));
+
+      const tick = () => {
+        const elapsedMs = Date.now() - startTime;
+        const remainingMs = challengeDurationMs - elapsedMs;
+
+        if (remainingMs <= 0) {
+          endChallenge();
+          return;
+        }
+
+        updateTimerDisplay(remainingMs);
+      };
+
+      tick();
+      challengeTimer = window.setInterval(tick, 1000);
+    }
+
+    function renderResult(result) {
+      resultStatus.textContent = result.status;
+      resultOutput.className = `terminal-body ${result.status === "Accepted" ? "success" : "error"}`.trim();
+      resultOutput.textContent = result.stdout || result.output || result.stderr || result.compileOutput || "";
+      progressBar.style.width = `${Math.min(100, Math.max(0, result.score ?? 72))}%`;
+    }
+
+    function renderSubmissionTests(testResults) {
+      submissionTests.innerHTML = "";
+
+      if (!Array.isArray(testResults) || testResults.length === 0) {
+        submissionTests.hidden = true;
+        return;
+      }
+
+      submissionTests.hidden = false;
+
+      testResults.forEach((testResult, index) => {
+        const row = document.createElement("div");
+        row.className = `test-row ${testResult.passed ? "pass" : "fail"}`;
+
+        const statusChip = document.createElement("span");
+        statusChip.className = `chip ${testResult.passed ? "success" : ""}`.trim();
+        statusChip.textContent = testResult.passed ? "Pass" : "Fail";
+
+        const summary = document.createElement("div");
+        summary.innerHTML = `<strong>Test ${index + 1}</strong><div class="small">${testResult.status} • ${testResult.executionTime?.toFixed ? testResult.executionTime.toFixed(2) : testResult.executionTime || 0}s</div>`;
+
+        const details = document.createElement("div");
+        details.innerHTML = `
+          <pre><strong>Input</strong> ${testResult.stdin ?? ""}</pre>
+          <pre><strong>Expected</strong> ${testResult.expectedOutput ?? ""}</pre>
+          <pre><strong>Output</strong> ${testResult.actualOutput ?? ""}</pre>
+        `;
+
+        row.append(statusChip, summary, details);
+        submissionTests.appendChild(row);
+      });
+    }
+
+    document.getElementById("submitButton").addEventListener("click", async () => {
+      if (challengeEnded) {
+        return;
+      }
+
+      submitButton.disabled = true;
+      submitButton.textContent = "Submitting...";
+
+      try {
+        const result = await callApi("/api/code/submit", sharedPayload());
+        renderResult(result);
+        renderSubmissionTests(result.testResults);
+      } catch (error) {
+        renderResult({
+          stdout: "",
+          stderr: `Submit failed: ${error.message}`,
+          compileOutput: "",
+          status: "Submit Error",
+          score: 0,
+        });
+        submissionTests.hidden = true;
+        submissionTests.innerHTML = "";
+      } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = "Submit Code";
+      }
+    });
+
+    document.getElementById("saveDraftButton").addEventListener("click", () => {
+      window.localStorage.setItem("evalora-code-draft", sourceCode.value);
+      saveDraftButton.textContent = "Saved";
+      window.setTimeout(() => {
+        saveDraftButton.textContent = "Save Draft";
+      }, 1200);
+    });
+
+    runButton.addEventListener("click", async () => {
+      if (challengeEnded) {
+        return;
+      }
+
+      runButton.disabled = true;
+      runButton.textContent = "Running...";
+
+      try {
+        const result = await callApi("/api/code/run", {
+          language: "javascript",
+          sourceCode: buildRunnableSource(sourceCode.value),
+          stdin: "",
+        });
+
+        renderResult(result);
+      } catch (error) {
+        renderResult({
+          stdout: "",
+          stderr: `Run failed: ${error.message}`,
+          compileOutput: "",
+          status: "Run Error",
+          score: 0,
+        });
+      } finally {
+        runButton.disabled = false;
+        runButton.textContent = "Run Code";
+      }
+    });
+
+    formatButton.addEventListener("click", () => {
+      if (challengeEnded) {
+        return;
+      }
+
+      sourceCode.value = sourceCode.value
+        .replace(/\r\n/g, "\n")
+        .split("\n")
+        .map((line) => line.replace(/[\t ]+$/g, ""))
+        .join("\n")
+        .trimEnd() + "\n";
+
+      if (monacoEditor) {
+        monacoEditor.setValue(sourceCode.value);
+      }
+    });
+
+    resetButton.addEventListener("click", () => {
+      if (challengeEnded) {
+        return;
+      }
+
+      sourceCode.value = initialSourceCode;
+
+      if (monacoEditor) {
+        monacoEditor.setValue(initialSourceCode);
+      }
+    });
+
+    expiredDismissButton.addEventListener("click", () => {
+      expiredOverlay.classList.remove("visible");
+      expiredOverlay.setAttribute("aria-hidden", "true");
+    });
+
+    const savedDraft = window.localStorage.getItem("evalora-code-draft");
+    if (savedDraft) {
+      sourceCode.value = savedDraft;
+    }
+
+    window.require.config({ paths: { vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.49.0/min/vs" } });
+    window.require(["vs/editor/editor.main"], () => {
+      monacoEditor = window.monaco.editor.create(monacoEditorElement, {
+        value: sourceCode.value,
+        language: "javascript",
+        theme: "vs-dark",
+        fontSize: 14,
+        minimap: { enabled: false },
+        scrollBeyondLastLine: false,
+        automaticLayout: true,
+        readOnly: challengeEnded,
+      });
+
+      monacoEditor.onDidChangeModelContent(() => {
+        sourceCode.value = monacoEditor.getValue();
+      });
+
+      if (challengeEnded) {
+        monacoEditor.updateOptions({ readOnly: true });
+      }
+
+      if (savedDraft) {
+        monacoEditor.setValue(savedDraft);
+        sourceCode.value = savedDraft;
+      }
+    });
+
+    startChallengeTimer();
+
+    if (challengeEnded) {
+      setControlsDisabled(true);
+    }
+  </script>
+</body>
+</html>

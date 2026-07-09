@@ -46,7 +46,7 @@ export function requireOrganizationId(access: AccessContext): string {
 }
 
 export function assertCanWriteOrganizationResource(access: AccessContext | undefined): void {
-  if (!access || access.role === "admin" || access.role === "organization") return;
+  if (!access || access.role === "admin" || access.role === "organization" || access.role === "interviewer") return;
   throw new ForbiddenException("You do not have permission to modify this resource.");
 }
 

@@ -12,11 +12,20 @@ interface ResponseRow {
   updatedAt?: Date | null;
 }
 
+type PrismaSessionStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "EXPIRED";
+
+interface ResponseSessionAccessRow {
+  id: string;
+  accessCode: string;
+  status: PrismaSessionStatus;
+  expiresAt?: Date | null;
+}
+
 type ResponseFindFirstFn = (args: any) => Promise<ResponseRow | null>;
 type ResponseCreateFn = (args: any) => Promise<ResponseRow>;
 type ResponseUpdateFn = (args: any) => Promise<ResponseRow>;
 type ResponseFindManyFn = (args: any) => Promise<ResponseRow[]>;
-type SessionFindFirstFn = (args: any) => Promise<unknown | null>;
+type SessionFindFirstFn = (args: any) => Promise<ResponseSessionAccessRow | null>;
 
 interface ResponsePrismaClient {
   interviewSession?: {
@@ -60,6 +69,24 @@ export class ResponsesService {
     });
 
     return responses.map(toResponseDto);
+  }
+
+  async saveResponseByAccessCode(accessCode: string, input: Omit<SaveResponseInput, "sessionId">): Promise<CandidateResponseDto> {
+    const session = await this.findOpenSessionByAccessCode(accessCode);
+    return this.saveResponse({ ...input, sessionId: session.id });
+  }
+
+  async listResponsesByAccessCode(accessCode: string): Promise<CandidateResponseDto[]> {
+    const session = await this.findOpenSessionByAccessCode(accessCode);
+    return this.listResponsesBySession(session.id);
+  }
+
+  private async findOpenSessionByAccessCode(accessCode: string): Promise<ResponseSessionAccessRow> {
+    const findFirst = requireMethod(this.prisma.interviewSession?.findFirst, "interviewSession.findFirst");
+    const session = await findFirst({ where: { accessCode: normalizeAccessCode(accessCode) } });
+    if (!session) throw forbiddenResourceError("Session");
+    assertCandidateAccessOpen(session);
+    return session;
   }
 
   private async assertSessionAccess(sessionId: string, access?: AccessContext): Promise<void> {
@@ -108,6 +135,15 @@ function buildResponseOwnershipWhere(access?: AccessContext): Record<string, unk
   return Object.keys(sessionScope).length ? { session: sessionScope } : undefined;
 }
 
+function assertCandidateAccessOpen(session: ResponseSessionAccessRow): void {
+  if (session.status === "COMPLETED" || session.status === "EXPIRED") {
+    throw forbiddenResourceError("Session no longer available");
+  }
+  if (session.expiresAt && session.expiresAt.getTime() < Date.now()) {
+    throw forbiddenResourceError("Session no longer available");
+  }
+}
+
 function toResponseDto(response: ResponseRow): CandidateResponseDto {
   return {
     id: response.id,
@@ -122,6 +158,10 @@ function toResponseDto(response: ResponseRow): CandidateResponseDto {
 
 function toIso(value?: Date | null): string | undefined {
   return value ? value.toISOString() : undefined;
+}
+
+function normalizeAccessCode(accessCode: string): string {
+  return requireNonEmpty(accessCode, "Access code is required.").toUpperCase();
 }
 
 function requireNonEmpty(value: string | undefined, message: string): string {

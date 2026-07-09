@@ -107,7 +107,7 @@ export class AuthService {
     const name = requireNonEmpty(input.name, "Name is required.");
     const email = normalizeEmail(requireNonEmpty(input.email, "Email is required."));
     const password = requirePassword(input.password);
-    const role = input.role ?? "candidate";
+    const role = resolvePublicRegistrationRole(input.role);
 
     const existingUser = await this.users.findByEmail(email);
     if (existingUser) {
@@ -126,6 +126,9 @@ export class AuthService {
 
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
       throw new Error("Invalid email or password.");
+    }
+    if (user.role === "candidate") {
+      throw new Error("Candidates access assessments through an invitation link or access code.");
     }
 
     return this.toAuthResult(user);
@@ -164,6 +167,13 @@ function requirePassword(value: string | undefined): string {
   if (password.length < 8) throw new Error("Password must be at least 8 characters.");
   if (password.length > 128) throw new Error("Password must be at most 128 characters.");
   return password;
+}
+
+function resolvePublicRegistrationRole(role: UserRole | undefined): UserRole {
+  if (!role || role === "interviewer") return "interviewer";
+  if (role === "organization") return "interviewer";
+  if (role === "admin") throw new Error("Admin accounts are created privately by the Evalora team.");
+  throw new Error("Candidates access assessments through invitation links or access codes, not platform registration.");
 }
 
 function stripPasswordHash(user: AuthUserRecord): Omit<AuthUserRecord, "passwordHash"> {
