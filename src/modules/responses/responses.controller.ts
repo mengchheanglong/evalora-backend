@@ -9,7 +9,7 @@ export class ResponsesController {
   constructor(private readonly responsesService: ResponsesService) {}
 
   @Post()
-  @Roles("admin", "organization", "interviewer", "candidate")
+  @Roles("admin", "organization", "interviewer")
   async submit(@Body() body: SaveResponseInput, @Req() request: AuthenticatedRequest) {
     try {
       return await this.responsesService.saveResponse(body, toAccessContext(request.user));
@@ -19,8 +19,27 @@ export class ResponsesController {
   }
 
   @Get("session/:sessionId")
-  @Roles("admin", "organization", "interviewer", "candidate")
+  @Roles("admin", "organization", "interviewer")
   findBySession(@Param("sessionId") sessionId: string, @Req() request: AuthenticatedRequest) {
     return this.responsesService.listResponsesBySession(sessionId, toAccessContext(request.user));
+  }
+}
+
+@Controller("responses/access")
+export class CandidateResponsesAccessController {
+  constructor(private readonly responsesService: ResponsesService) {}
+
+  @Post(":accessCode")
+  async submitByAccessCode(@Param("accessCode") accessCode: string, @Body() body: SaveResponseInput) {
+    try {
+      return await this.responsesService.saveResponseByAccessCode(accessCode, body);
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : "Response save failed.");
+    }
+  }
+
+  @Get(":accessCode")
+  findByAccessCode(@Param("accessCode") accessCode: string) {
+    return this.responsesService.listResponsesByAccessCode(accessCode);
   }
 }

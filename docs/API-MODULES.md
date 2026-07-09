@@ -13,6 +13,8 @@ Implemented auth persistence slice:
 
 - Logic adapted from the Coorad backend auth flow: normalize email, hash password, verify password with bcrypt, sign JWT with role claims, and never return password hashes.
 - `src/modules/auth/auth.service.ts` exposes `register` and `login` over a repository boundary.
+- Public registration defaults to the interviewer role. It rejects public `admin` and `candidate` registration because admins are private/seeded and candidates use invite links/access codes.
+- `login` blocks candidate records so invite-only candidate rows cannot become platform accounts.
 - `PrismaAuthRepository` writes/reads `User` records through Prisma using Evalora's `passwordHash` and role enum fields.
 - `src/modules/auth/auth.guard.ts` parses `Authorization: Bearer JWT_TOKEN`, attaches the authenticated user to the request, and provides role-access checks.
 - `src/modules/auth/access-control.ts` derives reusable ownership scopes from authenticated `{ userId, role, organizationId }` context.
@@ -40,7 +42,7 @@ Implemented template persistence slice:
 - `GET /api/templates` and `GET /api/templates/:id` return nested module/question DTOs.
 - `src/modules/templates/prebuilt-templates.ts` re-exports researched starter banks from `src/modules/templates/prebuilt/`, where each role/module has its own file for maintainability.
 - `pnpm seed:prebuilt` upserts those prebuilt tests into Neon for the seeded organization scope.
-- Template routes require JWT auth; write routes are restricted to `admin` and `organization` roles.
+- Template routes require JWT auth; write routes allow `admin`, `organization`, and `interviewer` roles.
 - Ownership hardening: admins can query broadly, while organization/interviewer users are scoped to their JWT `organizationId`.
 
 Next template task:
@@ -56,19 +58,20 @@ Endpoints:
 - `GET /api/sessions/:id`
 - `PUT /api/sessions/:id/start`
 - `PUT /api/sessions/:id/complete`
+- `GET /api/sessions/access/:accessCode`
+- `PUT /api/sessions/access/:accessCode/start`
+- `PUT /api/sessions/access/:accessCode/complete`
 
 Implemented session persistence slice:
 
 - `src/modules/sessions/sessions.service.ts` creates `InterviewSession` records with generated access codes.
+- Session creation accepts either an existing `candidateId` or candidate name/email. Name/email creation stores an invite-only candidate user row with a random password hash, not a platform login.
 - Session DTOs include candidate/template labels from Prisma relations when available.
+- Candidate access-code endpoints return the assigned assessment template/modules/questions without a platform JWT.
 - `PUT /api/sessions/:id/start` writes `IN_PROGRESS` and `startedAt`.
 - `PUT /api/sessions/:id/complete` writes `COMPLETED` and `completedAt`.
-- Session routes require JWT auth; create routes are restricted to `admin`, `organization`, and `interviewer` roles.
-- Ownership hardening: organization/interviewer users are scoped to their JWT `organizationId`; candidates can only read/update assigned sessions.
-
-Next session task:
-
-- Add candidate access-code lookup/reconnect flow if the frontend needs link-based entry.
+- Platform session routes require JWT auth; create routes are restricted to `admin`, `organization`, and `interviewer` roles.
+- Ownership hardening: organization/interviewer users are scoped to their JWT `organizationId`; candidate invite access is scoped by active access code and closes after completion/expiry.
 
 ## Responses
 
@@ -76,15 +79,19 @@ Endpoints:
 
 - `POST /api/responses`
 - `GET /api/responses/session/:sessionId`
+- `POST /api/responses/access/:accessCode`
+- `GET /api/responses/access/:accessCode`
 
 Implemented response persistence/autosave slice:
 
 - `src/modules/responses/responses.service.ts` writes `Response` records through Prisma.
 - `POST /api/responses` creates a response when no existing `sessionId` + `questionId` answer exists.
 - `POST /api/responses` updates the existing `sessionId` + `questionId` answer for autosave.
+- `POST /api/responses/access/:accessCode` lets candidates autosave through the invite link without logging in.
+- `GET /api/responses/access/:accessCode` lets candidates reload saved answers only while the session remains active.
 - `GET /api/responses/session/:sessionId` returns responses ordered by creation time.
-- Response routes require JWT auth and allow `admin`, `organization`, `interviewer`, and `candidate` roles.
-- Ownership hardening: organization/interviewer users are scoped through the response session's `organizationId`; candidates are scoped through the response session's `candidateId` before autosave writes.
+- Platform response routes require JWT auth for admin/interviewer review/corrections.
+- Ownership hardening: organization/interviewer users are scoped through the response session's `organizationId`; candidate invite writes are scoped by active access code and blocked after completion/expiry.
 
 Next response task:
 

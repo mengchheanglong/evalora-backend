@@ -27,14 +27,14 @@ Health check: <http://localhost:4000/api/health>
 
 ## Current state
 
-This backend now includes Prisma-backed core APIs, JWT/RBAC auth, ownership scoping, report privacy, deterministic AI fallback logic, a DeepSeek V4 Flash AI service adapter, module-specific evaluation profiles, saved-response report generation, persisted report readback, and seeded researched prebuilt assessment banks for HR Generalist, Software Engineer, and Team Leader roles. The seeded banks hold 30 HR questions, 39 software-engineer questions, and 30 team-leader questions; the product should assign only a candidate-sized subset per assessment. Some frontend-driven flows and production integrations remain MVP follow-up work.
+This backend now includes Prisma-backed core APIs, JWT/RBAC auth, ownership scoping, report privacy, deterministic AI fallback logic, a DeepSeek V4 Flash AI service adapter, module-specific evaluation profiles, saved-response report generation, persisted report readback, candidate invite/access-code assessment entry, and seeded researched prebuilt assessment banks for HR Generalist, Software Engineer, and Team Leader roles. Public registration creates interviewer accounts; admin accounts are private/seeded; candidates complete one assigned assessment through invite/access-code routes and cannot log in as platform users after completion. The seeded banks hold 30 HR questions, 39 software-engineer questions, and 30 team-leader questions; the product should assign only a candidate-sized subset per assessment. Some frontend-driven flows and production integrations remain MVP follow-up work.
 
 ## Module map
 
-- `src/modules/auth/` — register, login, logout, current user.
+- `src/modules/auth/` — interviewer registration, admin/interviewer login, logout, current user.
 - `src/modules/templates/` — assessment template CRUD.
-- `src/modules/sessions/` — interview session creation/start/complete.
-- `src/modules/responses/` — response submission/autosave boundary.
+- `src/modules/sessions/` — interview session creation/start/complete plus candidate access-code entry.
+- `src/modules/responses/` — platform response review and candidate access-code submission/autosave boundary.
 - `src/modules/ai/` — AI question, follow-up, evaluation, report generation boundary.
 - `src/modules/code/` — code run/submit boundary for Judge0/sandbox.
 - `src/modules/reports/` — candidate report retrieval/generation/export boundary.

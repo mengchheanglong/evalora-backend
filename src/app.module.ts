@@ -10,9 +10,9 @@ import { AuthService, PrismaAuthRepository } from "./modules/auth/auth.service";
 import { CodeController } from "./modules/code/code.controller";
 import { ReportsController } from "./modules/reports/reports.controller";
 import { ReportsService } from "./modules/reports/reports.service";
-import { ResponsesController } from "./modules/responses/responses.controller";
+import { CandidateResponsesAccessController, ResponsesController } from "./modules/responses/responses.controller";
 import { ResponsesService } from "./modules/responses/responses.service";
-import { SessionsController } from "./modules/sessions/sessions.controller";
+import { CandidateSessionAccessController, SessionsController } from "./modules/sessions/sessions.controller";
 import { SessionsService } from "./modules/sessions/sessions.service";
 import { TemplatesController } from "./modules/templates/templates.controller";
 import { TemplatesService } from "./modules/templates/templates.service";
@@ -25,7 +25,9 @@ import { PrismaService } from "./prisma/prisma.service";
     AuthController,
     TemplatesController,
     SessionsController,
+    CandidateSessionAccessController,
     ResponsesController,
+    CandidateResponsesAccessController,
     AiController,
     CodeController,
     ReportsController,

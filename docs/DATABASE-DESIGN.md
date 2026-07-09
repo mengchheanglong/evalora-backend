@@ -6,7 +6,7 @@ Evalora uses PostgreSQL on Neon with Prisma.
 
 | Entity | Purpose |
 | --- | --- |
-| User | Account, email, password hash, role, optional organization. |
+| User | Platform account or invite-only candidate record, email, password hash, role, optional organization. |
 | Organization | Company/client workspace. |
 | AssessmentTemplate | Reusable assessment structure for a role/job. |
 | AssessmentModule | Ordered module inside a template. |
@@ -39,6 +39,8 @@ InterviewSession 1---N ReviewerNote
 ## Important modeling rules
 
 - Passwords are stored only as `passwordHash`.
+- Public login is for admin/interviewer platform accounts. Candidate `User` rows are invite-only participant records created from session candidate info and use random password hashes that are not used for login.
+- Candidate assessment access is controlled by `InterviewSession.accessCode`; access ends after completion/expiry while authorized admins/interviewers retain session data, responses, evaluations, and reports.
 - Use enums for roles, session status, module type, and question type.
 - Store AI evidence as JSON so reports can quote response-backed justification.
 - Store code execution results separately from final report for auditability.

@@ -116,6 +116,47 @@ test("createTemplate maps nested modules and questions to Prisma create input", 
   });
 });
 
+test("interviewer can create templates within their organization", async () => {
+  const calls: unknown[] = [];
+  const service = new TemplatesService({
+    assessmentTemplate: {
+      create: async (args: unknown) => {
+        calls.push(args);
+        return templateRow;
+      },
+    },
+  });
+
+  await service.createTemplate(
+    {
+      title: "Interviewer Assessment",
+      roleType: "Software Engineer",
+      createdById: "ignored-client-user",
+      organizationId: "ignored-client-org",
+    },
+    { userId: "interviewer-1", role: "interviewer", organizationId: "org-1" },
+  );
+
+  assert.deepEqual(calls[0], {
+    data: {
+      title: "Interviewer Assessment",
+      description: undefined,
+      roleType: "Software Engineer",
+      timeLimitMin: undefined,
+      scoringRules: undefined,
+      createdById: "interviewer-1",
+      organizationId: "org-1",
+      modules: { create: [] },
+    },
+    include: {
+      modules: {
+        include: { questions: true },
+        orderBy: { orderIndex: "asc" },
+      },
+    },
+  });
+});
+
 test("updateTemplate replaces nested modules so template edits stay in sync", async () => {
   const calls: unknown[] = [];
   const service = new TemplatesService({
