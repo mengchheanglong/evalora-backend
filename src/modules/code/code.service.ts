@@ -1,8 +1,16 @@
-import { BadRequestException, GoneException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { Prisma, PrismaClient } from "@prisma/client";
+import {
+  BadRequestException,
+  ConflictException,
+  GoneException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { CODE_QUESTION_INDEX, CODE_QUESTIONS } from "./constants/code.constants";
 import type { CodeQuestion, SessionSnapshot } from "./interfaces/code.interfaces";
 import { PistonService } from "./piston.service";
+import { PrismaService } from "./prisma.service";
 import type { GradeCodeDto } from "./dto/grade-code.dto";
 import type { RunCodeDto } from "./dto/run-code.dto";
 import type { SubmitCodeDto } from "./dto/submit-code.dto";
@@ -25,12 +33,13 @@ interface GradedRun {
   stdout: string;
   stderr: string;
   compileOutput: string;
+  executionTime: number;
 }
 
 @Injectable()
 export class CodeService {
   constructor(
-    @Inject(PrismaClient) private readonly prisma: PrismaClient,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(PistonService) private readonly pistonService: PistonService,
   ) {}
 
@@ -44,10 +53,15 @@ export class CodeService {
       language: question.language,
       sampleInput: question.sampleInput,
       sampleOutput: question.sampleOutput,
-      examples: question.testCases.map((testCase) => ({
-        input: testCase.stdin,
-        expectedOutput: testCase.expectedOutput,
-      })),
+      // Expose only the public sample. Hidden grading cases stay server-side so a
+      // candidate cannot read expected outputs and hardcode them to pass.
+      examples: [
+        {
+          input: question.sampleInput,
+          expectedOutput: question.sampleOutput,
+        },
+      ],
+      testCaseCount: question.testCases.length,
     }));
   }
 
@@ -83,6 +97,12 @@ export class CodeService {
     this.assertSupportedLanguage(dto.language);
 
     const session = await this.findSessionOrFail(dto.sessionId);
+
+    // A finished assessment must not accept further submissions.
+    if (session.status === "COMPLETED") {
+      throw new ConflictException("This session is already completed; no more submissions are accepted.");
+    }
+
     const question = this.findQuestionOrFail(dto.questionId);
     this.assertQuestionSupportsLanguage(question, dto.language);
 
@@ -98,7 +118,7 @@ export class CodeService {
         stderr: graded.stderr,
         compileOutput: graded.compileOutput,
         status: graded.status,
-        executionTime: graded.testResults[0]?.executionTime ?? 0,
+        executionTime: graded.executionTime,
         score: graded.score,
         testResults: {
           passedTestCases: graded.passedTestCases,
@@ -116,7 +136,7 @@ export class CodeService {
       stderr: graded.stderr,
       compileOutput: graded.compileOutput,
       status: graded.status,
-      executionTime: graded.testResults[0]?.executionTime ?? 0,
+      executionTime: graded.executionTime,
       score: graded.score,
       totalTestCases: graded.totalTestCases,
       passedTestCases: graded.passedTestCases,
@@ -140,6 +160,12 @@ export class CodeService {
   private async gradeAgainstTestCases(question: CodeQuestion, sourceCode: string): Promise<GradedRun> {
     const testResults: CodeTestCaseResult[] = [];
     let firstError: CodeExecutionStatus | null = null;
+    // Capture diagnostics from the first non-passing execution so a failing
+    // submission surfaces the actual compiler/runtime error instead of "".
+    let failureStdout: string | null = null;
+    let failureStderr = "";
+    let failureCompileOutput = "";
+    let maxExecutionTime = 0;
 
     for (const testCase of question.testCases) {
       const execution = await this.pistonService.executeCode(sourceCode, testCase.stdin);
@@ -153,9 +179,19 @@ export class CodeService {
           ? "Wrong Answer"
           : execution.status;
 
-      if (!passed && !firstError && status !== "Wrong Answer") {
-        firstError = status;
+      if (!passed) {
+        if (!firstError && status !== "Wrong Answer") {
+          firstError = status;
+        }
+
+        if (failureStdout === null) {
+          failureStdout = execution.stdout;
+          failureStderr = execution.stderr;
+          failureCompileOutput = execution.compileOutput;
+        }
       }
+
+      maxExecutionTime = Math.max(maxExecutionTime, execution.executionTime);
 
       testResults.push({
         stdin: testCase.stdin,
@@ -181,9 +217,12 @@ export class CodeService {
       score,
       passed,
       status: overallStatus,
-      stdout: first?.actualOutput ?? "",
-      stderr: "",
-      compileOutput: "",
+      // On success show the first passing output; on failure surface the failing
+      // run's stdout/stderr/compile output so the result is debuggable.
+      stdout: passed ? (first?.actualOutput ?? "") : (failureStdout ?? first?.actualOutput ?? ""),
+      stderr: failureStderr,
+      compileOutput: failureCompileOutput,
+      executionTime: maxExecutionTime,
     };
   }
 

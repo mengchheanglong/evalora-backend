@@ -129,7 +129,7 @@ export class PistonService {
       return "Runtime Error";
     }
 
-    return "Judge0 Unavailable";
+    return "Execution Error";
   }
 
   private getBaseUrl(): string {

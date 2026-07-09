@@ -10,7 +10,7 @@ export type CodeExecutionStatus =
   | "Compilation Error"
   | "Runtime Error"
   | "Time Limit Exceeded"
-  | "Judge0 Unavailable";
+  | "Execution Error";
 
 export interface CodeRunResult {
   stdout: string;
@@ -53,7 +53,10 @@ export interface CodeQuestionSummary {
   language: CodeLanguage;
   sampleInput: string;
   sampleOutput: string;
+  // Only the public sample is exposed. Hidden grading cases are never sent to the
+  // client so candidates cannot hardcode expected outputs.
   examples: CodeExample[];
+  testCaseCount: number;
 }
 
 export interface CodeGradeResult {

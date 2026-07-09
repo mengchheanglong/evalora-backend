@@ -1,21 +1,13 @@
 import { Module } from "@nestjs/common";
-import { PrismaClient } from "@prisma/client";
 import { CodeController } from "./code.controller";
 import { CodeService } from "./code.service";
-import { Judge0Service } from "./judge0.service";
+import { CodeRateLimitGuard } from "./guards/rate-limit.guard";
 import { PistonService } from "./piston.service";
+import { PrismaService } from "./prisma.service";
 
 @Module({
   controllers: [CodeController],
-  providers: [
-    Judge0Service,
-    PistonService,
-    CodeService,
-    {
-      provide: PrismaClient,
-      useFactory: () => new PrismaClient(),
-    },
-  ],
-  exports: [CodeService, Judge0Service],
+  providers: [PistonService, CodeService, PrismaService, CodeRateLimitGuard],
+  exports: [CodeService, PrismaService],
 })
 export class CodeModule {}

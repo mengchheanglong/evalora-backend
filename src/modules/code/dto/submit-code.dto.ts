@@ -1,13 +1,15 @@
-import { IsIn, IsNotEmpty, IsString } from "class-validator";
-import { SUPPORTED_CODE_LANGUAGES } from "../constants/code.constants";
+import { IsIn, IsNotEmpty, IsString, MaxLength } from "class-validator";
+import { MAX_SOURCE_CODE_LENGTH, SUPPORTED_CODE_LANGUAGES } from "../constants/code.constants";
 
 export class SubmitCodeDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(200)
   sessionId!: string;
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(200)
   questionId!: string;
 
   @IsString()
@@ -17,5 +19,6 @@ export class SubmitCodeDto {
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(MAX_SOURCE_CODE_LENGTH)
   sourceCode!: string;
 }
