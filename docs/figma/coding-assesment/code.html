@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Evalora - Coding Assessment</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface": "#f8f9ff",
+                        "on-surface": "#0b1c30",
+                        "on-secondary-container": "#fffbff",
+                        "surface-dim": "#cbdbf5",
+                        "primary-fixed-dim": "#c0c1ff",
+                        "primary-fixed": "#e1e0ff",
+                        "on-tertiary-container": "#fffbff",
+                        "surface-tint": "#494bd6",
+                        "secondary-fixed": "#e9ddff",
+                        "background": "#f8f9ff",
+                        "on-error": "#ffffff",
+                        "error-container": "#ffdad6",
+                        "on-tertiary": "#ffffff",
+                        "on-secondary-fixed-variant": "#5516be",
+                        "on-secondary-fixed": "#23005c",
+                        "error": "#ba1a1a",
+                        "tertiary-fixed": "#ffdcc5",
+                        "secondary": "#6b38d4",
+                        "tertiary-fixed-dim": "#ffb783",
+                        "tertiary-container": "#b55d00",
+                        "surface-container-low": "#eff4ff",
+                        "on-tertiary-fixed": "#301400",
+                        "on-tertiary-fixed-variant": "#703700",
+                        "surface-container-high": "#dce9ff",
+                        "on-background": "#0b1c30",
+                        "surface-container-lowest": "#ffffff",
+                        "surface-variant": "#d3e4fe",
+                        "on-primary-container": "#fffbff",
+                        "surface-bright": "#f8f9ff",
+                        "inverse-surface": "#213145",
+                        "inverse-primary": "#c0c1ff",
+                        "primary-container": "#6063ee",
+                        "outline-variant": "#c7c4d7",
+                        "outline": "#767586",
+                        "on-surface-variant": "#464554",
+                        "on-primary-fixed-variant": "#2f2ebe",
+                        "primary": "#4648d4",
+                        "secondary-container": "#8455ef",
+                        "tertiary": "#904900",
+                        "on-error-container": "#93000a",
+                        "surface-container": "#e5eeff",
+                        "secondary-fixed-dim": "#d0bcff",
+                        "inverse-on-surface": "#eaf1ff",
+                        "on-secondary": "#ffffff",
+                        "on-primary": "#ffffff",
+                        "on-primary-fixed": "#07006c",
+                        "surface-container-highest": "#d3e4fe"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "margin-mobile": "20px",
+                        "gutter": "24px",
+                        "base": "8px",
+                        "margin-desktop": "48px",
+                        "container-max": "1280px"
+                    },
+                    "fontFamily": {
+                        "headline-xl": ["Inter", "sans-serif"],
+                        "headline-lg-mobile": ["Inter", "sans-serif"],
+                        "label-sm": ["Inter", "sans-serif"],
+                        "headline-md": ["Inter", "sans-serif"],
+                        "body-md": ["Inter", "sans-serif"],
+                        "headline-lg": ["Inter", "sans-serif"],
+                        "body-lg": ["Inter", "sans-serif"],
+                        "label-md": ["Inter", "sans-serif"]
+                    },
+                    "fontSize": {
+                        "headline-xl": ["36px", { "lineHeight": "44px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "headline-lg-mobile": ["24px", { "lineHeight": "32px", "fontWeight": "600" }],
+                        "label-sm": ["12px", { "lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600" }],
+                        "headline-md": ["24px", { "lineHeight": "32px", "fontWeight": "600" }],
+                        "body-md": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+                        "headline-lg": ["30px", { "lineHeight": "38px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "body-lg": ["18px", { "lineHeight": "28px", "fontWeight": "400" }],
+                        "label-md": ["14px", { "lineHeight": "20px", "fontWeight": "500" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8f9ff; }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        .filled-icon { font-variation-settings: 'FILL' 1; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="bg-background text-on-background h-screen flex flex-col overflow-hidden">
+<!-- TopAppBar -->
+<header class="bg-surface-container-lowest border-b border-outline-variant shadow-sm fixed top-0 left-0 w-full z-50 flex justify-between items-center px-margin-mobile md:px-margin-desktop h-16 shrink-0">
+<div class="flex items-center gap-4">
+<img alt="Evalora Logo" class="h-8 w-auto" src="https://lh3.googleusercontent.com/aida/AP1WRLvnigsr6WIDaJxqf0I-8xpM2QrTlfpkjm2biMsuWWkbCK4wiQmISR3FTt8Vyrb8TfEOujD0PIIolCua7Xm_7Krah20I-EcADW6RsQnd5_72zWyUTQvrij4q6kJNTksk7Rofq3nT1l4nxbnDWDGlx39wqdQh7-eH1RYxMYW5-YAu-gzuJXirQIhRa1xB9kKe_BTV9V0jWl1qWpIWT6ruc0A1XSAAJOJCi-J0unZNJb1FMy4hvNPQXAnCDzvG"/>
+<div class="hidden md:block h-6 w-[1px] bg-outline-variant mx-2"></div>
+<h1 class="hidden md:block font-headline-md text-headline-md text-on-surface">Software Engineer Assessment</h1>
+<h1 class="block md:hidden font-headline-lg-mobile text-headline-lg-mobile text-on-surface">Assessment</h1>
+</div>
+<div class="flex items-center gap-6">
+<div class="hidden sm:flex flex-col items-end">
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Progress</span>
+<span class="font-label-md text-label-md text-primary">Module 2 of 4</span>
+</div>
+<div class="flex items-center gap-2 bg-error-container text-on-error-container px-3 py-1.5 rounded-full border border-error/20">
+<span class="material-symbols-outlined filled-icon text-[18px]">timer</span>
+<span class="font-label-md text-label-md font-bold">38:45</span>
+</div>
+<div class="flex items-center gap-3">
+<button class="text-on-surface-variant hover:text-primary transition-colors duration-200">
+<span class="material-symbols-outlined">help</span>
+</button>
+<button class="text-on-surface-variant hover:text-primary transition-colors duration-200">
+<span class="material-symbols-outlined">settings</span>
+</button>
+</div>
+</div>
+</header>
+<div class="flex flex-1 pt-16 h-full w-full max-w-[1920px] mx-auto overflow-hidden">
+<!-- SideNavBar -->
+<nav class="bg-surface border-r border-outline-variant w-20 md:w-64 flex-shrink-0 flex flex-col h-full py-6">
+<div class="px-4 mb-6 hidden md:block">
+<h2 class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider mb-2">Modules</h2>
+</div>
+<ul class="flex flex-col gap-2 px-2 md:px-4 w-full">
+<!-- Completed Module -->
+<li>
+<button class="w-full flex items-center justify-center md:justify-start gap-3 p-3 rounded-lg text-on-surface-variant hover:bg-surface-container-low transition-all group">
+<div class="relative">
+<span class="material-symbols-outlined group-hover:text-primary">chat</span>
+<span class="absolute -bottom-1 -right-1 bg-surface rounded-full">
+<span class="material-symbols-outlined text-[14px] text-green-600 filled-icon">check_circle</span>
+</span>
+</div>
+<span class="hidden md:inline font-label-md text-label-md group-hover:text-on-surface truncate">AI Interview Chat</span>
+</button>
+</li>
+<!-- Active Module -->
+<li>
+<button class="w-full flex items-center justify-center md:justify-start gap-3 p-3 rounded-lg bg-primary-container text-on-primary-container font-bold shadow-sm transition-all scale-100 hover:scale-[0.98]">
+<span class="material-symbols-outlined filled-icon">terminal</span>
+<span class="hidden md:inline font-label-md text-label-md truncate">Coding Assessment</span>
+</button>
+</li>
+<!-- Locked Modules -->
+<li>
+<button class="w-full flex items-center justify-center md:justify-start gap-3 p-3 rounded-lg text-outline opacity-60 cursor-not-allowed">
+<span class="material-symbols-outlined">lock</span>
+<span class="hidden md:inline font-label-md text-label-md truncate">Behavioral Questions</span>
+</button>
+</li>
+<li>
+<button class="w-full flex items-center justify-center md:justify-start gap-3 p-3 rounded-lg text-outline opacity-60 cursor-not-allowed">
+<span class="material-symbols-outlined">lock</span>
+<span class="hidden md:inline font-label-md text-label-md truncate">Leadership Scenario</span>
+</button>
+</li>
+</ul>
+</nav>
+<!-- Main Content Area (Two Column Split) -->
+<main class="flex-1 flex flex-col lg:flex-row h-full overflow-hidden bg-background">
+<!-- Left Column: Problem Description -->
+<section class="w-full lg:w-[45%] h-full flex flex-col border-r border-outline-variant bg-surface-container-lowest overflow-y-auto scrollbar-hide">
+<div class="p-6 md:p-8 flex flex-col gap-6">
+<!-- Header -->
+<div>
+<div class="flex items-center justify-between mb-4">
+<h2 class="font-headline-lg text-headline-lg text-on-surface">Two Sum</h2>
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-full font-label-sm text-label-sm bg-green-100 text-green-800 border border-green-200">
+                                Easy
+                            </span>
+</div>
+<div class="h-[2px] w-12 bg-primary rounded-full mb-6"></div>
+</div>
+<!-- Description -->
+<div class="prose prose-sm max-w-none text-on-surface font-body-md text-body-md">
+<p class="mb-4">Given an array of integers <code>nums</code> and an integer <code>target</code>, return indices of the two numbers such that they add up to <code>target</code>.</p>
+<p class="mb-4">You may assume that each input would have <strong>exactly one solution</strong>, and you may not use the same element twice.</p>
+<p>You can return the answer in any order.</p>
+</div>
+<!-- Examples -->
+<div class="flex flex-col gap-4 mt-4">
+<div class="bg-surface-container-low border-l-2 border-secondary-container p-4 rounded-r-lg shadow-sm">
+<p class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider mb-2">Example 1</p>
+<div class="font-mono text-sm">
+<p><span class="text-on-surface-variant">Input:</span> <code>nums = [2,7,11,15], target = 9</code></p>
+<p><span class="text-on-surface-variant">Output:</span> <code>[0,1]</code></p>
+<p class="text-on-surface-variant mt-1 text-xs">Explanation: Because nums[0] + nums[1] == 9, we return [0, 1].</p>
+</div>
+</div>
+<div class="bg-surface-container-low border-l-2 border-outline-variant p-4 rounded-r-lg shadow-sm">
+<p class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider mb-2">Constraints</p>
+<ul class="list-disc list-inside font-mono text-sm text-on-surface space-y-1">
+<li>2 &lt;= nums.length &lt;= 10<sup>4</sup></li>
+<li>-10<sup>9</sup> &lt;= nums[i] &lt;= 10<sup>9</sup></li>
+<li>-10<sup>9</sup> &lt;= target &lt;= 10<sup>9</sup></li>
+</ul>
+</div>
+</div>
+<!-- Test Cases Status -->
+<div class="mt-8">
+<h3 class="font-headline-md text-headline-md text-on-surface mb-4">Test Cases</h3>
+<div class="flex gap-2 mb-4">
+<button class="px-4 py-2 bg-surface border border-outline-variant rounded-lg font-label-md text-label-md text-on-surface hover:bg-surface-container-high transition-colors flex items-center gap-2">
+                                Case 1
+                                <span class="material-symbols-outlined text-[16px] text-green-600 filled-icon">check_circle</span>
+</button>
+<button class="px-4 py-2 bg-error-container/20 border border-error/30 rounded-lg font-label-md text-label-md text-on-surface hover:bg-error-container/40 transition-colors flex items-center gap-2">
+                                Case 2
+                                <span class="material-symbols-outlined text-[16px] text-error filled-icon">cancel</span>
+</button>
+</div>
+<!-- Selected Test Case Details -->
+<div class="bg-surface-container-lowest border border-error/30 rounded-lg p-4 shadow-sm">
+<div class="flex items-center gap-2 mb-3 text-error">
+<span class="material-symbols-outlined filled-icon">error</span>
+<span class="font-label-md text-label-md font-bold">Failed</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 font-mono text-sm">
+<div>
+<span class="text-on-surface-variant text-xs uppercase mb-1 block">Input</span>
+<div class="bg-surface p-2 rounded border border-outline-variant">nums = [3,2,4], target = 6</div>
+</div>
+<div>
+<span class="text-on-surface-variant text-xs uppercase mb-1 block">Expected</span>
+<div class="bg-surface p-2 rounded border border-outline-variant">[1,2]</div>
+</div>
+<div class="col-span-1 md:col-span-2">
+<span class="text-on-surface-variant text-xs uppercase mb-1 block">Output</span>
+<div class="bg-error-container/30 text-error p-2 rounded border border-error/30">[0,1]</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Right Column: Workspace -->
+<section class="w-full lg:w-[55%] h-full flex flex-col bg-[#1e1e1e]">
+<!-- Workspace Toolbar -->
+<div class="h-12 bg-[#2d2d2d] border-b border-[#404040] flex items-center justify-between px-4 shrink-0">
+<div class="flex items-center gap-3">
+<div class="relative">
+<select class="appearance-none bg-[#3d3d3d] text-white border border-[#555] rounded-md py-1 pl-3 pr-8 font-label-md text-label-md hover:border-[#777] focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors">
+<option>JavaScript (Node.js)</option>
+<option>Python 3</option>
+<option>Java</option>
+<option>C++</option>
+</select>
+<span class="material-symbols-outlined absolute right-2 top-1.5 text-white pointer-events-none text-[18px]">expand_more</span>
+</div>
+<button class="text-[#a0a0a0] hover:text-white transition-colors" title="Reset to default code">
+<span class="material-symbols-outlined text-[18px]">refresh</span>
+</button>
+</div>
+<div class="flex items-center gap-2">
+<button class="bg-[#3d3d3d] hover:bg-[#4d4d4d] text-white px-4 py-1.5 rounded-md font-label-md text-label-md transition-colors border border-[#555] flex items-center gap-2 h-8">
+<span class="material-symbols-outlined text-[16px]">play_arrow</span>
+                            Run Code
+                        </button>
+<button class="bg-primary hover:bg-primary/90 text-on-primary px-4 py-1.5 rounded-md font-label-md text-label-md transition-colors border border-primary/50 flex items-center gap-2 h-8">
+<span class="material-symbols-outlined text-[16px]">cloud_upload</span>
+                            Submit
+                        </button>
+</div>
+</div>
+<!-- Code Editor Area -->
+<div class="flex-1 relative overflow-hidden flex font-mono text-sm" style="font-family: 'Menlo', 'Monaco', 'Courier New', monospace;">
+<!-- Line Numbers -->
+<div class="w-12 bg-[#1e1e1e] text-[#6e7681] text-right pr-4 py-4 select-none border-r border-[#404040]">
+                        1<br/>2<br/>3<br/>4<br/>5<br/>6<br/>7<br/>8<br/>9<br/>10<br/>11
+                    </div>
+<!-- Editor Content (Mock) -->
+<div class="flex-1 bg-[#1e1e1e] text-[#d4d4d4] p-4 overflow-auto whitespace-pre">
+<span class="text-[#569cd6]">/**</span>
+<span class="text-[#569cd6]"> * @param {number[]} nums</span>
+<span class="text-[#569cd6]"> * @param {number} target</span>
+<span class="text-[#569cd6]"> * @return {number[]}</span>
+<span class="text-[#569cd6]"> */</span>
+<span class="text-[#569cd6]">var</span> <span class="text-[#dcdcaa]">twoSum</span> = <span class="text-[#569cd6]">function</span>(nums, target) {
+    <span class="text-[#569cd6]">const</span> map = <span class="text-[#569cd6]">new</span> <span class="text-[#4ec9b0]">Map</span>();
+    
+    <span class="text-[#c586c0]">for</span> (<span class="text-[#569cd6]">let</span> i = <span class="text-[#b5cea8]">0</span>; i &lt; nums.<span class="text-[#9cdcfe]">length</span>; i++) {
+        <span class="text-[#569cd6]">const</span> complement = target - nums[i];
+        
+        <span class="text-[#c586c0]">if</span> (map.<span class="text-[#dcdcaa]">has</span>(complement)) {
+            <span class="text-[#c586c0]">return</span> [map.<span class="text-[#dcdcaa]">get</span>(complement), i];
+        }
+        
+        map.<span class="text-[#dcdcaa]">set</span>(nums[i], i);
+    }
+    
+    <span class="text-[#c586c0]">return</span> []; <span class="text-[#6a9955]">// Should not reach here per constraints</span>
+};</div>
+</div>
+<!-- Resizer Handle -->
+<div class="h-1 bg-[#404040] cursor-row-resize hover:bg-primary transition-colors z-10 relative"></div>
+<!-- Output Console -->
+<div class="h-48 bg-[#1e1e1e] border-t border-[#404040] flex flex-col shrink-0">
+<div class="flex items-center px-4 py-2 border-b border-[#333] bg-[#252526]">
+<span class="font-label-md text-label-md text-[#cccccc] flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">terminal</span> Console Output
+                        </span>
+</div>
+<div class="p-4 font-mono text-sm overflow-auto text-[#cccccc]">
+<div class="flex items-center gap-2 text-green-400 mb-2">
+<span class="material-symbols-outlined text-[16px] filled-icon">check_circle</span>
+<span>Run Finished Successfully</span>
+</div>
+<div class="text-[#808080] mb-3">Runtime: 120ms | Memory: 42.8 MB</div>
+<div class="bg-[#2d2d2d] p-2 rounded border border-[#404040] mb-2">
+<span class="text-[#569cd6]">stdout:</span><br/>
+                            &gt; Initializing hash map...<br/>
+                            &gt; Checking index 0, value 3<br/>
+                            &gt; Checking index 1, value 2<br/>
+                            &gt; Checking index 2, value 4<br/>
+                            &gt; Match found!
+                        </div>
+</div>
+</div>
+</section>
+</main>
+</div>
+</body></html>
