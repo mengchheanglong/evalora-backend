@@ -58,6 +58,22 @@ test("public register does not create admin or candidate platform accounts", asy
   assert.equal(repo.users.length, 0);
 });
 
+test("public register cannot join an existing organization by supplying its id", async () => {
+  const repo = createRepo();
+  const service = new AuthService(repo, "test-jwt-secret");
+
+  await assert.rejects(
+    () => service.register({
+      name: "Unauthorized Member",
+      email: "outsider@example.com",
+      password: "secure-password",
+      organizationId: "another-tenant",
+    }),
+    /organization membership cannot be selected/i,
+  );
+  assert.equal(repo.users.length, 0);
+});
+
 test("login verifies hashed password before issuing token", async () => {
   const repo = createRepo();
   const service = new AuthService(repo, "test-jwt-secret");

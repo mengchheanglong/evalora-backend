@@ -1,8 +1,9 @@
-import { Injectable } from "@nestjs/common";
+import { GoneException, Injectable } from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
-import { randomInt, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { AssessmentTemplateDto, InterviewSessionDto, JsonValue, ModuleType, QuestionType, SessionStatus } from "../../domain/evalora.types";
-import { buildSessionOwnershipWhere, forbiddenResourceError, mergeWhere, requireOrganizationId, type AccessContext } from "../auth/access-control";
+import { buildSessionOwnershipWhere, buildTemplateOwnershipWhere, forbiddenResourceError, mergeWhere, requireOrganizationId, type AccessContext } from "../auth/access-control";
+import { selectCandidateQuestions } from "./candidate-assignment";
 
 type PrismaSessionStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "EXPIRED";
 type PrismaRole = "ADMIN" | "ORGANIZATION" | "INTERVIEWER" | "CANDIDATE";
@@ -16,6 +17,11 @@ interface SessionUserRow {
 
 interface SessionTemplateRow {
   title: string;
+  roleType?: string;
+}
+
+interface SessionReportRow {
+  overallScore: number;
 }
 
 interface CandidateQuestionRow {
@@ -54,6 +60,7 @@ interface SessionRow {
   candidate?: SessionUserRow | null;
   templateId: string;
   template?: SessionTemplateRow | null;
+  report?: SessionReportRow | null;
   organizationId?: string | null;
   accessCode: string;
   status: PrismaSessionStatus;
@@ -71,6 +78,7 @@ interface CandidateSessionRow extends Omit<SessionRow, "template"> {
 interface CandidateUserRow {
   id: string;
   role: PrismaRole;
+  organizationId?: string | null;
 }
 
 type SessionCreateFn = (args: any) => Promise<SessionRow>;
@@ -85,6 +93,9 @@ interface SessionPrismaClient {
   user?: {
     findUnique?: UserFindUniqueFn;
     create?: UserCreateFn;
+  };
+  assessmentTemplate?: {
+    findFirst?: (args: any) => Promise<{ id: string; organizationId?: string | null } | null>;
   };
   interviewSession: {
     create?: SessionCreateFn;
@@ -122,7 +133,8 @@ interface SessionsServiceOptions {
 
 export const SESSION_INCLUDE = {
   candidate: { select: { name: true, email: true } },
-  template: { select: { title: true } },
+  template: { select: { title: true, roleType: true } },
+  report: { select: { overallScore: true } },
 };
 
 export const CANDIDATE_SESSION_INCLUDE = {
@@ -145,7 +157,7 @@ export const CANDIDATE_SESSION_INCLUDE = {
   },
 };
 
-const CANDIDATE_SELECT = { id: true, role: true };
+const CANDIDATE_SELECT = { id: true, role: true, organizationId: true };
 const INVITE_ONLY_PASSWORD_PREFIX = "evalora-invite-only";
 const SALT_ROUNDS = 12;
 
@@ -165,15 +177,17 @@ export class SessionsService {
   async createSession(input: CreateSessionInput, access?: AccessContext): Promise<InterviewSessionDto> {
     const create = requireMethod(this.prisma.interviewSession.create, "interviewSession.create");
     const organizationId = resolveWritableOrganizationId(input.organizationId, access);
-    const candidateId = await this.resolveCandidateId(input, organizationId);
+    const templateId = requireNonEmpty(input.templateId, "Template id is required.");
+    await this.assertTemplateAssignment(templateId, organizationId, access);
+    const candidateId = await this.resolveCandidateId(input, organizationId, access);
     const session = await create({
       data: {
         candidateId,
-        templateId: requireNonEmpty(input.templateId, "Template id is required."),
+        templateId,
         organizationId,
         accessCode: this.generateAccessCode(),
         status: "NOT_STARTED",
-        expiresAt: toDate(input.expiresAt),
+        expiresAt: resolveExpiry(input.expiresAt, this.now()),
       },
       include: SESSION_INCLUDE,
     });
@@ -218,7 +232,12 @@ export class SessionsService {
   }
 
   async startSession(id: string, access?: AccessContext): Promise<InterviewSessionDto> {
-    await this.assertSessionAccess(id, access);
+    if (access) {
+      const current = await this.getSession(id, access);
+      if (!current) throw forbiddenResourceError("Session");
+      if (current.status === "in_progress") return current;
+      if (current.status !== "not_started") throw new Error("Only a not-started session can be started.");
+    }
 
     const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
     const session = await update({
@@ -233,6 +252,8 @@ export class SessionsService {
   async startSessionByAccessCode(accessCode: string): Promise<CandidateAccessSessionDto> {
     const current = await this.findCandidateSessionByAccessCode(accessCode);
     assertCandidateAccessOpen(current);
+    if (current.status === "IN_PROGRESS") return toCandidateAccessSessionDto(current);
+    if (current.status !== "NOT_STARTED") throw forbiddenResourceError("Session cannot be started");
     const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
     const session = await update({
       where: { id: current.id },
@@ -243,7 +264,12 @@ export class SessionsService {
   }
 
   async completeSession(id: string, access?: AccessContext): Promise<InterviewSessionDto> {
-    await this.assertSessionAccess(id, access);
+    if (access) {
+      const current = await this.getSession(id, access);
+      if (!current) throw forbiddenResourceError("Session");
+      if (current.status === "completed") return current;
+      if (current.status !== "in_progress") throw new Error("Start the session before completing it.");
+    }
 
     const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
     const session = await update({
@@ -258,6 +284,7 @@ export class SessionsService {
   async completeSessionByAccessCode(accessCode: string): Promise<CandidateAccessSessionDto> {
     const current = await this.findCandidateSessionByAccessCode(accessCode);
     assertCandidateAccessOpen(current);
+    if (current.status !== "IN_PROGRESS") throw forbiddenResourceError("Start the session before completing it");
     const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
     const session = await update({
       where: { id: current.id },
@@ -267,8 +294,15 @@ export class SessionsService {
     return toCandidateAccessSessionDto(session as CandidateSessionRow);
   }
 
-  private async resolveCandidateId(input: CreateSessionInput, organizationId: string | undefined): Promise<string> {
-    if (input.candidateId?.trim()) return input.candidateId.trim();
+  private async resolveCandidateId(input: CreateSessionInput, organizationId: string | undefined, access?: AccessContext): Promise<string> {
+    if (input.candidateId?.trim()) {
+      const candidateId = input.candidateId.trim();
+      if (!access) return candidateId;
+      const findUnique = requireMethod(this.prisma.user?.findUnique, "user.findUnique");
+      const candidate = await findUnique({ where: { id: candidateId }, select: CANDIDATE_SELECT });
+      assertCandidateBelongsToOrganization(candidate, organizationId);
+      return candidateId;
+    }
 
     const name = requireNonEmpty(input.candidateName, "Candidate name is required.");
     const email = normalizeEmail(requireNonEmpty(input.candidateEmail, "Candidate email is required."));
@@ -283,6 +317,7 @@ export class SessionsService {
       if (existingCandidate.role !== "CANDIDATE") {
         throw new Error("Candidate email is already used by a platform account.");
       }
+      assertCandidateBelongsToOrganization(existingCandidate, organizationId);
       return existingCandidate.id;
     }
 
@@ -310,11 +345,15 @@ export class SessionsService {
     return session as CandidateSessionRow;
   }
 
-  private async assertSessionAccess(id: string, access?: AccessContext): Promise<void> {
-    if (!access || access.role === "admin") return;
-    const findFirst = requireMethod(this.prisma.interviewSession.findFirst, "interviewSession.findFirst");
-    const session = await findFirst({ where: mergeWhere({ id }, buildSessionOwnershipWhere(access)) });
-    if (!session) throw forbiddenResourceError("Session");
+  private async assertTemplateAssignment(templateId: string, organizationId: string | undefined, access?: AccessContext): Promise<void> {
+    if (!access) return;
+    const findFirst = requireMethod(this.prisma.assessmentTemplate?.findFirst, "assessmentTemplate.findFirst");
+    const requestedOrganization = access.role === "admin" && organizationId ? { organizationId } : undefined;
+    const template = await findFirst({
+      where: mergeWhere({ id: templateId }, requestedOrganization, buildTemplateOwnershipWhere(access)),
+      select: { id: true, organizationId: true },
+    });
+    if (!template) throw forbiddenResourceError("Template");
   }
 }
 
@@ -340,9 +379,12 @@ function toSessionDto(session: SessionRow): InterviewSessionDto {
     candidateEmail: session.candidate?.email,
     templateId: session.templateId,
     templateTitle: session.template?.title,
+    targetRole: session.template?.roleType,
     organizationId: session.organizationId ?? undefined,
     status: fromPrismaSessionStatus(session.status),
     accessCode: session.accessCode,
+    overallScore: session.report?.overallScore,
+    reportReady: Boolean(session.report),
     startedAt: toIso(session.startedAt),
     completedAt: toIso(session.completedAt),
     expiresAt: toIso(session.expiresAt),
@@ -355,11 +397,11 @@ function toCandidateAccessSessionDto(session: CandidateSessionRow): CandidateAcc
   const sessionDto = toSessionDto({ ...session, template: session.template ? { title: session.template.title } : null });
   return {
     ...sessionDto,
-    template: toCandidateTemplateDto(session.template),
+    template: toCandidateTemplateDto(session.template, session.accessCode),
   };
 }
 
-function toCandidateTemplateDto(template: CandidateTemplateRow | null | undefined): AssessmentTemplateDto {
+function toCandidateTemplateDto(template: CandidateTemplateRow | null | undefined, accessCode: string): AssessmentTemplateDto {
   if (!template) {
     return {
       id: "",
@@ -376,9 +418,9 @@ function toCandidateTemplateDto(template: CandidateTemplateRow | null | undefine
     description: template.description ?? "",
     roleType: template.roleType,
     timeLimitMin: template.timeLimitMin ?? undefined,
-    scoringRules: template.scoringRules ?? undefined,
-    createdById: template.createdById,
-    organizationId: template.organizationId ?? undefined,
+    scoringRules: undefined,
+    createdById: undefined,
+    organizationId: undefined,
     modules: (template.modules ?? []).map((module) => ({
       id: module.id,
       type: fromPrismaModuleType(module.moduleType),
@@ -387,12 +429,12 @@ function toCandidateTemplateDto(template: CandidateTemplateRow | null | undefine
       weight: module.weight,
       orderIndex: module.orderIndex,
       settings: module.settings ?? undefined,
-      questions: (module.questions ?? []).map((question) => ({
+      questions: selectCandidateQuestions(module.questions ?? [], accessCode, module.id, module.moduleType === "CODING" ? 0 : 2).map((question) => ({
         id: question.id,
         questionText: question.questionText,
         questionType: fromPrismaQuestionType(question.questionType),
         options: question.options ?? undefined,
-        rubric: question.rubric ?? undefined,
+        rubric: undefined,
       })),
     })),
   };
@@ -401,10 +443,10 @@ function toCandidateTemplateDto(template: CandidateTemplateRow | null | undefine
 function assertCandidateAccessOpen(session: CandidateSessionRow): void {
   const status = fromPrismaSessionStatus(session.status);
   if (status === "completed" || status === "expired") {
-    throw forbiddenResourceError("Session no longer available");
+    throw new GoneException("This assessment is no longer available.");
   }
   if (session.expiresAt && session.expiresAt.getTime() < Date.now()) {
-    throw forbiddenResourceError("Session no longer available");
+    throw new GoneException("This assessment invitation has expired.");
   }
 }
 
@@ -453,5 +495,17 @@ function requireMethod<T extends (...args: any[]) => any>(method: T | undefined,
 }
 
 function defaultAccessCode(): string {
-  return `EV-${randomInt(100000, 1000000)}`;
+  return `EV-${randomBytes(16).toString("base64url").toUpperCase()}`;
+}
+
+function resolveExpiry(value: Date | string | undefined, now: Date): Date {
+  const expiresAt = toDate(value) ?? new Date(now.getTime() + 7 * 24 * 60 * 60 * 1_000);
+  if (Number.isNaN(expiresAt.getTime())) throw new Error("Expiry date is invalid.");
+  if (expiresAt.getTime() <= now.getTime()) throw new Error("Expiry date must be in the future.");
+  return expiresAt;
+}
+
+function assertCandidateBelongsToOrganization(candidate: CandidateUserRow | null, organizationId: string | undefined): void {
+  if (!candidate || candidate.role !== "CANDIDATE") throw forbiddenResourceError("Candidate");
+  if (organizationId && candidate.organizationId !== organizationId) throw forbiddenResourceError("Candidate");
 }

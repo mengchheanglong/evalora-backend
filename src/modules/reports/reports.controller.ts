@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Req, UseGuards } from "@nestjs/common";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { ReportsService } from "./reports.service";
@@ -6,7 +6,7 @@ import { ReportsService } from "./reports.service";
 @Controller("reports")
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ReportsController {
-  constructor(private readonly reportsService: ReportsService) {}
+  constructor(@Inject(ReportsService) private readonly reportsService: ReportsService) {}
 
   @Get(":sessionId")
   @Roles("admin", "organization", "interviewer")
@@ -24,5 +24,25 @@ export class ReportsController {
   @Roles("admin", "organization", "interviewer")
   exportReport(@Param("sessionId") sessionId: string, @Req() request: AuthenticatedRequest) {
     return this.reportsService.exportReport(sessionId, toAccessContext(request.user));
+  }
+
+  @Get(":sessionId/notes")
+  @Roles("admin", "organization", "interviewer")
+  notes(@Param("sessionId") sessionId: string, @Req() request: AuthenticatedRequest) {
+    return this.reportsService.listReviewerNotes(sessionId, toAccessContext(request.user));
+  }
+
+  @Post(":sessionId/notes")
+  @Roles("admin", "organization", "interviewer")
+  async addNote(
+    @Param("sessionId") sessionId: string,
+    @Body() body: { note?: string },
+    @Req() request: AuthenticatedRequest,
+  ) {
+    try {
+      return await this.reportsService.addReviewerNote(sessionId, body.note, toAccessContext(request.user));
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : "Unable to add reviewer note.");
+    }
   }
 }

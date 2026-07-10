@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, NotFoundException } from "@nestjs/common";
 import type { JsonValue, ModuleType } from "../../domain/evalora.types";
 import type { AiService } from "../ai/ai.service";
 import { evaluateResponse, generateCandidateReport, type EvaluateResponseInput, type EvaluationResultDto, type GeneratedCandidateReport } from "../ai/evaluation.service";
@@ -15,6 +15,10 @@ interface ReportPersistenceClient {
   candidateReport: {
     findUnique?(args: unknown): Promise<unknown | null>;
     upsert(args: unknown): Promise<unknown>;
+  };
+  reviewerNote?: {
+    findMany(args: unknown): Promise<unknown[]>;
+    create(args: unknown): Promise<unknown>;
   };
   $transaction<T>(operations: Array<Promise<T>>): Promise<T[]>;
 }
@@ -60,8 +64,29 @@ interface EvaluationSessionRow {
   id?: unknown;
   completedAt?: unknown;
   candidate?: { name?: unknown } | null;
-  template?: { title?: unknown } | null;
+  template?: { title?: unknown; modules?: EvaluationModuleRow[] | null } | null;
   responses?: EvaluationResponseRow[] | null;
+  codeSubmissions?: EvaluationCodeSubmissionRow[] | null;
+}
+
+interface EvaluationCodeSubmissionRow {
+  questionId?: unknown;
+  language?: unknown;
+  sourceCode?: unknown;
+  stdout?: unknown;
+  stderr?: unknown;
+  compileOutput?: unknown;
+  status?: unknown;
+  score?: unknown;
+  createdAt?: unknown;
+}
+
+interface ReviewerNoteRow {
+  id?: unknown;
+  sessionId?: unknown;
+  note?: unknown;
+  createdAt?: unknown;
+  reviewer?: { id?: unknown; name?: unknown } | null;
 }
 
 interface GroupedResponseEntry {
@@ -88,7 +113,15 @@ const REPORT_ADVISORY_NOTICE = "AI feedback is advisory and not a final hiring d
 
 const REPORT_EVALUATION_SESSION_INCLUDE = {
   candidate: { select: { name: true } },
-  template: { select: { title: true } },
+  template: {
+    select: {
+      title: true,
+      modules: {
+        where: { moduleType: "CODING" },
+        select: { id: true, title: true, moduleType: true, weight: true },
+      },
+    },
+  },
   responses: {
     include: {
       question: {
@@ -96,6 +129,20 @@ const REPORT_EVALUATION_SESSION_INCLUDE = {
           module: true,
         },
       },
+    },
+    orderBy: { createdAt: "asc" },
+  },
+  codeSubmissions: {
+    select: {
+      questionId: true,
+      language: true,
+      sourceCode: true,
+      stdout: true,
+      stderr: true,
+      compileOutput: true,
+      status: true,
+      score: true,
+      createdAt: true,
     },
     orderBy: { createdAt: "asc" },
   },
@@ -110,7 +157,9 @@ export class ReportsService {
 
   async getReport(sessionId: string, access?: AccessContext): Promise<GeneratedCandidateReport> {
     await this.assertReportAccess(sessionId, access);
-    return (await this.readPersistedReport(sessionId)) ?? this.buildDemoReport(sessionId).report;
+    const report = await this.readPersistedReport(sessionId);
+    if (!report) throw new NotFoundException("Report is not ready. Generate the report after the candidate completes the assessment.");
+    return report;
   }
 
   buildDemoReport(sessionId: string) {
@@ -168,6 +217,35 @@ export class ReportsService {
       status: "not_implemented",
       message: "PDF/export support is a future improvement unless prioritized.",
     };
+  }
+
+  async listReviewerNotes(sessionId: string, access?: AccessContext) {
+    await this.assertReportAccess(sessionId, access);
+    const findMany = requireMethod(this.prisma?.reviewerNote?.findMany, "reviewerNote.findMany");
+    const rows = (await findMany({
+      where: { sessionId },
+      include: { reviewer: { select: { id: true, name: true } } },
+      orderBy: { createdAt: "desc" },
+    })) as ReviewerNoteRow[];
+
+    return rows.map(mapReviewerNote);
+  }
+
+  async addReviewerNote(sessionId: string, note: string | undefined, access?: AccessContext) {
+    await this.assertReportAccess(sessionId, access);
+    if (!access) throw forbiddenResourceError("Reviewer note");
+    const normalizedNote = requireReviewerNote(note);
+    const create = requireMethod(this.prisma?.reviewerNote?.create, "reviewerNote.create");
+    const row = (await create({
+      data: {
+        sessionId,
+        reviewerId: access.userId,
+        note: normalizedNote,
+      },
+      include: { reviewer: { select: { id: true, name: true } } },
+    })) as ReviewerNoteRow;
+
+    return mapReviewerNote(row);
   }
 
   async persistReport({ report, evaluations }: PersistReportInput): Promise<ReportPersistenceResult> {
@@ -261,21 +339,34 @@ export class ReportsService {
 
   private async evaluateSessionResponses(session: EvaluationSessionRow): Promise<EvaluationResultDto[]> {
     const groups = groupResponsesByModule(session.responses ?? []);
-    const evaluations: EvaluationResultDto[] = [];
+    const inputs: EvaluateResponseInput[] = [];
 
     for (const group of Array.from(groups.values())) {
-      const input: EvaluateResponseInput = {
+      inputs.push({
         moduleId: optionalString(group.module.id),
         moduleTitle: optionalString(group.module.title),
         moduleType: fromPrismaModuleType(group.module.moduleType),
         responseText: buildModuleResponseText(group.entries),
         rubric: unique(group.entries.flatMap((entry) => stringArray(entry.question.rubric))),
         weight: numberValue(group.module.weight, 1),
-      };
-      evaluations.push(await this.evaluateModuleResponse(input));
+      });
     }
 
-    return evaluations;
+    const codingModule = session.template?.modules?.find(
+      (module) => fromPrismaModuleType(module.moduleType) === "coding",
+    );
+    if (codingModule && session.codeSubmissions?.length) {
+      inputs.push({
+        moduleId: optionalString(codingModule.id),
+        moduleTitle: optionalString(codingModule.title) ?? "Coding Assessment",
+        moduleType: "coding",
+        responseText: buildCodeSubmissionText(session.codeSubmissions),
+        rubric: ["correctness", "execution evidence", "code clarity", "validation", "problem solving"],
+        weight: numberValue(codingModule.weight, 1),
+      });
+    }
+
+    return Promise.all(inputs.map((input) => this.evaluateModuleResponse(input)));
   }
 
   private async evaluateModuleResponse(input: EvaluateResponseInput): Promise<EvaluationResultDto> {
@@ -359,6 +450,51 @@ function buildModuleResponseText(entries: GroupedResponseEntry[]): string {
       return lines.join("\n");
     })
     .join("\n\n");
+}
+
+function buildCodeSubmissionText(submissions: EvaluationCodeSubmissionRow[]): string {
+  const latestByQuestion = new Map<string, EvaluationCodeSubmissionRow>();
+  for (const submission of submissions) {
+    latestByQuestion.set(stringValue(submission.questionId, "coding-question"), submission);
+  }
+
+  return Array.from(latestByQuestion.values())
+    .map((submission, index) => {
+      const sourceCode = stringValue(submission.sourceCode, "").slice(0, 6_000);
+      const diagnostics = [optionalString(submission.compileOutput), optionalString(submission.stderr)].filter(Boolean).join("\n");
+      return [
+        `Coding challenge ${index + 1}: ${stringValue(submission.questionId, "unknown")}`,
+        `Language: ${stringValue(submission.language, "unknown")}`,
+        `Sandbox status: ${stringValue(submission.status, "unknown")}`,
+        `Automated test score: ${numberValue(submission.score, 0)} out of 100`,
+        optionalString(submission.stdout) ? `Standard output: ${optionalString(submission.stdout)}` : undefined,
+        diagnostics ? `Diagnostics: ${diagnostics}` : undefined,
+        sourceCode ? `Submitted code:\n${sourceCode}` : undefined,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    })
+    .join("\n\n");
+}
+
+function mapReviewerNote(row: ReviewerNoteRow) {
+  return {
+    id: stringValue(row.id, ""),
+    sessionId: stringValue(row.sessionId, ""),
+    note: stringValue(row.note, ""),
+    reviewer: {
+      id: stringValue(row.reviewer?.id, ""),
+      name: stringValue(row.reviewer?.name, "Reviewer"),
+    },
+    createdAt: isoDateString(row.createdAt),
+  };
+}
+
+function requireReviewerNote(note: string | undefined): string {
+  const normalized = note?.trim();
+  if (!normalized) throw new Error("Reviewer note is required.");
+  if (normalized.length > 2_000) throw new Error("Reviewer note must be 2,000 characters or fewer.");
+  return normalized;
 }
 
 function fromPrismaModuleType(value: unknown): ModuleType {

@@ -54,9 +54,12 @@ export interface InterviewSessionDto {
   candidateEmail?: string;
   templateId: string;
   templateTitle?: string;
+  targetRole?: string;
   organizationId?: string;
   status: SessionStatus;
   accessCode: string;
+  overallScore?: number;
+  reportReady?: boolean;
   startedAt?: string;
   completedAt?: string;
   expiresAt?: string;

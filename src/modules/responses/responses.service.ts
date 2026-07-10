@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type { CandidateResponseDto, JsonValue } from "../../domain/evalora.types";
 import { buildSessionOwnershipWhere, forbiddenResourceError, mergeWhere, type AccessContext } from "../auth/access-control";
+import { selectCandidateQuestions } from "../sessions/candidate-assignment";
 
 interface ResponseRow {
   id: string;
@@ -25,7 +26,7 @@ type ResponseFindFirstFn = (args: any) => Promise<ResponseRow | null>;
 type ResponseCreateFn = (args: any) => Promise<ResponseRow>;
 type ResponseUpdateFn = (args: any) => Promise<ResponseRow>;
 type ResponseFindManyFn = (args: any) => Promise<ResponseRow[]>;
-type SessionFindFirstFn = (args: any) => Promise<ResponseSessionAccessRow | null>;
+type SessionFindFirstFn = (args: any) => Promise<any | null>;
 
 interface ResponsePrismaClient {
   interviewSession?: {
@@ -53,7 +54,8 @@ export class ResponsesService {
   async saveResponse(input: SaveResponseInput, access?: AccessContext): Promise<CandidateResponseDto> {
     const sessionId = requireNonEmpty(input.sessionId, "Session id is required.");
     const responseText = input.responseText ?? "";
-    await this.assertSessionAccess(sessionId, access);
+    await this.assertSessionWritable(sessionId, access);
+    if (input.questionId) await this.assertQuestionAssigned(sessionId, input.questionId);
 
     const existing = input.questionId ? await this.findExistingResponse(sessionId, input.questionId) : null;
     const response = existing ? await this.updateResponse(existing.id, responseText, input.responseJson) : await this.createResponse(sessionId, input.questionId, responseText, input.responseJson);
@@ -73,6 +75,7 @@ export class ResponsesService {
 
   async saveResponseByAccessCode(accessCode: string, input: Omit<SaveResponseInput, "sessionId">): Promise<CandidateResponseDto> {
     const session = await this.findOpenSessionByAccessCode(accessCode);
+    requireNonEmpty(input.questionId, "Question id is required.");
     return this.saveResponse({ ...input, sessionId: session.id });
   }
 
@@ -89,11 +92,34 @@ export class ResponsesService {
     return session;
   }
 
-  private async assertSessionAccess(sessionId: string, access?: AccessContext): Promise<void> {
-    if (!access || access.role === "admin") return;
+  private async assertSessionWritable(sessionId: string, access?: AccessContext): Promise<void> {
     const findFirst = requireMethod(this.prisma.interviewSession?.findFirst, "interviewSession.findFirst");
-    const session = await findFirst({ where: mergeWhere({ id: sessionId }, buildSessionOwnershipWhere(access)) });
+    const session = await findFirst({ where: mergeWhere({ id: sessionId }, access ? buildSessionOwnershipWhere(access) : undefined) });
     if (!session) throw forbiddenResourceError("Session");
+    if (session.status !== "IN_PROGRESS") throw forbiddenResourceError("Responses require an in-progress session");
+    assertCandidateAccessOpen(session);
+  }
+
+  private async assertQuestionAssigned(sessionId: string, questionId: string): Promise<void> {
+    const findFirst = requireMethod(this.prisma.interviewSession?.findFirst, "interviewSession.findFirst");
+    const session = await findFirst({
+      where: { id: sessionId },
+      select: {
+        accessCode: true,
+        template: {
+          select: {
+            modules: {
+              select: { id: true, moduleType: true, questions: { select: { id: true } } },
+            },
+          },
+        },
+      },
+    });
+    if (!session) throw forbiddenResourceError("Session");
+    const assignedIds = (session.template?.modules ?? []).flatMap((module: any) =>
+      selectCandidateQuestions(module.questions ?? [], session.accessCode, module.id, module.moduleType === "CODING" ? 0 : 2).map((question) => question.id),
+    );
+    if (!assignedIds.includes(questionId)) throw forbiddenResourceError("Question");
   }
 
   private async findExistingResponse(sessionId: string, questionId: string): Promise<ResponseRow | null> {

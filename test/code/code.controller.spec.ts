@@ -30,14 +30,14 @@ describe("CodeController", () => {
       questionId: "sum-two-numbers",
       language: "javascript",
       sourceCode: "console.log(1)",
-    });
+    }, { user: { id: "reviewer-1", email: "reviewer@example.com", role: "interviewer", organizationId: "org-1" } } as never);
 
     expect(codeService.submitCode).toHaveBeenCalledWith({
       sessionId: "session-1",
       questionId: "sum-two-numbers",
       language: "javascript",
       sourceCode: "console.log(1)",
-    });
+    }, { userId: "reviewer-1", role: "interviewer", organizationId: "org-1" });
     expect(result).toEqual({ submissionId: "submission-1" });
   });
 
@@ -90,9 +90,9 @@ describe("CodeController", () => {
     };
 
     const controller = new CodeController(codeService as never);
-    const result = await controller.submissions("session-1");
+    const result = await controller.submissions("session-1", { user: { id: "reviewer-1", email: "reviewer@example.com", role: "interviewer", organizationId: "org-1" } } as never);
 
-    expect(codeService.listSubmissions).toHaveBeenCalledWith("session-1");
+    expect(codeService.listSubmissions).toHaveBeenCalledWith("session-1", { userId: "reviewer-1", role: "interviewer", organizationId: "org-1" });
     expect(result).toBe(rows);
   });
 });

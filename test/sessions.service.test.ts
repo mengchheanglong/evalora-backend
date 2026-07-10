@@ -10,7 +10,7 @@ const sessionRow = {
   candidateId: "candidate-1",
   candidate: { name: "Demo Candidate", email: "candidate@example.com" },
   templateId: "template-1",
-  template: { title: "Backend Engineer Assessment" },
+  template: { title: "Backend Engineer Assessment", roleType: "Backend Engineer" },
   organizationId: "org-1",
   accessCode: "EV-123456",
   status: "NOT_STARTED",
@@ -81,7 +81,8 @@ test("createSession generates an access code and maps candidate/template assignm
     },
     include: {
       candidate: { select: { name: true, email: true } },
-      template: { select: { title: true } },
+      template: { select: { title: true, roleType: true } },
+      report: { select: { overallScore: true } },
     },
   });
 });
@@ -90,6 +91,12 @@ test("createSession can create an invite-only candidate record from name and ema
   const calls: Array<{ method: string; args: any }> = [];
   const service = new SessionsService(
     {
+      assessmentTemplate: {
+        findFirst: async (args: any) => {
+          calls.push({ method: "template.findFirst", args });
+          return { id: "template-1", organizationId: "org-1" };
+        },
+      },
       user: {
         findUnique: async (args: any) => {
           calls.push({ method: "user.findUnique", args });
@@ -97,7 +104,7 @@ test("createSession can create an invite-only candidate record from name and ema
         },
         create: async (args: any) => {
           calls.push({ method: "user.create", args });
-          return { id: "candidate-1", name: "Demo Candidate", email: "candidate@example.com", role: "CANDIDATE" };
+          return { id: "candidate-1", name: "Demo Candidate", email: "candidate@example.com", role: "CANDIDATE", organizationId: "org-1" };
         },
       },
       interviewSession: {
@@ -121,39 +128,42 @@ test("createSession can create an invite-only candidate record from name and ema
   );
 
   assert.equal(result.candidateId, "candidate-1");
-  assert.equal(calls[0].method, "user.findUnique");
-  assert.deepEqual(calls[0].args, {
+  assert.equal(calls[0].method, "template.findFirst");
+  assert.equal(calls[1].method, "user.findUnique");
+  assert.deepEqual(calls[1].args, {
     where: { email: "candidate@example.com" },
-    select: { id: true, role: true },
+    select: { id: true, role: true, organizationId: true },
   });
-  assert.equal(calls[1].method, "user.create");
-  assert.equal(calls[1].args.data.name, "Demo Candidate");
-  assert.equal(calls[1].args.data.email, "candidate@example.com");
-  assert.equal(calls[1].args.data.role, "CANDIDATE");
-  assert.equal(calls[1].args.data.organizationId, "org-1");
-  assert.match(calls[1].args.data.passwordHash, /^\$2/);
-  assert.equal(calls[2].method, "session.create");
-  assert.equal(calls[2].args.data.candidateId, "candidate-1");
+  assert.equal(calls[2].method, "user.create");
+  assert.equal(calls[2].args.data.name, "Demo Candidate");
+  assert.equal(calls[2].args.data.email, "candidate@example.com");
+  assert.equal(calls[2].args.data.role, "CANDIDATE");
   assert.equal(calls[2].args.data.organizationId, "org-1");
+  assert.match(calls[2].args.data.passwordHash, /^\$2/);
+  assert.equal(calls[3].method, "session.create");
+  assert.equal(calls[3].args.data.candidateId, "candidate-1");
+  assert.equal(calls[3].args.data.organizationId, "org-1");
 });
 
 test("candidate invite access code opens, starts, and completes only the assigned assessment", async () => {
   const calls: Array<{ method: string; args: any }> = [];
+  let currentStatus = "NOT_STARTED";
   const service = new SessionsService(
     {
       interviewSession: {
         findFirst: async (args: any) => {
           calls.push({ method: "findFirst", args });
-          return { ...sessionRow, template: { title: "Backend Engineer Assessment", modules: [candidateModuleRow] } };
+          return { ...sessionRow, status: currentStatus, template: { title: "Backend Engineer Assessment", roleType: "Backend Engineer", modules: [candidateModuleRow] } };
         },
         update: async (args: any) => {
           calls.push({ method: "update", args });
+          currentStatus = args.data.status;
           return {
             ...sessionRow,
-            status: args.data.status,
+            status: currentStatus,
             startedAt: args.data.startedAt ?? null,
             completedAt: args.data.completedAt ?? null,
-            template: { title: "Backend Engineer Assessment", modules: [candidateModuleRow] },
+            template: { title: "Backend Engineer Assessment", roleType: "Backend Engineer", modules: [candidateModuleRow] },
           };
         },
       },
@@ -216,7 +226,8 @@ test("startSession and completeSession write status timestamps through Prisma", 
       data: { status: "IN_PROGRESS", startedAt: now },
       include: {
         candidate: { select: { name: true, email: true } },
-        template: { select: { title: true } },
+        template: { select: { title: true, roleType: true } },
+        report: { select: { overallScore: true } },
       },
     },
     {
@@ -224,7 +235,8 @@ test("startSession and completeSession write status timestamps through Prisma", 
       data: { status: "COMPLETED", completedAt: now },
       include: {
         candidate: { select: { name: true, email: true } },
-        template: { select: { title: true } },
+        template: { select: { title: true, roleType: true } },
+        report: { select: { overallScore: true } },
       },
     },
   ]);
@@ -245,4 +257,18 @@ test("listSessions and getSession map Prisma rows to API DTOs", async () => {
   assert.equal(sessions[0].candidateEmail, "candidate@example.com");
   assert.equal(session?.status, "completed");
   assert.equal(session?.templateTitle, "Backend Engineer Assessment");
+});
+
+test("session creation rejects a template outside the authenticated organization", async () => {
+  let created = false;
+  const service = new SessionsService({
+    assessmentTemplate: { findFirst: async () => null },
+    interviewSession: { create: async () => { created = true; return sessionRow; } },
+  } as any);
+
+  await assert.rejects(
+    () => service.createSession({ candidateId: "candidate-1", templateId: "template-other" }, interviewerAccess),
+    /template not found or access denied/i,
+  );
+  assert.equal(created, false);
 });

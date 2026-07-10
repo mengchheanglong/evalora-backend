@@ -1,7 +1,7 @@
 import { ConflictException, GoneException, NotFoundException } from "@nestjs/common";
+import { CodeExecutionService } from "../../src/modules/code/code-execution.service";
 import { CODE_QUESTIONS } from "../../src/modules/code/constants/code.constants";
 import { CodeService } from "../../src/modules/code/code.service";
-import { PistonService } from "../../src/modules/code/piston.service";
 import { PrismaService } from "../../src/modules/code/prisma.service";
 
 describe("CodeService", () => {
@@ -15,11 +15,11 @@ describe("CodeService", () => {
     },
   } as unknown as PrismaService;
 
-  const pistonService = {
+  const executionService = {
     executeCode: jest.fn(),
-  } as unknown as PistonService;
+  } as unknown as CodeExecutionService;
 
-  const service = new CodeService(prismaMock, pistonService);
+  const service = new CodeService(prismaMock, executionService);
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -48,8 +48,8 @@ describe("CodeService", () => {
     expect(exposedInputs).not.toEqual(expect.arrayContaining(hiddenInputs));
   });
 
-  it("runs code through the Piston sandbox", async () => {
-    (pistonService.executeCode as jest.Mock).mockResolvedValue({
+  it("runs code through the configured execution sandbox", async () => {
+    (executionService.executeCode as jest.Mock).mockResolvedValue({
       stdout: "hello\n",
       stderr: "",
       compileOutput: "",
@@ -63,7 +63,7 @@ describe("CodeService", () => {
       stdin: "",
     });
 
-    expect(pistonService.executeCode).toHaveBeenCalledWith("console.log('hello')", "");
+    expect(executionService.executeCode).toHaveBeenCalledWith("console.log('hello')", "");
     expect(result.status).toBe("Accepted");
   });
 
@@ -74,7 +74,7 @@ describe("CodeService", () => {
       expiresAt: null,
     });
     // A correct solution: echo the sum of the two space-separated integers from stdin.
-    (pistonService.executeCode as jest.Mock).mockImplementation((_source: string, stdin: string) => {
+    (executionService.executeCode as jest.Mock).mockImplementation((_source: string, stdin: string) => {
       const [a, b] = stdin.split(" ").map(Number);
       return Promise.resolve({
         stdout: `${a + b}\n`,
@@ -108,7 +108,7 @@ describe("CodeService", () => {
 
   it("reports a partial score and Wrong Answer when only some cases pass", async () => {
     // Always echo "6\n": correct for the first sum-two-numbers case (10 + -4), wrong for the rest.
-    (pistonService.executeCode as jest.Mock).mockResolvedValue({
+    (executionService.executeCode as jest.Mock).mockResolvedValue({
       stdout: "6\n",
       stderr: "",
       compileOutput: "",
@@ -145,7 +145,7 @@ describe("CodeService", () => {
         sourceCode: "console.log(6)",
       }),
     ).rejects.toBeInstanceOf(GoneException);
-    expect(pistonService.executeCode).not.toHaveBeenCalled();
+    expect(executionService.executeCode).not.toHaveBeenCalled();
   });
 
   it("lists submissions for a session in newest-first order after validating it exists", async () => {
@@ -175,7 +175,7 @@ describe("CodeService", () => {
   });
 
   it("surfaces stderr and compile output when a graded run fails", async () => {
-    (pistonService.executeCode as jest.Mock).mockResolvedValue({
+    (executionService.executeCode as jest.Mock).mockResolvedValue({
       stdout: "",
       stderr: "ReferenceError: x is not defined",
       compileOutput: "",
@@ -227,7 +227,7 @@ describe("CodeService", () => {
         sourceCode: "console.log(6)",
       }),
     ).rejects.toBeInstanceOf(ConflictException);
-    expect(pistonService.executeCode).not.toHaveBeenCalled();
+    expect(executionService.executeCode).not.toHaveBeenCalled();
     expect(prismaMock.codeSubmission.create).not.toHaveBeenCalled();
   });
 

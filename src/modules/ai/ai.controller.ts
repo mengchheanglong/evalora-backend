@@ -1,10 +1,15 @@
-import { Body, Controller, Post } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Param, Post, UseGuards } from "@nestjs/common";
+import { JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
+import { CandidateAccessRateLimitGuard } from "../sessions/access-rate-limit.guard";
+import { CandidateAiService } from "./candidate-ai.service";
 import { AiService, type FollowUpInput, type InterviewQuestionInput } from "./ai.service";
 import type { EvaluateResponseInput, EvaluationResultDto } from "./evaluation.service";
 
 @Controller("ai")
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles("admin", "organization", "interviewer")
 export class AiController {
-  constructor(private readonly aiService: AiService) {}
+  constructor(@Inject(AiService) private readonly aiService: AiService) {}
 
   @Post("interview-question")
   async interviewQuestion(@Body() body: InterviewQuestionInput) {
@@ -56,5 +61,26 @@ export class AiController {
           ],
       reviewerNotes: body.reviewerNotes,
     });
+  }
+}
+
+@Controller("ai/access")
+@UseGuards(CandidateAccessRateLimitGuard)
+export class CandidateAiController {
+  constructor(@Inject(CandidateAiService) private readonly candidateAiService: CandidateAiService) {}
+
+  @Get(":accessCode/conversation")
+  conversation(@Param("accessCode") accessCode: string) {
+    return this.candidateAiService.conversation(accessCode);
+  }
+
+  @Post(":accessCode/interview-question")
+  interviewQuestion(@Param("accessCode") accessCode: string, @Body() body: { conversationHistory?: string[]; rubric?: string[] }) {
+    return this.candidateAiService.interviewQuestion(accessCode, body);
+  }
+
+  @Post(":accessCode/follow-up")
+  followUp(@Param("accessCode") accessCode: string, @Body() body: { question?: string; answer?: string; rubric?: string[] }) {
+    return this.candidateAiService.followUp(accessCode, body);
   }
 }

@@ -104,7 +104,7 @@ test("organization session lists and candidate session reads are scoped by owner
       method: "findMany",
       args: {
         where: { organizationId: "org-1" },
-        include: { candidate: { select: { name: true, email: true } }, template: { select: { title: true } } },
+        include: { candidate: { select: { name: true, email: true } }, template: { select: { title: true, roleType: true } }, report: { select: { overallScore: true } } },
         orderBy: { updatedAt: "desc" },
       },
     },
@@ -112,7 +112,7 @@ test("organization session lists and candidate session reads are scoped by owner
       method: "findFirst",
       args: {
         where: { id: "session-1", candidateId: "candidate-1" },
-        include: { candidate: { select: { name: true, email: true } }, template: { select: { title: true } } },
+        include: { candidate: { select: { name: true, email: true } }, template: { select: { title: true, roleType: true } }, report: { select: { overallScore: true } } },
       },
     },
   ]);
@@ -124,7 +124,20 @@ test("candidate response autosave checks assigned session ownership before writi
     interviewSession: {
       findFirst: async (args: unknown) => {
         calls.push({ method: "session.findFirst", args });
-        return sessionRow;
+        return {
+          ...sessionRow,
+          status: "IN_PROGRESS",
+          template: {
+            title: "Backend Engineer Assessment",
+            modules: [
+              {
+                id: "module-1",
+                moduleType: "AI_INTERVIEW",
+                questions: [{ id: "question-1" }],
+              },
+            ],
+          },
+        };
       },
     },
     response: {
@@ -153,6 +166,13 @@ test("candidate response autosave checks assigned session ownership before writi
     {
       method: "session.findFirst",
       args: { where: { id: "session-1", candidateId: "candidate-1" } },
+    },
+    {
+      method: "session.findFirst",
+      args: {
+        where: { id: "session-1" },
+        select: { accessCode: true, template: { select: { modules: { select: { id: true, moduleType: true, questions: { select: { id: true } } } } } } },
+      },
     },
     {
       method: "response.findFirst",

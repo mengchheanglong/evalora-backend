@@ -1,15 +1,10 @@
 # Evalora Backend
 
-Standalone NestJS + TypeScript backend for Evalora.
-
-MVP provider choices:
-
-- AI: DeepSeek V4 Flash.
-- Database: PostgreSQL on Neon.
+NestJS + TypeScript API for Evalora, backed by PostgreSQL/Neon and Prisma.
 
 ## AI agent start rule
 
-Before any AI agent changes this repository, read `AGENTS.md` first.
+Before changing this repository, read `AGENTS.md` and the product documents it references.
 
 ## Run locally
 
@@ -21,33 +16,54 @@ pnpm seed:prebuilt
 pnpm dev
 ```
 
-Local API: <http://localhost:4000/api>
+API: <http://localhost:4000/api>
 
 Health check: <http://localhost:4000/api/health>
 
-## Current state
+The frontend runs separately at <http://localhost:3010>.
 
-This backend now includes Prisma-backed core APIs, JWT/RBAC auth, ownership scoping, report privacy, deterministic AI fallback logic, a DeepSeek V4 Flash AI service adapter, module-specific evaluation profiles, saved-response report generation, persisted report readback, candidate invite/access-code assessment entry, and seeded researched prebuilt assessment banks for HR Generalist, Software Engineer, and Team Leader roles. Public registration creates interviewer accounts; admin accounts are private/seeded; candidates complete one assigned assessment through invite/access-code routes and cannot log in as platform users after completion. The seeded banks hold 30 HR questions, 39 software-engineer questions, and 30 team-leader questions; the product should assign only a candidate-sized subset per assessment. Some frontend-driven flows and production integrations remain MVP follow-up work.
+## Current capabilities
+
+- JWT authentication and role/organization ownership checks.
+- Public interviewer registration with atomic workspace creation.
+- Nested assessment-template CRUD and researched starter banks.
+- High-entropy, expiring candidate invitations with rate-limited access.
+- Deterministic candidate question assignment and autosave validation.
+- Access-code-scoped AI interview/follow-up history with DeepSeek fallback.
+- JavaScript execution through Judge0 or self-hosted Piston, hidden-test grading, and persisted submissions.
+- Evidence-backed advisory report generation, report readback, and reviewer notes.
+- Organization-scoped dashboard/activity/module/score/theme analytics.
 
 ## Module map
 
-- `src/modules/auth/` — interviewer registration, admin/interviewer login, logout, current user.
-- `src/modules/templates/` — assessment template CRUD.
-- `src/modules/sessions/` — interview session creation/start/complete plus candidate access-code entry.
-- `src/modules/responses/` — platform response review and candidate access-code submission/autosave boundary.
-- `src/modules/ai/` — AI question, follow-up, evaluation, report generation boundary.
-- `src/modules/code/` — code run/submit boundary for Judge0/sandbox.
-- `src/modules/reports/` — candidate report retrieval/generation/export boundary.
-- `src/modules/analytics/` — dashboard summary/activity.
-- `prisma/schema.prisma` — database schema draft.
+- `src/modules/auth/` - authentication, guards, roles, and ownership helpers.
+- `src/modules/templates/` - assessment template CRUD and prebuilt banks.
+- `src/modules/sessions/` - workspace sessions and candidate invitation access.
+- `src/modules/responses/` - scoped review reads and candidate autosave.
+- `src/modules/ai/` - provider adapter, deterministic fallback, and candidate conversation boundary.
+- `src/modules/code/` - execution adapters, challenge bank, grading, and submissions.
+- `src/modules/reports/` - evaluation aggregation, persisted reports, and reviewer notes.
+- `src/modules/analytics/` - organization-scoped operational analytics.
+- `prisma/schema.prisma` - database schema.
+
+## Environment highlights
+
+- `DATABASE_URL`, `JWT_SECRET`
+- `FRONTEND_URL`
+- `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, `DEEPSEEK_MODEL`
+- `CODE_EXECUTION_PROVIDER=judge0|piston`
+- `JUDGE0_API_URL`, optional Judge0 credentials/language ID
+- `PISTON_URL`, optional Piston API key
+
+See `.env.example` for limits and local defaults. Production must set a strong `JWT_SECRET` and should use a capacity-controlled execution sandbox.
 
 ## Source of truth
 
-- `AGENTS.md` — backend agent/team alignment.
-- `docs/SRS.md` — product requirements.
-- `docs/API-CONTRACT.md` — API contract.
-- `docs/DATABASE-DESIGN.md` — database design.
-- `docs/AI-SERVICE-CONTRACT.md` — AI integration contract.
+- `AGENTS.md` - backend agent/team alignment.
+- `docs/SRS.md` - requirements and MVP scope.
+- `docs/API-CONTRACT.md` - shared API contract.
+- `docs/DATABASE-DESIGN.md` - persistence model.
+- `docs/AI-SERVICE-CONTRACT.md` - AI boundary and safety.
 
 ## Verification
 
@@ -56,9 +72,7 @@ pnpm test
 pnpm typecheck
 pnpm lint
 pnpm build
-DATABASE_URL='postgresql://postgres:***@localhost:5432/evalora' pnpm prisma:validate
+pnpm prisma:validate
 ```
 
-## Separate repository note
-
-This folder is intentionally self-contained so it can be pushed to its own GitHub repository independently from the frontend.
+This repository is intentionally independent from the frontend repository.

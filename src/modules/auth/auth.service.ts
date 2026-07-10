@@ -16,7 +16,13 @@ export interface AuthUserRecord {
 
 export interface AuthUserRepository {
   findByEmail(email: string): Promise<AuthUserRecord | null>;
+  findById?(id: string): Promise<AuthUserRecord | null>;
   createUser(data: Omit<AuthUserRecord, "id">): Promise<AuthUserRecord>;
+  createUserWithWorkspace?(
+    data: Omit<AuthUserRecord, "id" | "organizationId">,
+    workspaceName: string,
+  ): Promise<AuthUserRecord>;
+  ensureUserWorkspace?(user: AuthUserRecord, workspaceName: string): Promise<AuthUserRecord>;
 }
 
 export interface RegisterInput {
@@ -25,6 +31,7 @@ export interface RegisterInput {
   password?: string;
   role?: UserRole;
   organizationId?: string;
+  organizationName?: string;
 }
 
 export interface LoginInput {
@@ -48,11 +55,35 @@ interface PrismaUserRow {
 
 interface PrismaUserClient {
   user: {
-    findUnique(args: { where: { email: string }; select: Record<keyof PrismaUserRow, true> }): Promise<PrismaUserRow | null>;
+    findUnique(args: { where: { email: string } | { id: string }; select: Record<keyof PrismaUserRow, true> }): Promise<PrismaUserRow | null>;
     create(args: {
-      data: { name: string; email: string; passwordHash: string; role: PrismaRole; organizationId?: string };
+      data:
+        | {
+            name: string;
+            email: string;
+            passwordHash: string;
+            role: PrismaRole;
+            organizationId?: string;
+            organization?: never;
+          }
+        | {
+            name: string;
+            email: string;
+            passwordHash: string;
+            role: PrismaRole;
+            organizationId?: never;
+            organization: { create: { name: string } };
+          };
       select: Record<keyof PrismaUserRow, true>;
     }): Promise<PrismaUserRow>;
+    update(args: {
+      where: { id: string };
+      data: { organizationId: string };
+      select: Record<keyof PrismaUserRow, true>;
+    }): Promise<PrismaUserRow>;
+  };
+  organization: {
+    create(args: { data: { name: string }; select: { id: true } }): Promise<{ id: string }>;
   };
 }
 
@@ -80,6 +111,14 @@ export class PrismaAuthRepository implements AuthUserRepository {
     return user ? toAuthUserRecord(user) : null;
   }
 
+  async findById(id: string): Promise<AuthUserRecord | null> {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: USER_SELECT,
+    });
+    return user ? toAuthUserRecord(user) : null;
+  }
+
   async createUser(data: Omit<AuthUserRecord, "id">): Promise<AuthUserRecord> {
     const user = await this.prisma.user.create({
       data: {
@@ -94,13 +133,47 @@ export class PrismaAuthRepository implements AuthUserRepository {
 
     return toAuthUserRecord(user);
   }
+
+  async createUserWithWorkspace(
+    data: Omit<AuthUserRecord, "id" | "organizationId">,
+    workspaceName: string,
+  ): Promise<AuthUserRecord> {
+    const user = await this.prisma.user.create({
+      data: {
+        name: data.name.trim(),
+        email: normalizeEmail(data.email),
+        passwordHash: data.passwordHash,
+        role: toPrismaRole(data.role),
+        organization: { create: { name: workspaceName } },
+      },
+      select: USER_SELECT,
+    });
+
+    return toAuthUserRecord(user);
+  }
+
+  async ensureUserWorkspace(user: AuthUserRecord, workspaceName: string): Promise<AuthUserRecord> {
+    if (user.organizationId || user.role === "admin" || user.role === "candidate") return user;
+
+    const organization = await this.prisma.organization.create({
+      data: { name: workspaceName },
+      select: { id: true },
+    });
+    const updatedUser = await this.prisma.user.update({
+      where: { id: user.id },
+      data: { organizationId: organization.id },
+      select: USER_SELECT,
+    });
+
+    return toAuthUserRecord(updatedUser);
+  }
 }
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly users: AuthUserRepository,
-    private readonly jwtSecret = process.env.JWT_SECRET || DEFAULT_JWT_SECRET,
+    private readonly jwtSecret = resolveJwtSecret(),
   ) {}
 
   async register(input: RegisterInput): Promise<AuthResult> {
@@ -108,6 +181,9 @@ export class AuthService {
     const email = normalizeEmail(requireNonEmpty(input.email, "Email is required."));
     const password = requirePassword(input.password);
     const role = resolvePublicRegistrationRole(input.role);
+    if (input.organizationId?.trim()) {
+      throw new Error("Organization membership cannot be selected during public registration.");
+    }
 
     const existingUser = await this.users.findByEmail(email);
     if (existingUser) {
@@ -115,20 +191,34 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-    const user = await this.users.createUser({ name, email, passwordHash, role, organizationId: input.organizationId });
+    const userData = { name, email, passwordHash, role };
+    const user = this.users.createUserWithWorkspace
+      ? await this.users.createUserWithWorkspace(userData, workspaceName(input.organizationName, name))
+      : await this.users.createUser(userData);
     return this.toAuthResult(user);
+  }
+
+  async getCurrentUser(id: string): Promise<Omit<AuthUserRecord, "passwordHash">> {
+    if (!this.users.findById) throw new Error("User lookup is unavailable.");
+    const user = await this.users.findById(id);
+    if (!user || user.role === "candidate") throw new Error("User account is unavailable.");
+    return stripPasswordHash(user);
   }
 
   async login(input: LoginInput): Promise<AuthResult> {
     const email = normalizeEmail(requireNonEmpty(input.email, "Email is required."));
     const password = requireNonEmpty(input.password, "Password is required.");
-    const user = await this.users.findByEmail(email);
+    let user = await this.users.findByEmail(email);
 
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
       throw new Error("Invalid email or password.");
     }
     if (user.role === "candidate") {
       throw new Error("Candidates access assessments through an invitation link or access code.");
+    }
+
+    if (!user.organizationId && user.role !== "admin" && this.users.ensureUserWorkspace) {
+      user = await this.users.ensureUserWorkspace(user, workspaceName(undefined, user.name));
     }
 
     return this.toAuthResult(user);
@@ -167,6 +257,18 @@ function requirePassword(value: string | undefined): string {
   if (password.length < 8) throw new Error("Password must be at least 8 characters.");
   if (password.length > 128) throw new Error("Password must be at most 128 characters.");
   return password;
+}
+
+function workspaceName(requestedName: string | undefined, userName: string): string {
+  const normalized = requestedName?.trim();
+  return normalized ? normalized.slice(0, 120) : `${userName.trim().slice(0, 96)}'s workspace`;
+}
+
+function resolveJwtSecret(): string {
+  const configured = process.env.JWT_SECRET?.trim();
+  if (configured) return configured;
+  if (process.env.NODE_ENV === "production") throw new Error("JWT_SECRET is required in production.");
+  return DEFAULT_JWT_SECRET;
 }
 
 function resolvePublicRegistrationRole(role: UserRole | undefined): UserRole {

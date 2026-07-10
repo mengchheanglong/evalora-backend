@@ -23,6 +23,12 @@ const accessSessionRow = {
 test("saveResponse creates a new answer when no existing session/question response exists", async () => {
   const calls: unknown[] = [];
   const service = new ResponsesService({
+    interviewSession: {
+      findFirst: async (args: unknown) => {
+        calls.push({ method: "session.findFirst", args });
+        return assignedSessionRow();
+      },
+    },
     response: {
       findFirst: async (args: unknown) => {
         calls.push({ method: "findFirst", args });
@@ -49,6 +55,8 @@ test("saveResponse creates a new answer when no existing session/question respon
   assert.equal(result.savedAt, createdAt.toISOString());
 
   assert.deepEqual(calls, [
+    { method: "session.findFirst", args: { where: { id: "session-1" } } },
+    { method: "session.findFirst", args: assignmentLookupArgs() },
     {
       method: "findFirst",
       args: { where: { sessionId: "session-1", questionId: "question-1" }, orderBy: { createdAt: "desc" } },
@@ -70,6 +78,12 @@ test("saveResponse creates a new answer when no existing session/question respon
 test("saveResponse updates an existing session/question response for autosave", async () => {
   const calls: unknown[] = [];
   const service = new ResponsesService({
+    interviewSession: {
+      findFirst: async (args: unknown) => {
+        calls.push({ method: "session.findFirst", args });
+        return assignedSessionRow();
+      },
+    },
     response: {
       findFirst: async (args: unknown) => {
         calls.push({ method: "findFirst", args });
@@ -94,6 +108,8 @@ test("saveResponse updates an existing session/question response for autosave", 
   assert.deepEqual(result.responseJson, { confidence: 5 });
 
   assert.deepEqual(calls, [
+    { method: "session.findFirst", args: { where: { id: "session-1" } } },
+    { method: "session.findFirst", args: assignmentLookupArgs() },
     {
       method: "findFirst",
       args: { where: { sessionId: "session-1", questionId: "question-1" }, orderBy: { createdAt: "desc" } },
@@ -135,7 +151,7 @@ test("saveResponseByAccessCode autosaves by invite code without candidate login"
     interviewSession: {
       findFirst: async (args: any) => {
         calls.push({ method: "session.findFirst", args });
-        return accessSessionRow;
+        return assignedSessionRow();
       },
     },
     response: {
@@ -158,6 +174,8 @@ test("saveResponseByAccessCode autosaves by invite code without candidate login"
   assert.equal(result.sessionId, "session-1");
   assert.deepEqual(calls, [
     { method: "session.findFirst", args: { where: { accessCode: "EV-123456" } } },
+    { method: "session.findFirst", args: { where: { id: "session-1" } } },
+    { method: "session.findFirst", args: assignmentLookupArgs() },
     { method: "response.findFirst", args: { where: { sessionId: "session-1", questionId: "question-1" }, orderBy: { createdAt: "desc" } } },
     {
       method: "response.create",
@@ -186,3 +204,17 @@ test("candidate invite access cannot save after session completion", async () =>
     /no longer available/i,
   );
 });
+
+function assignedSessionRow() {
+  return {
+    ...accessSessionRow,
+    template: { modules: [{ id: "module-1", moduleType: "AI_INTERVIEW", questions: [{ id: "question-1" }] }] },
+  };
+}
+
+function assignmentLookupArgs() {
+  return {
+    where: { id: "session-1" },
+    select: { accessCode: true, template: { select: { modules: { select: { id: true, moduleType: true, questions: { select: { id: true } } } } } } },
+  };
+}

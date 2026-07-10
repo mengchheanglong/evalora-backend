@@ -240,7 +240,15 @@ test("generateAndPersistReport evaluates saved responses by module and persists 
       where: { id: "session-1", organizationId: "org-1" },
       include: {
         candidate: { select: { name: true } },
-        template: { select: { title: true } },
+        template: {
+          select: {
+            title: true,
+            modules: {
+              where: { moduleType: "CODING" },
+              select: { id: true, title: true, moduleType: true, weight: true },
+            },
+          },
+        },
         responses: {
           include: {
             question: {
@@ -248,6 +256,20 @@ test("generateAndPersistReport evaluates saved responses by module and persists 
                 module: true,
               },
             },
+          },
+          orderBy: { createdAt: "asc" },
+        },
+        codeSubmissions: {
+          select: {
+            questionId: true,
+            language: true,
+            sourceCode: true,
+            stdout: true,
+            stderr: true,
+            compileOutput: true,
+            status: true,
+            score: true,
+            createdAt: true,
           },
           orderBy: { createdAt: "asc" },
         },
@@ -318,4 +340,14 @@ test("getReport rejects inaccessible report sessions", async () => {
   const service = new ReportsService(fakePrisma as any);
 
   await assert.rejects(() => (service as any).getReport("session-1", organizationAccess), /not found or access denied/i);
+});
+
+test("getReport reports not-ready instead of returning fabricated candidate data", async () => {
+  const fakePrisma = {
+    interviewSession: { findFirst: async () => ({ id: "session-1", organizationId: "org-1" }) },
+    candidateReport: { findUnique: async () => null },
+  };
+  const service = new ReportsService(fakePrisma as any);
+
+  await assert.rejects(() => service.getReport("session-1", organizationAccess), /report is not ready/i);
 });

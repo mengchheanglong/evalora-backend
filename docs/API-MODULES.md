@@ -13,8 +13,9 @@ Implemented auth persistence slice:
 
 - Logic adapted from the Coorad backend auth flow: normalize email, hash password, verify password with bcrypt, sign JWT with role claims, and never return password hashes.
 - `src/modules/auth/auth.service.ts` exposes `register` and `login` over a repository boundary.
-- Public registration defaults to the interviewer role. It rejects public `admin` and `candidate` registration because admins are private/seeded and candidates use invite links/access codes.
+- Public registration defaults to the interviewer role, rejects caller-supplied organization IDs, and atomically creates a new organization workspace. It rejects public `admin` and `candidate` registration because admins are private/seeded and candidates use invitation links.
 - `login` blocks candidate records so invite-only candidate rows cannot become platform accounts.
+- Login repairs legacy interviewer records that do not yet have an organization workspace.
 - `PrismaAuthRepository` writes/reads `User` records through Prisma using Evalora's `passwordHash` and role enum fields.
 - `src/modules/auth/auth.guard.ts` parses `Authorization: Bearer JWT_TOKEN`, attaches the authenticated user to the request, and provides role-access checks.
 - `src/modules/auth/access-control.ts` derives reusable ownership scopes from authenticated `{ userId, role, organizationId }` context.
@@ -68,10 +69,13 @@ Implemented session persistence slice:
 - Session creation accepts either an existing `candidateId` or candidate name/email. Name/email creation stores an invite-only candidate user row with a random password hash, not a platform login.
 - Session DTOs include candidate/template labels from Prisma relations when available.
 - Candidate access-code endpoints return the assigned assessment template/modules/questions without a platform JWT.
+- Candidate payloads omit scoring rules, rubrics, internal ownership metadata, and coding-bank contents. Question selection is deterministic and restricted again when responses are saved.
 - `PUT /api/sessions/:id/start` writes `IN_PROGRESS` and `startedAt`.
 - `PUT /api/sessions/:id/complete` writes `COMPLETED` and `completedAt`.
 - Platform session routes require JWT auth; create routes are restricted to `admin`, `organization`, and `interviewer` roles.
 - Ownership hardening: organization/interviewer users are scoped to their JWT `organizationId`; candidate invite access is scoped by active access code and closes after completion/expiry.
+- Access codes use high-entropy random tokens and candidate routes are protected by a fixed-window rate limiter.
+- Completion returns immediately with report processing status while report generation continues outside the candidate request.
 
 ## Responses
 
@@ -93,9 +97,7 @@ Implemented response persistence/autosave slice:
 - Platform response routes require JWT auth for admin/interviewer review/corrections.
 - Ownership hardening: organization/interviewer users are scoped through the response session's `organizationId`; candidate invite writes are scoped by active access code and blocked after completion/expiry.
 
-Next response task:
-
-- Add per-module validation when frontend DTOs are finalized.
+- Response writes require an in-progress session and an assigned question; completed, expired, cross-template, and cross-organization writes are rejected.
 
 ## AI
 
@@ -110,18 +112,38 @@ Implemented Member 1 slices:
 - `POST /api/ai/evaluate` returns score, criteria scores, feedback, strengths, improvement areas, evidence, and advisory notice using custom or module-default rubrics.
 - `POST /api/ai/report` aggregates module evaluations into a candidate report.
 - Provider failures fall back to deterministic rubric evaluation instead of crashing the candidate flow.
+- Candidate access endpoints persist conversation messages and provide assigned interview/follow-up generation without exposing platform AI routes.
 
 ## Reports
 
-Implemented first Member 1 slice:
+Implemented report slice:
 
 - `GET /api/reports/:sessionId` reads a persisted `CandidateReport` row first and maps session candidate/template metadata into the report DTO.
-- If no persisted report exists, `GET /api/reports/:sessionId` keeps the generated evidence-based fallback report shape.
+- If no persisted report exists, `GET /api/reports/:sessionId` returns `404` instead of fabricated/demo report data.
 - `POST /api/reports/:sessionId/generate` loads the saved session responses with their questions/modules, groups answers by module, evaluates each module through `AiService` with deterministic fallback, then persists fresh `Evaluation` rows and one `CandidateReport`.
 - Report generation requires a real saved session. Sessions with no candidate responses return generated report data with `persistence.status = "skipped"` and reason `no candidate responses`.
 - Report routes require JWT auth and are restricted to `admin`, `organization`, and `interviewer` roles.
 - Ownership hardening: organization/interviewer users are scoped through the report session's `organizationId`; candidates are intentionally blocked from generated evaluation reports in the MVP API.
+- Response and coding evaluations run concurrently, and reviewer-note endpoints retain human context alongside the advisory report.
 
 ## Code execution
 
-Use a sandbox/Judge0-style service. Never run submitted code directly in Node.
+Never run submitted code inside the API process.
+
+- `CodeExecutionService` selects Judge0 by default or an explicitly configured self-hosted Piston instance.
+- Candidate assignments contain one deterministic easy, medium, and hard challenge when the bank supports all three levels.
+- Candidate run/grade/submit routes require an active access code and are rate limited.
+- Hidden test inputs, expected outputs, and actual outputs are stripped from candidate responses and submission history.
+- Platform code routes require JWT/RBAC and session ownership.
+
+## Analytics
+
+Endpoints:
+
+- `GET /api/analytics/summary`
+- `GET /api/analytics/activity`
+- `GET /api/analytics/module-performance`
+- `GET /api/analytics/score-distribution`
+- `GET /api/analytics/themes`
+
+Analytics are computed from organization-scoped sessions, evaluations, reports, and report evidence. No static demo values are returned.

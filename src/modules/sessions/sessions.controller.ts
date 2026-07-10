@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Inject,
   NotFoundException,
   Param,
   Post,
@@ -14,12 +15,17 @@ import {
 import type { SessionStatus } from "../../domain/evalora.types";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
+import { ReportsService } from "../reports/reports.service";
+import { CandidateAccessRateLimitGuard } from "./access-rate-limit.guard";
 import { type CreateSessionInput, type ListSessionsFilter, SessionsService } from "./sessions.service";
 
 @Controller("sessions")
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class SessionsController {
-  constructor(private readonly sessionsService: SessionsService) {}
+  constructor(
+    @Inject(SessionsService) private readonly sessionsService: SessionsService,
+    @Inject(ReportsService) private readonly reportsService: ReportsService,
+  ) {}
 
   @Post()
   @Roles("admin", "organization", "interviewer")
@@ -60,14 +66,25 @@ export class SessionsController {
 
   @Put(":id/complete")
   @Roles("admin", "organization", "interviewer")
-  complete(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
-    return this.sessionsService.completeSession(id, toAccessContext(request.user));
+  async complete(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
+    const access = toAccessContext(request.user);
+    const session = await this.sessionsService.completeSession(id, access);
+    this.queueReportGeneration(session.id, access);
+    return { ...session, reportStatus: session.reportReady ? "generated" as const : "pending" as const };
+  }
+
+  private queueReportGeneration(id: string, access: ReturnType<typeof toAccessContext>) {
+    void this.reportsService.generateAndPersistReport(id, access).catch(() => undefined);
   }
 }
 
 @Controller("sessions/access")
+@UseGuards(CandidateAccessRateLimitGuard)
 export class CandidateSessionAccessController {
-  constructor(private readonly sessionsService: SessionsService) {}
+  constructor(
+    @Inject(SessionsService) private readonly sessionsService: SessionsService,
+    @Inject(ReportsService) private readonly reportsService: ReportsService,
+  ) {}
 
   @Get(":accessCode")
   findByAccessCode(@Param("accessCode") accessCode: string) {
@@ -80,7 +97,9 @@ export class CandidateSessionAccessController {
   }
 
   @Put(":accessCode/complete")
-  completeByAccessCode(@Param("accessCode") accessCode: string) {
-    return this.sessionsService.completeSessionByAccessCode(accessCode);
+  async completeByAccessCode(@Param("accessCode") accessCode: string) {
+    const session = await this.sessionsService.completeSessionByAccessCode(accessCode);
+    void this.reportsService.generateAndPersistReport(session.id).catch(() => undefined);
+    return { ...session, reportStatus: "pending" as const };
   }
 }

@@ -1,29 +1,40 @@
-import { Controller, Get } from "@nestjs/common";
+import { Controller, Get, Inject, Req, UseGuards } from "@nestjs/common";
+import { toAccessContext } from "../auth/access-control";
+import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
+import { AnalyticsService } from "./analytics.service";
 
 @Controller("analytics")
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class AnalyticsController {
+  constructor(@Inject(AnalyticsService) private readonly analyticsService: AnalyticsService) {}
+
   @Get("summary")
-  summary() {
-    return {
-      totalCandidates: 42,
-      completedAssessments: 28,
-      pendingAssessments: 14,
-      averageScore: 4.1,
-      completionRate: 0.67,
-      modulePerformance: [
-        { module: "Technical", average: 4.2 },
-        { module: "Communication", average: 4.0 },
-        { module: "Leadership", average: 3.8 },
-        { module: "Work Style", average: 4.1 },
-      ],
-    };
+  @Roles("admin", "organization", "interviewer")
+  summary(@Req() request: AuthenticatedRequest) {
+    return this.analyticsService.summary(toAccessContext(request.user));
   }
 
   @Get("activity")
-  activity() {
-    return [
-      { type: "session_completed", message: "Demo candidate completed assessment", createdAt: new Date().toISOString() },
-      { type: "report_generated", message: "Candidate report generated", createdAt: new Date().toISOString() },
-    ];
+  @Roles("admin", "organization", "interviewer")
+  activity(@Req() request: AuthenticatedRequest) {
+    return this.analyticsService.activity(toAccessContext(request.user));
+  }
+
+  @Get("module-performance")
+  @Roles("admin", "organization", "interviewer")
+  modulePerformance(@Req() request: AuthenticatedRequest) {
+    return this.analyticsService.modulePerformance(toAccessContext(request.user));
+  }
+
+  @Get("score-distribution")
+  @Roles("admin", "organization", "interviewer")
+  scoreDistribution(@Req() request: AuthenticatedRequest) {
+    return this.analyticsService.scoreDistribution(toAccessContext(request.user));
+  }
+
+  @Get("themes")
+  @Roles("admin", "organization", "interviewer")
+  themes(@Req() request: AuthenticatedRequest) {
+    return this.analyticsService.themes(toAccessContext(request.user));
   }
 }

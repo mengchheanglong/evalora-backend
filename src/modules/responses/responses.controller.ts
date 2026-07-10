@@ -1,12 +1,13 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Req, UseGuards } from "@nestjs/common";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { type SaveResponseInput, ResponsesService } from "./responses.service";
+import { CandidateAccessRateLimitGuard } from "../sessions/access-rate-limit.guard";
 
 @Controller("responses")
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ResponsesController {
-  constructor(private readonly responsesService: ResponsesService) {}
+  constructor(@Inject(ResponsesService) private readonly responsesService: ResponsesService) {}
 
   @Post()
   @Roles("admin", "organization", "interviewer")
@@ -26,8 +27,9 @@ export class ResponsesController {
 }
 
 @Controller("responses/access")
+@UseGuards(CandidateAccessRateLimitGuard)
 export class CandidateResponsesAccessController {
-  constructor(private readonly responsesService: ResponsesService) {}
+  constructor(@Inject(ResponsesService) private readonly responsesService: ResponsesService) {}
 
   @Post(":accessCode")
   async submitByAccessCode(@Param("accessCode") accessCode: string, @Body() body: SaveResponseInput) {

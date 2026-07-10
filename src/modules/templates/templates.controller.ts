@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Post, Put, Query, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, Inject, NotFoundException, Param, Post, Put, Query, Req, UseGuards } from "@nestjs/common";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { type CreateTemplateInput, TemplatesService, type UpdateTemplateInput } from "./templates.service";
@@ -6,7 +6,7 @@ import { type CreateTemplateInput, TemplatesService, type UpdateTemplateInput } 
 @Controller("templates")
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class TemplatesController {
-  constructor(private readonly templatesService: TemplatesService) {}
+  constructor(@Inject(TemplatesService) private readonly templatesService: TemplatesService) {}
 
   @Get()
   @Roles("admin", "organization", "interviewer")

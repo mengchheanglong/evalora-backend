@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Post, Req, UnauthorizedException, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Inject, Post, Req, UnauthorizedException, UseGuards } from "@nestjs/common";
 import type { UserRole } from "../../domain/evalora.types";
 import { type AuthenticatedRequest, JwtAuthGuard } from "./auth.guard";
 import { AuthService } from "./auth.service";
@@ -9,6 +9,7 @@ interface RegisterRequest {
   password?: string;
   role?: UserRole;
   organizationId?: string;
+  organizationName?: string;
 }
 
 interface LoginRequest {
@@ -18,7 +19,7 @@ interface LoginRequest {
 
 @Controller("auth")
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(@Inject(AuthService) private readonly authService: AuthService) {}
 
   @Post("register")
   async register(@Body() body: RegisterRequest) {
@@ -47,7 +48,12 @@ export class AuthController {
 
   @Get("me")
   @UseGuards(JwtAuthGuard)
-  me(@Req() request: AuthenticatedRequest) {
-    return request.user;
+  async me(@Req() request: AuthenticatedRequest) {
+    if (!request.user) throw new UnauthorizedException("Authentication required.");
+    try {
+      return await this.authService.getCurrentUser(request.user.id);
+    } catch {
+      throw new UnauthorizedException("Authentication required.");
+    }
   }
 }

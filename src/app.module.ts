@@ -1,9 +1,11 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { AnalyticsController } from "./modules/analytics/analytics.controller";
+import { AnalyticsService } from "./modules/analytics/analytics.service";
 import { AppController } from "./app.controller";
-import { AiController } from "./modules/ai/ai.controller";
+import { AiController, CandidateAiController } from "./modules/ai/ai.controller";
 import { AiService } from "./modules/ai/ai.service";
+import { CandidateAiService } from "./modules/ai/candidate-ai.service";
 import { createDeepSeekProviderFromEnv } from "./modules/ai/deepseek.provider";
 import { AuthController } from "./modules/auth/auth.controller";
 import { JwtAuthGuard, RolesGuard } from "./modules/auth/auth.guard";
@@ -15,6 +17,7 @@ import { CandidateResponsesAccessController, ResponsesController } from "./modul
 import { ResponsesService } from "./modules/responses/responses.service";
 import { CandidateSessionAccessController, SessionsController } from "./modules/sessions/sessions.controller";
 import { SessionsService } from "./modules/sessions/sessions.service";
+import { CandidateAccessRateLimitGuard } from "./modules/sessions/access-rate-limit.guard";
 import { TemplatesController } from "./modules/templates/templates.controller";
 import { TemplatesService } from "./modules/templates/templates.service";
 import { PrismaService } from "./prisma/prisma.service";
@@ -30,11 +33,15 @@ import { PrismaService } from "./prisma/prisma.service";
     ResponsesController,
     CandidateResponsesAccessController,
     AiController,
+    CandidateAiController,
     ReportsController,
     AnalyticsController,
   ],
   providers: [
     PrismaService,
+    AnalyticsService,
+    CandidateAccessRateLimitGuard,
+    CandidateAiService,
     JwtAuthGuard,
     RolesGuard,
     {

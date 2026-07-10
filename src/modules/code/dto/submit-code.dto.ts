@@ -22,3 +22,20 @@ export class SubmitCodeDto {
   @MaxLength(MAX_SOURCE_CODE_LENGTH)
   sourceCode!: string;
 }
+
+export class CandidateSubmitCodeDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  questionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @IsIn(SUPPORTED_CODE_LANGUAGES)
+  language!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(MAX_SOURCE_CODE_LENGTH)
+  sourceCode!: string;
+}

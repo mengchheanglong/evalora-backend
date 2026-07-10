@@ -7,13 +7,14 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
+import { buildSessionOwnershipWhere, type AccessContext } from "../auth/access-control";
+import { CodeExecutionService } from "./code-execution.service";
 import { CODE_QUESTION_INDEX, CODE_QUESTIONS } from "./constants/code.constants";
 import type { CodeQuestion, SessionSnapshot } from "./interfaces/code.interfaces";
-import { PistonService } from "./piston.service";
 import { PrismaService } from "./prisma.service";
 import type { GradeCodeDto } from "./dto/grade-code.dto";
 import type { RunCodeDto } from "./dto/run-code.dto";
-import type { SubmitCodeDto } from "./dto/submit-code.dto";
+import type { CandidateSubmitCodeDto, SubmitCodeDto } from "./dto/submit-code.dto";
 import type {
   CodeExecutionStatus,
   CodeGradeResult,
@@ -40,7 +41,7 @@ interface GradedRun {
 export class CodeService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(PistonService) private readonly pistonService: PistonService,
+    @Inject(CodeExecutionService) private readonly executionService: CodeExecutionService,
   ) {}
 
   getQuestions(): CodeQuestionSummary[] {
@@ -68,7 +69,7 @@ export class CodeService {
   async runCode(dto: RunCodeDto): Promise<CodeRunResult> {
     this.assertSupportedLanguage(dto.language);
 
-    return this.pistonService.executeCode(dto.sourceCode, dto.stdin ?? "");
+    return this.executionService.executeCode(dto.sourceCode, dto.stdin ?? "");
   }
 
   async gradeCode(dto: GradeCodeDto): Promise<CodeGradeResult> {
@@ -93,10 +94,10 @@ export class CodeService {
     };
   }
 
-  async submitCode(dto: SubmitCodeDto): Promise<CodeSubmitResult> {
+  async submitCode(dto: SubmitCodeDto, access?: AccessContext): Promise<CodeSubmitResult> {
     this.assertSupportedLanguage(dto.language);
 
-    const session = await this.findSessionOrFail(dto.sessionId);
+    const session = await this.findSessionOrFail(dto.sessionId, access);
 
     // A finished assessment must not accept further submissions.
     if (session.status === "COMPLETED") {
@@ -144,8 +145,8 @@ export class CodeService {
     };
   }
 
-  async listSubmissions(sessionId: string) {
-    await this.findSessionOrFail(sessionId);
+  async listSubmissions(sessionId: string, access?: AccessContext) {
+    await this.findSessionOrFail(sessionId, access);
 
     return this.prisma.codeSubmission.findMany({
       where: {
@@ -155,6 +156,48 @@ export class CodeService {
         createdAt: "desc",
       },
     });
+  }
+
+  async getQuestionsByAccessCode(accessCode: string): Promise<CodeQuestionSummary[]> {
+    await this.findOpenSessionByAccessCode(accessCode);
+    return selectCandidateQuestions(this.getQuestions(), accessCode, 3);
+  }
+
+  async runCodeByAccessCode(accessCode: string, dto: RunCodeDto): Promise<CodeRunResult> {
+    await this.findOpenSessionByAccessCode(accessCode);
+    return this.runCode(dto);
+  }
+
+  async gradeCodeByAccessCode(accessCode: string, dto: GradeCodeDto) {
+    await this.findOpenSessionByAccessCode(accessCode);
+    this.assertQuestionAssignedToCandidate(accessCode, dto.questionId);
+    return sanitizeCandidateGrade(await this.gradeCode(dto));
+  }
+
+  async submitCodeByAccessCode(accessCode: string, dto: CandidateSubmitCodeDto) {
+    const session = await this.findOpenSessionByAccessCode(accessCode);
+    this.assertQuestionAssignedToCandidate(accessCode, dto.questionId);
+    return sanitizeCandidateGrade(await this.submitCode({ ...dto, sessionId: session.id }));
+  }
+
+  async listSubmissionsByAccessCode(accessCode: string) {
+    const session = await this.findOpenSessionByAccessCode(accessCode);
+    const submissions = await this.listSubmissions(session.id);
+    return submissions.map((submission) => ({
+      id: submission.id,
+      sessionId: submission.sessionId,
+      questionId: submission.questionId,
+      language: submission.language,
+      sourceCode: submission.sourceCode,
+      stdout: submission.stdout,
+      stderr: submission.stderr,
+      compileOutput: submission.compileOutput,
+      status: submission.status,
+      executionTime: submission.executionTime,
+      score: submission.score,
+      createdAt: submission.createdAt,
+      updatedAt: submission.updatedAt,
+    }));
   }
 
   private async gradeAgainstTestCases(question: CodeQuestion, sourceCode: string): Promise<GradedRun> {
@@ -168,7 +211,7 @@ export class CodeService {
     let maxExecutionTime = 0;
 
     for (const testCase of question.testCases) {
-      const execution = await this.pistonService.executeCode(sourceCode, testCase.stdin);
+      const execution = await this.executionService.executeCode(sourceCode, testCase.stdin);
       const passed =
         execution.status === "Accepted" &&
         this.normalizeOutput(execution.stdout) === this.normalizeOutput(testCase.expectedOutput);
@@ -238,11 +281,36 @@ export class CodeService {
     }
   }
 
-  private async findSessionOrFail(sessionId: string): Promise<SessionSnapshot> {
-    const session = await this.prisma.interviewSession.findUnique({
-      where: {
-        id: sessionId,
-      },
+  private async findSessionOrFail(sessionId: string, access?: AccessContext): Promise<SessionSnapshot> {
+    const session = access
+      ? await this.prisma.interviewSession.findFirst({
+          where: { id: sessionId, ...buildSessionOwnershipWhere(access) },
+          select: {
+            id: true,
+            status: true,
+            expiresAt: true,
+          },
+        })
+      : await this.prisma.interviewSession.findUnique({
+          where: { id: sessionId },
+          select: {
+            id: true,
+            status: true,
+            expiresAt: true,
+          },
+        });
+
+    if (!session) {
+      throw new NotFoundException("Session not found or access denied.");
+    }
+
+    this.assertSessionNotExpired(session);
+    return session;
+  }
+
+  private async findOpenSessionByAccessCode(accessCode: string): Promise<SessionSnapshot> {
+    const session = await this.prisma.interviewSession.findFirst({
+      where: { accessCode: normalizeAccessCode(accessCode) },
       select: {
         id: true,
         status: true,
@@ -254,6 +322,15 @@ export class CodeService {
       throw new NotFoundException("Session not found.");
     }
 
+    this.assertSessionNotExpired(session);
+    if (session.status !== "IN_PROGRESS") {
+      throw new ConflictException("Start the assessment before opening the coding workspace.");
+    }
+
+    return session;
+  }
+
+  private assertSessionNotExpired(session: SessionSnapshot): void {
     if (session.status === "EXPIRED") {
       throw new GoneException("Session has expired.");
     }
@@ -261,8 +338,13 @@ export class CodeService {
     if (session.expiresAt && session.expiresAt.getTime() < Date.now()) {
       throw new GoneException("Session has expired.");
     }
+  }
 
-    return session;
+  private assertQuestionAssignedToCandidate(accessCode: string, questionId: string): void {
+    const assigned = selectCandidateQuestions(this.getQuestions(), accessCode, 3);
+    if (!assigned.some((question) => question.id === questionId)) {
+      throw new BadRequestException("Coding question is not assigned to this session.");
+    }
   }
 
   private findQuestionOrFail(questionId: string): CodeQuestion {
@@ -278,4 +360,56 @@ export class CodeService {
   private normalizeOutput(value: string): string {
     return value.replace(/\r\n/g, "\n").trimEnd();
   }
+}
+
+function selectCandidateQuestions(
+  questions: CodeQuestionSummary[],
+  accessCode: string,
+  limit: number,
+): CodeQuestionSummary[] {
+  if (questions.length <= limit) return questions;
+  const selected: CodeQuestionSummary[] = [];
+
+  for (const difficulty of ["easy", "medium", "hard"] as const) {
+    const candidates = questions.filter((question) => question.difficulty === difficulty);
+    if (!candidates.length || selected.length >= limit) continue;
+    selected.push(candidates[stableIndex(`${accessCode}:${difficulty}`, candidates.length)]);
+  }
+
+  const remaining = questions.filter(
+    (question) => !selected.some((candidate) => candidate.id === question.id),
+  );
+  const offset = stableIndex(accessCode, Math.max(remaining.length, 1));
+  for (let index = 0; selected.length < limit && index < remaining.length; index += 1) {
+    selected.push(remaining[(offset + index) % remaining.length]);
+  }
+
+  return selected;
+}
+
+function stableIndex(seed: string, length: number): number {
+  let hash = 2_166_136_261;
+  for (const character of seed.toUpperCase()) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return (hash >>> 0) % length;
+}
+
+function normalizeAccessCode(accessCode: string): string {
+  const normalized = accessCode.trim().toUpperCase();
+  if (!normalized) throw new BadRequestException("Access code is required.");
+  return normalized;
+}
+
+function sanitizeCandidateGrade<T extends CodeGradeResult | CodeSubmitResult>(result: T) {
+  return {
+    ...result,
+    testResults: result.testResults.map((test, index) => ({
+      case: index + 1,
+      passed: test.passed,
+      status: test.status,
+      executionTime: test.executionTime,
+    })),
+  };
 }
