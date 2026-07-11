@@ -16,6 +16,8 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   private readonly logger = new Logger(PrismaService.name);
 
   async onModuleInit(): Promise<void> {
+    if (process.env.SKIP_DATABASE_CONNECT === "true") return;
+
     try {
       await this.$connect();
     } catch (error) {
