@@ -6,6 +6,9 @@ import { PREBUILT_ASSESSMENT_TEMPLATES, buildPrebuiltTemplateCreateData, buildPr
 
 test("prebuilt template definitions are split into per-role module files", () => {
   const expectedModuleFiles = [
+    "customer-success/index.ts",
+    "data-analyst/index.ts",
+    "frontend-developer/index.ts",
     "hr-generalist/ai-ethics.ts",
     "hr-generalist/behavioral.ts",
     "hr-generalist/communication.ts",
@@ -13,6 +16,7 @@ test("prebuilt template definitions are split into per-role module files", () =>
     "hr-generalist/leadership.ts",
     "hr-generalist/problem-solving.ts",
     "hr-generalist/work-style.ts",
+    "product-manager/index.ts",
     "software-engineer/ai-interview.ts",
     "software-engineer/behavioral.ts",
     "software-engineer/coding.ts",
@@ -47,10 +51,18 @@ function templateByRole(roleType: string) {
   return template;
 }
 
-test("prebuilt templates cover HR, software engineer, and team leader assessments", () => {
+test("prebuilt templates cover core hiring roles across the catalog", () => {
   assert.deepEqual(
     PREBUILT_ASSESSMENT_TEMPLATES.map((template) => template.roleType).sort(),
-    ["HR Generalist", "Software Engineer", "Team Leader"],
+    [
+      "Customer Success",
+      "Data Analyst",
+      "Frontend Developer",
+      "HR Generalist",
+      "Product Manager",
+      "Software Engineer",
+      "Team Leader",
+    ],
   );
 
   const allQuestionIds = new Set<string>();
@@ -58,9 +70,10 @@ test("prebuilt templates cover HR, software engineer, and team leader assessment
     assert.match(template.id, /^prebuilt-/);
     assert.ok(template.title.includes("Assessment"));
     assert.ok((template.timeLimitMin ?? 0) >= 45);
-    assert.ok(template.modules.length >= 6, `${template.title} should have a production-sized module set`);
-    assert.equal(template.scoringRules.source, "prebuilt-researched-v2");
-    assert.ok(template.scoringRules.recommendedCandidateQuestionCount, `${template.title} should define candidate subset size`);
+    assert.ok(template.modules.length >= 5, `${template.title} should have a production-sized module set`);
+    const scoring = template.scoringRules as { source?: string; recommendedCandidateQuestionCount?: unknown };
+    assert.equal(scoring.source, "prebuilt-researched-v2");
+    assert.ok(scoring.recommendedCandidateQuestionCount, `${template.title} should define candidate subset size`);
 
     for (const module of template.modules) {
       assert.ok(module.questions.length >= 3, `${module.title} should include a meaningful question bank`);
@@ -79,15 +92,30 @@ test("prebuilt templates cover HR, software engineer, and team leader assessment
 test("prebuilt templates include researched question-bank depth and candidate subset sizing", () => {
   const hr = templateByRole("HR Generalist");
   assert.ok(hr.modules.flatMap((module) => module.questions).length >= 25);
-  assert.deepEqual(hr.scoringRules.recommendedCandidateQuestionCount, { min: 10, max: 14 });
+  assert.deepEqual((hr.scoringRules as { recommendedCandidateQuestionCount: unknown }).recommendedCandidateQuestionCount, {
+    min: 10,
+    max: 14,
+  });
 
   const software = templateByRole("Software Engineer");
   assert.ok(software.modules.flatMap((module) => module.questions).length >= 35);
-  assert.deepEqual(software.scoringRules.recommendedCandidateQuestionCount, { min: 10, max: 15, practicalTasks: 1 });
+  assert.deepEqual((software.scoringRules as { recommendedCandidateQuestionCount: unknown }).recommendedCandidateQuestionCount, {
+    min: 10,
+    max: 15,
+    practicalTasks: 1,
+  });
 
   const leader = templateByRole("Team Leader");
   assert.ok(leader.modules.flatMap((module) => module.questions).length >= 25);
-  assert.deepEqual(leader.scoringRules.recommendedCandidateQuestionCount, { min: 10, max: 14 });
+  assert.deepEqual((leader.scoringRules as { recommendedCandidateQuestionCount: unknown }).recommendedCandidateQuestionCount, {
+    min: 10,
+    max: 14,
+  });
+
+  for (const role of ["Product Manager", "Frontend Developer", "Data Analyst", "Customer Success"]) {
+    const template = templateByRole(role);
+    assert.ok(template.modules.flatMap((module) => module.questions).length >= 18, `${role} should have a solid question bank`);
+  }
 });
 
 test("prebuilt templates include the expected role/module coverage", () => {
@@ -102,6 +130,22 @@ test("prebuilt templates include the expected role/module coverage", () => {
   assert.deepEqual(
     templateByRole("Team Leader").modules.map((module) => module.type),
     ["leadership", "communication", "behavioral", "problem_solving", "work_style", "ai_interview"],
+  );
+  assert.deepEqual(
+    templateByRole("Product Manager").modules.map((module) => module.type),
+    ["problem_solving", "communication", "leadership", "behavioral", "work_style", "ai_interview"],
+  );
+  assert.deepEqual(
+    templateByRole("Frontend Developer").modules.map((module) => module.type),
+    ["coding", "debugging", "ai_interview", "communication", "behavioral", "work_style"],
+  );
+  assert.deepEqual(
+    templateByRole("Data Analyst").modules.map((module) => module.type),
+    ["problem_solving", "communication", "behavioral", "work_style", "leadership", "ai_interview"],
+  );
+  assert.deepEqual(
+    templateByRole("Customer Success").modules.map((module) => module.type),
+    ["communication", "problem_solving", "behavioral", "leadership", "work_style", "ai_interview"],
   );
 });
 

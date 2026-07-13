@@ -1,6 +1,10 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, NotFoundException } from "@nestjs/common";
 import type { AssessmentModuleDto, AssessmentTemplateDto, JsonValue, ModuleType, QuestionDto, QuestionType } from "../../domain/evalora.types";
 import { assertCanWriteOrganizationResource, buildTemplateOwnershipWhere, forbiddenResourceError, mergeWhere, requireOrganizationId, type AccessContext } from "../auth/access-control";
+import {
+  PREBUILT_ASSESSMENT_TEMPLATES,
+  type PrebuiltAssessmentTemplateDefinition,
+} from "./prebuilt-templates";
 
 type PrismaModuleType = "AI_INTERVIEW" | "CODING" | "DEBUGGING" | "WORK_STYLE" | "BEHAVIORAL" | "LEADERSHIP" | "COMMUNICATION" | "PROBLEM_SOLVING";
 type PrismaQuestionType = "MCQ" | "SCALE" | "SHORT_ANSWER" | "CODING" | "SCENARIO" | "ROLEPLAY";
@@ -71,6 +75,24 @@ export interface TemplateModuleInput {
   questions?: TemplateQuestionInput[];
 }
 
+export interface CatalogTemplateSummaryDto {
+  id: string;
+  title: string;
+  description: string;
+  roleType: string;
+  timeLimitMin?: number;
+  moduleCount: number;
+  questionCount: number;
+  moduleTypes: ModuleType[];
+  source: "prebuilt";
+}
+
+export interface CloneFromCatalogInput {
+  catalogId?: string;
+  /** Optional override for the org-owned copy title. */
+  title?: string;
+}
+
 export interface CreateTemplateInput {
   title?: string;
   description?: string;
@@ -116,6 +138,91 @@ export const TEMPLATE_LIST_INCLUDE = {
 @Injectable()
 export class TemplatesService {
   constructor(private readonly prisma: TemplatePrismaClient) {}
+
+  /** Read-only prebuilt blueprints (not org-owned DB rows). */
+  listCatalog(): CatalogTemplateSummaryDto[] {
+    return PREBUILT_ASSESSMENT_TEMPLATES.map(toCatalogSummary);
+  }
+
+  getCatalogTemplate(catalogId: string): AssessmentTemplateDto {
+    const template = findCatalogTemplate(catalogId);
+    if (!template) throw new NotFoundException("Catalog template not found.");
+    return prebuiltToTemplateDto(template);
+  }
+
+  /**
+   * Deep-clone a prebuilt blueprint into the caller's organization.
+   * New UUIDs are generated for template/modules/questions so orgs can edit safely.
+   */
+  async cloneFromCatalog(input: CloneFromCatalogInput, access?: AccessContext): Promise<AssessmentTemplateDto> {
+    assertCanWriteOrganizationResource(access);
+    const catalogId = requireNonEmpty(input.catalogId, "Catalog template id is required.");
+    const catalog = findCatalogTemplate(catalogId);
+    if (!catalog) throw new NotFoundException("Catalog template not found.");
+
+    return this.createTemplate(
+      {
+        title: input.title?.trim() || catalog.title,
+        description: catalog.description,
+        roleType: catalog.roleType,
+        timeLimitMin: catalog.timeLimitMin,
+        scoringRules: {
+          ...(typeof catalog.scoringRules === "object" && catalog.scoringRules && !Array.isArray(catalog.scoringRules)
+            ? (catalog.scoringRules as Record<string, unknown>)
+            : {}),
+          clonedFromCatalogId: catalog.id,
+          advisoryOnly: true,
+        },
+        modules: catalog.modules.map((module) => ({
+          type: module.type,
+          title: module.title,
+          description: module.description,
+          weight: module.weight,
+          orderIndex: module.orderIndex,
+          settings: module.settings,
+          questions: module.questions.map((question) => ({
+            questionText: question.questionText,
+            questionType: question.questionType,
+            options: question.options,
+            rubric: question.rubric,
+          })),
+        })),
+      },
+      access,
+    );
+  }
+
+  /** Duplicate an existing org-owned template within the same organization. */
+  async duplicateTemplate(id: string, access?: AccessContext): Promise<AssessmentTemplateDto> {
+    assertCanWriteOrganizationResource(access);
+    const source = await this.getTemplate(id, access);
+    if (!source) throw forbiddenResourceError("Template");
+
+    return this.createTemplate(
+      {
+        title: `${source.title} (Copy)`,
+        description: source.description,
+        roleType: source.roleType,
+        timeLimitMin: source.timeLimitMin,
+        scoringRules: source.scoringRules,
+        modules: (source.modules ?? []).map((module) => ({
+          type: module.type,
+          title: module.title,
+          description: module.description,
+          weight: module.weight,
+          orderIndex: module.orderIndex,
+          settings: module.settings,
+          questions: (module.questions ?? []).map((question) => ({
+            questionText: question.questionText,
+            questionType: question.questionType,
+            options: question.options,
+            rubric: question.rubric,
+          })),
+        })),
+      },
+      access,
+    );
+  }
 
   async listTemplates(options: string | ListTemplatesOptions = {}): Promise<AssessmentTemplateDto[]> {
     const normalized = typeof options === "string" ? { organizationId: options } : options;
@@ -306,4 +413,53 @@ function requireNonEmpty(value: string | undefined, message: string): string {
 function requireMethod<T extends (...args: any[]) => any>(method: T | undefined, name: string): T {
   if (!method) throw new Error(`${name} is not available.`);
   return method;
+}
+
+function findCatalogTemplate(catalogId: string): PrebuiltAssessmentTemplateDefinition | undefined {
+  const normalized = catalogId.trim().toLowerCase();
+  return PREBUILT_ASSESSMENT_TEMPLATES.find(
+    (template) => template.id.toLowerCase() === normalized || template.id.toLowerCase() === `prebuilt-${normalized}`,
+  );
+}
+
+function toCatalogSummary(template: PrebuiltAssessmentTemplateDefinition): CatalogTemplateSummaryDto {
+  const questionCount = template.modules.reduce((total, module) => total + module.questions.length, 0);
+  return {
+    id: template.id,
+    title: template.title,
+    description: template.description,
+    roleType: template.roleType,
+    timeLimitMin: template.timeLimitMin,
+    moduleCount: template.modules.length,
+    questionCount,
+    moduleTypes: template.modules.map((module) => module.type),
+    source: "prebuilt",
+  };
+}
+
+function prebuiltToTemplateDto(template: PrebuiltAssessmentTemplateDefinition): AssessmentTemplateDto {
+  return {
+    id: template.id,
+    title: template.title,
+    description: template.description,
+    roleType: template.roleType,
+    timeLimitMin: template.timeLimitMin,
+    scoringRules: template.scoringRules,
+    modules: template.modules.map((module) => ({
+      id: module.id,
+      type: module.type,
+      title: module.title,
+      description: module.description,
+      weight: module.weight,
+      orderIndex: module.orderIndex,
+      settings: module.settings,
+      questions: module.questions.map((question) => ({
+        id: question.id,
+        questionText: question.questionText,
+        questionType: question.questionType,
+        options: question.options,
+        rubric: question.rubric,
+      })),
+    })),
+  };
 }

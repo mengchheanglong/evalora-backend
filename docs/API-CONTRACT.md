@@ -97,11 +97,26 @@ All template routes require workspace authentication.
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| GET | `/templates` | List organization-visible templates with modules/questions. |
-| POST | `/templates` | Create a nested template. |
-| GET | `/templates/:id` | Read one scoped template. |
+| GET | `/templates/catalog` | List **prebuilt blueprints** (read-only library; not org-owned). |
+| GET | `/templates/catalog/:catalogId` | Full prebuilt template for preview. |
+| POST | `/templates/from-catalog` | Deep-clone a prebuilt into the caller's organization (ready to assign or edit). |
+| GET | `/templates` | List **organization-owned** templates. |
+| POST | `/templates` | Create a nested template (blank or custom). |
+| POST | `/templates/:id/duplicate` | Duplicate an org-owned template in the same workspace. |
+| GET | `/templates/:id` | Read one scoped org template. |
 | PUT | `/templates/:id` | Replace template fields and nested modules/questions. |
 | DELETE | `/templates/:id` | Delete one scoped template. |
+
+Clone request:
+
+```json
+{
+  "catalogId": "prebuilt-software-engineer-assessment",
+  "title": "Optional custom title for my copy"
+}
+```
+
+`POST /templates/from-catalog` creates new UUIDs for the template, modules, and questions under the JWT organization. Editing that copy never changes the shared catalog. Sessions should only reference org-owned template ids.
 
 The backend derives `createdById` and organization ownership from the JWT. A template contains title, description, target role, time limit, scoring rules, ordered modules, weights, settings, and questions.
 
