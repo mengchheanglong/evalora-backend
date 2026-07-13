@@ -6,12 +6,13 @@ Evalora uses PostgreSQL on Neon with Prisma.
 
 | Entity | Purpose |
 | --- | --- |
-| User | Platform account or invite-only candidate record, email, password hash, role, optional organization. |
-| Organization | Company/client workspace. |
+| User | Platform account or invite-only candidate record, email, password hash, role, optional organization. Workspace roles: `organization` (owner) and `interviewer` (invited teammate). |
+| Organization | Company/client workspace. Multiple users share one organization. |
+| OrganizationInvite | Pending/accepted/cancelled teammate invites (email, token, expiry, invitedBy). |
 | AssessmentTemplate | Reusable assessment structure for a role/job. |
 | AssessmentModule | Ordered module inside a template. |
 | Question | Prompt/question/rubric inside a module. |
-| InterviewSession | One assigned candidate assessment attempt. |
+| InterviewSession | One assigned candidate assessment attempt, including optional workspace metadata (title, interviewers, schedule, notes, department, language). |
 | Response | Candidate answer to a question/module. |
 | AIMessage | AI/candidate chat messages. |
 | CodeSubmission | Candidate code, run output, language, status. |
@@ -23,11 +24,13 @@ Evalora uses PostgreSQL on Neon with Prisma.
 
 ```text
 Organization 1---N User
+Organization 1---N OrganizationInvite
 Organization 1---N AssessmentTemplate
 AssessmentTemplate 1---N AssessmentModule
 AssessmentModule 1---N Question
 AssessmentTemplate 1---N InterviewSession
 User(candidate) 1---N InterviewSession
+User(creator) 1---N InterviewSession
 InterviewSession 1---N Response
 InterviewSession 1---N AIMessage
 InterviewSession 1---N CodeSubmission
@@ -41,6 +44,7 @@ InterviewSession 1---N ReviewerNote
 - Passwords are stored only as `passwordHash`.
 - Public login is for admin/interviewer platform accounts. Candidate `User` rows are invite-only participant records created from session candidate info and use random password hashes that are not used for login.
 - Candidate assessment access is controlled by `InterviewSession.accessCode`; access ends after completion/expiry while authorized admins/interviewers retain session data, responses, evaluations, and reports.
+- Workspace create-session metadata is optional: `title`, `interviewType`, `interviewers` (JSON string array), `notes`, `targetRole`, `department`, `scheduledAt`, `durationMin`, `language`, `timeZone`, and `createdById`.
 - Use enums for roles, session status, module type, and question type.
 - Store AI evidence as JSON so reports can quote response-backed justification.
 - Store code execution results separately from final report for auditability.

@@ -17,6 +17,12 @@ interface LoginRequest {
   password?: string;
 }
 
+interface GoogleAuthRequest {
+  credential?: string;
+  idToken?: string;
+  organizationName?: string;
+}
+
 @Controller("auth")
 export class AuthController {
   constructor(@Inject(AuthService) private readonly authService: AuthService) {}
@@ -38,6 +44,20 @@ export class AuthController {
       return { ...result, message: "Login successful." };
     } catch {
       throw new UnauthorizedException("Invalid email or password.");
+    }
+  }
+
+  @Post("google")
+  async google(@Body() body: GoogleAuthRequest) {
+    try {
+      const result = await this.authService.loginWithGoogle(body);
+      return { ...result, message: "Google sign-in successful." };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Google sign-in failed.";
+      if (/not configured|credential is required|missing an email/i.test(message)) {
+        throw new BadRequestException(message);
+      }
+      throw new UnauthorizedException(message);
     }
   }
 

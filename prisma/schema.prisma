@@ -41,10 +41,18 @@ enum QuestionType {
   ROLEPLAY
 }
 
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  CANCELLED
+  EXPIRED
+}
+
 model Organization {
   id        String               @id @default(uuid())
   name      String
   users     User[]
+  invites   OrganizationInvite[]
   templates AssessmentTemplate[]
   sessions  InterviewSession[]
   createdAt DateTime             @default(now()) @map("created_at")
@@ -63,11 +71,35 @@ model User {
   organization     Organization?         @relation(fields: [organizationId], references: [id])
   createdTemplates AssessmentTemplate[]  @relation("TemplateCreator")
   candidateSessions InterviewSession[]   @relation("CandidateSessions")
+  createdSessions  InterviewSession[]    @relation("SessionCreator")
   reviewerNotes    ReviewerNote[]
+  sentInvites      OrganizationInvite[]  @relation("InviteSender")
   createdAt        DateTime              @default(now()) @map("created_at")
   updatedAt        DateTime              @updatedAt @map("updated_at")
 
   @@map("users")
+}
+
+/// Workspace invite for teammates (interviewers). Owners invite; invitees join the same organization.
+model OrganizationInvite {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String
+  /// Invite role is always INTERVIEWER for MVP; stored for future expansion.
+  role           UserRole     @default(INTERVIEWER)
+  token          String       @unique
+  status         InviteStatus @default(PENDING)
+  invitedById    String       @map("invited_by_id")
+  invitedBy      User         @relation("InviteSender", fields: [invitedById], references: [id])
+  expiresAt      DateTime     @map("expires_at")
+  acceptedAt     DateTime?    @map("accepted_at")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  @@index([organizationId, status])
+  @@index([email])
+  @@map("organization_invites")
 }
 
 model AssessmentTemplate {
@@ -130,6 +162,21 @@ model InterviewSession {
   template        AssessmentTemplate @relation(fields: [templateId], references: [id])
   organizationId  String?            @map("organization_id")
   organization    Organization?      @relation(fields: [organizationId], references: [id])
+  createdById     String?            @map("created_by_id")
+  createdBy       User?              @relation("SessionCreator", fields: [createdById], references: [id])
+  /// Workspace label from the create-session form (optional).
+  title           String?
+  interviewType   String?            @map("interview_type")
+  /// Named interviewers assigned on the workspace form (string array JSON).
+  interviewers    Json?
+  notes           String?
+  /// Role/position for this session; falls back to template.roleType when unset.
+  targetRole      String?            @map("target_role")
+  department      String?
+  scheduledAt     DateTime?          @map("scheduled_at")
+  durationMin     Int?               @map("duration_min")
+  language        String?
+  timeZone        String?            @map("time_zone")
   accessCode      String             @unique @map("access_code")
   status          SessionStatus      @default(NOT_STARTED)
   startedAt       DateTime?          @map("started_at")

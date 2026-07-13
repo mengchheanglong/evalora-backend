@@ -16,41 +16,56 @@ export class AnalyticsService {
   async summary(access: AccessContext) {
     const sessionWhere = sessionScope(access);
     const templateWhere = buildTemplateOwnershipWhere(access) as Prisma.AssessmentTemplateWhereInput;
-    const [sessions, totalTemplates, reports, modulePerformance] = await Promise.all([
-      this.prisma.interviewSession.findMany({
-        where: sessionWhere,
-        select: {
-          id: true,
-          candidateId: true,
-          status: true,
-          createdAt: true,
-          updatedAt: true,
-          completedAt: true,
-          candidate: { select: { name: true, email: true } },
-          template: { select: { title: true, roleType: true } },
-          report: { select: { overallScore: true } },
-        },
-        orderBy: { updatedAt: "desc" },
-      }),
-      this.prisma.assessmentTemplate.count({ where: templateWhere }),
-      this.prisma.candidateReport.findMany({
-        where: { session: sessionWhere },
-        select: { overallScore: true },
-      }),
-      this.modulePerformance(access),
-    ]);
+
+    // Prefer aggregates over loading every session row (much faster on Neon).
+    const [statusGroups, totalTemplates, reportStats, distinctCandidates, modulePerformance, recentCompleted] =
+      await Promise.all([
+        this.prisma.interviewSession.groupBy({
+          by: ["status"],
+          where: sessionWhere,
+          _count: { _all: true },
+        }),
+        this.prisma.assessmentTemplate.count({ where: templateWhere }),
+        this.prisma.candidateReport.aggregate({
+          where: { session: sessionWhere },
+          _avg: { overallScore: true },
+          _count: { _all: true },
+        }),
+        this.prisma.interviewSession.findMany({
+          where: sessionWhere,
+          select: { candidateId: true },
+          distinct: ["candidateId"],
+        }),
+        this.modulePerformance(access),
+        this.prisma.interviewSession.findMany({
+          where: { ...sessionWhere, status: "COMPLETED" },
+          select: {
+            id: true,
+            completedAt: true,
+            candidate: { select: { name: true, email: true } },
+            template: { select: { title: true, roleType: true } },
+            report: { select: { overallScore: true } },
+          },
+          orderBy: { completedAt: "desc" },
+          take: 6,
+        }),
+      ]);
 
     const statusCounts = emptyStatusCounts();
-    for (const session of sessions) statusCounts[fromPrismaStatus(session.status)] += 1;
+    let totalSessions = 0;
+    for (const group of statusGroups) {
+      const key = fromPrismaStatus(group.status);
+      statusCounts[key] = group._count._all;
+      totalSessions += group._count._all;
+    }
 
     const completedAssessments = statusCounts.completed;
-    const totalSessions = sessions.length;
-    const averageScore = reports.length
-      ? round(reports.reduce((total, report) => total + report.overallScore, 0) / reports.length, 2)
+    const averageScore = reportStats._count._all
+      ? round(reportStats._avg.overallScore ?? 0, 2)
       : 0;
 
     return {
-      totalCandidates: new Set(sessions.map((session) => session.candidateId)).size,
+      totalCandidates: distinctCandidates.length,
       totalTemplates,
       totalSessions,
       completedAssessments,
@@ -61,18 +76,15 @@ export class AnalyticsService {
       completionRate: totalSessions ? round(completedAssessments / totalSessions, 4) : 0,
       statusBreakdown: Object.entries(statusCounts).map(([status, count]) => ({ status, count })),
       modulePerformance,
-      recentCompleted: sessions
-        .filter((session) => session.status === "COMPLETED")
-        .slice(0, 6)
-        .map((session) => ({
-          sessionId: session.id,
-          candidateName: session.candidate.name,
-          candidateEmail: session.candidate.email,
-          assessmentName: session.template.title,
-          targetRole: session.template.roleType,
-          overallScore: session.report?.overallScore,
-          completedAt: session.completedAt?.toISOString(),
-        })),
+      recentCompleted: recentCompleted.map((session) => ({
+        sessionId: session.id,
+        candidateName: session.candidate.name,
+        candidateEmail: session.candidate.email,
+        assessmentName: session.template.title,
+        targetRole: session.template.roleType,
+        overallScore: session.report?.overallScore,
+        completedAt: session.completedAt?.toISOString(),
+      })),
     };
   }
 
@@ -109,12 +121,15 @@ export class AnalyticsService {
   }
 
   async modulePerformance(access: AccessContext) {
+    // Cap rows scanned for dashboard speed; averages stay representative for MVP volumes.
     const evaluations = await this.prisma.evaluation.findMany({
       where: { session: sessionScope(access) },
       select: {
         score: true,
         module: { select: { id: true, title: true, moduleType: true } },
       },
+      orderBy: { createdAt: "desc" },
+      take: 500,
     });
 
     const groups = new Map<string, { moduleId?: string; moduleType: string; title: string; total: number; count: number }>();
@@ -148,6 +163,7 @@ export class AnalyticsService {
     const reports = await this.prisma.candidateReport.findMany({
       where: { session: sessionScope(access) },
       select: { overallScore: true },
+      take: 1000,
     });
     const buckets = [
       { label: "1.0-1.9", min: 1, max: 2, count: 0 },
@@ -168,6 +184,8 @@ export class AnalyticsService {
     const reports = await this.prisma.candidateReport.findMany({
       where: { session: sessionScope(access) },
       select: { strengths: true, improvementAreas: true },
+      take: 200,
+      orderBy: { createdAt: "desc" },
     });
 
     return {
@@ -198,26 +216,32 @@ function activityCopy(status: StatusKey, reportReady: boolean) {
 }
 
 function stringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) : [];
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
 function rankThemes(values: string[]) {
-  const counts = new Map<string, { label: string; count: number }>();
+  const counts = new Map<string, number>();
   for (const value of values) {
-    const label = value.trim();
-    const key = label.toLowerCase();
-    const current = counts.get(key) ?? { label, count: 0 };
-    current.count += 1;
-    counts.set(key, current);
+    const key = value.trim();
+    if (!key) continue;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
   }
-  return Array.from(counts.values()).sort((a, b) => b.count - a.count).slice(0, 8);
+  return Array.from(counts.entries())
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8);
 }
 
-function titleCase(value: string): string {
-  return value.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase());
+function titleCase(value: string) {
+  return value
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
-function round(value: number, precision: number): number {
-  const factor = 10 ** precision;
+function round(value: number, digits: number) {
+  const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
 }

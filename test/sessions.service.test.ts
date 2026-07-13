@@ -11,6 +11,18 @@ const sessionRow = {
   candidate: { name: "Demo Candidate", email: "candidate@example.com" },
   templateId: "template-1",
   template: { title: "Backend Engineer Assessment", roleType: "Backend Engineer" },
+  createdById: "interviewer-1",
+  createdBy: { id: "interviewer-1", name: "Ada Interviewer", role: "INTERVIEWER" },
+  title: null,
+  interviewType: null,
+  interviewers: null,
+  notes: null,
+  targetRole: null,
+  department: null,
+  scheduledAt: null,
+  durationMin: null,
+  language: null,
+  timeZone: null,
   organizationId: "org-1",
   accessCode: "EV-123456",
   status: "NOT_STARTED",
@@ -75,16 +87,97 @@ test("createSession generates an access code and maps candidate/template assignm
       candidateId: "candidate-1",
       templateId: "template-1",
       organizationId: "org-1",
+      createdById: undefined,
       accessCode: "EV-123456",
       status: "NOT_STARTED",
       expiresAt,
+      title: undefined,
+      interviewType: undefined,
+      interviewers: undefined,
+      notes: undefined,
+      targetRole: undefined,
+      department: undefined,
+      scheduledAt: undefined,
+      durationMin: undefined,
+      language: undefined,
+      timeZone: undefined,
     },
     include: {
       candidate: { select: { name: true, email: true } },
+      createdBy: { select: { id: true, name: true, role: true } },
       template: { select: { title: true, roleType: true } },
       report: { select: { overallScore: true } },
     },
   });
+});
+
+test("createSession stores frontend workspace metadata and maps interviewer labels", async () => {
+  const calls: any[] = [];
+  const service = new SessionsService(
+    {
+      assessmentTemplate: {
+        findFirst: async () => ({ id: "template-1", organizationId: "org-1" }),
+      },
+      user: {
+        findUnique: async () => ({ id: "candidate-1", role: "CANDIDATE", organizationId: "org-1" }),
+      },
+      interviewSession: {
+        create: async (args: any) => {
+          calls.push(args);
+          return {
+            ...sessionRow,
+            title: args.data.title,
+            interviewType: args.data.interviewType,
+            interviewers: args.data.interviewers,
+            notes: args.data.notes,
+            targetRole: args.data.targetRole,
+            department: args.data.department,
+            scheduledAt: args.data.scheduledAt,
+            durationMin: args.data.durationMin,
+            language: args.data.language,
+            timeZone: args.data.timeZone,
+            createdById: args.data.createdById,
+          };
+        },
+      },
+    } as any,
+    { generateAccessCode: () => "EV-123456", now: () => now },
+  );
+
+  const result = await service.createSession(
+    {
+      candidateId: "candidate-1",
+      templateId: "template-1",
+      title: "Final Round with Dara",
+      interviewType: "Technical Interview",
+      interviewers: ["Sophia Kim", "Michael Chen"],
+      notes: "Focus on system design.",
+      targetRole: "Backend Engineer",
+      department: "Engineering",
+      sessionDate: "2026-07-20",
+      startTime: "14:30",
+      durationMin: 90,
+      language: "English",
+      timeZone: "GMT+07:00 Phnom Penh",
+    },
+    interviewerAccess,
+  );
+
+  assert.equal(result.title, "Final Round with Dara");
+  assert.equal(result.interviewType, "Technical Interview");
+  assert.deepEqual(result.interviewers, ["Sophia Kim", "Michael Chen"]);
+  assert.equal(result.interviewerName, "Sophia Kim");
+  assert.equal(result.interviewerRole, "Interviewer");
+  assert.equal(result.notes, "Focus on system design.");
+  assert.equal(result.targetRole, "Backend Engineer");
+  assert.equal(result.department, "Engineering");
+  assert.equal(result.scheduledAt, "2026-07-20T14:30:00.000Z");
+  assert.equal(result.durationMin, 90);
+  assert.equal(result.language, "English");
+  assert.equal(result.timeZone, "GMT+07:00 Phnom Penh");
+  assert.equal(result.createdById, "interviewer-1");
+  assert.equal(calls[0].data.createdById, "interviewer-1");
+  assert.deepEqual(calls[0].data.interviewers, ["Sophia Kim", "Michael Chen"]);
 });
 
 test("createSession can create an invite-only candidate record from name and email", async () => {
@@ -226,6 +319,7 @@ test("startSession and completeSession write status timestamps through Prisma", 
       data: { status: "IN_PROGRESS", startedAt: now },
       include: {
         candidate: { select: { name: true, email: true } },
+        createdBy: { select: { id: true, name: true, role: true } },
         template: { select: { title: true, roleType: true } },
         report: { select: { overallScore: true } },
       },
@@ -235,6 +329,7 @@ test("startSession and completeSession write status timestamps through Prisma", 
       data: { status: "COMPLETED", completedAt: now },
       include: {
         candidate: { select: { name: true, email: true } },
+        createdBy: { select: { id: true, name: true, role: true } },
         template: { select: { title: true, roleType: true } },
         report: { select: { overallScore: true } },
       },

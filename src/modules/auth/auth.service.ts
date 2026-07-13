@@ -1,6 +1,8 @@
 import { Injectable } from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
+import { OAuth2Client } from "google-auth-library";
 import * as jwt from "jsonwebtoken";
+import { randomBytes } from "node:crypto";
 import type { UserRole } from "../../domain/evalora.types";
 
 type PrismaRole = "ADMIN" | "ORGANIZATION" | "INTERVIEWER" | "CANDIDATE";
@@ -39,9 +41,21 @@ export interface LoginInput {
   password?: string;
 }
 
+export interface GoogleAuthInput {
+  /** Google Identity Services ID token (JWT credential). */
+  credential?: string;
+  idToken?: string;
+  /** Optional workspace name when creating a new owner account. */
+  organizationName?: string;
+}
+
 export interface AuthResult {
   token: string;
   user: Omit<AuthUserRecord, "passwordHash">;
+}
+
+export interface GoogleTokenVerifier {
+  verify(idToken: string): Promise<{ email: string; name: string; emailVerified: boolean }>;
 }
 
 interface PrismaUserRow {
@@ -174,6 +188,7 @@ export class AuthService {
   constructor(
     private readonly users: AuthUserRepository,
     private readonly jwtSecret = resolveJwtSecret(),
+    private readonly googleVerifier: GoogleTokenVerifier | null = createGoogleTokenVerifierFromEnv(),
   ) {}
 
   async register(input: RegisterInput): Promise<AuthResult> {
@@ -220,6 +235,53 @@ export class AuthService {
     if (!user.organizationId && user.role !== "admin" && this.users.ensureUserWorkspace) {
       user = await this.users.ensureUserWorkspace(user, workspaceName(undefined, user.name));
     }
+
+    return this.toAuthResult(user);
+  }
+
+  /**
+   * Sign in or create a workspace owner from a verified Google ID token.
+   * Existing interviewer/owner accounts are logged in; new emails create an organization workspace.
+   */
+  async loginWithGoogle(input: GoogleAuthInput): Promise<AuthResult> {
+    if (!this.googleVerifier) {
+      throw new Error("Google sign-in is not configured. Set GOOGLE_CLIENT_ID on the API.");
+    }
+
+    const idToken = requireNonEmpty(input.credential ?? input.idToken, "Google credential is required.");
+    const profile = await this.googleVerifier.verify(idToken);
+    if (!profile.emailVerified) {
+      throw new Error("Google account email is not verified.");
+    }
+
+    const email = normalizeEmail(profile.email);
+    const name = profile.name.trim() || email.split("@")[0] || "Google User";
+    let user = await this.users.findByEmail(email);
+
+    if (user) {
+      if (user.role === "candidate") {
+        throw new Error("This email is registered as a candidate invitation. Use a different Google account for workspace access.");
+      }
+      if (user.role === "admin") {
+        return this.toAuthResult(user);
+      }
+      if (!user.organizationId && this.users.ensureUserWorkspace) {
+        user = await this.users.ensureUserWorkspace(user, workspaceName(input.organizationName, user.name));
+      }
+      return this.toAuthResult(user);
+    }
+
+    // New Google user → workspace owner (same as public register).
+    const passwordHash = await bcrypt.hash(`google-oauth:${randomBytes(32).toString("hex")}`, SALT_ROUNDS);
+    const userData = {
+      name,
+      email,
+      passwordHash,
+      role: "organization" as UserRole,
+    };
+    user = this.users.createUserWithWorkspace
+      ? await this.users.createUserWithWorkspace(userData, workspaceName(input.organizationName, name))
+      : await this.users.createUser(userData);
 
     return this.toAuthResult(user);
   }
@@ -272,9 +334,12 @@ function resolveJwtSecret(): string {
 }
 
 function resolvePublicRegistrationRole(role: UserRole | undefined): UserRole {
-  if (!role || role === "interviewer") return "interviewer";
-  if (role === "organization") return "interviewer";
-  if (role === "admin") throw new Error("Admin accounts are created privately by the Evalora team.");
+  // First public signup is always the workspace owner (`organization`).
+  // Interviewers join later via invite — not public registration.
+  if (!role || role === "organization" || role === "interviewer") return "organization";
+  if (role === "admin") {
+    throw new Error("Platform admin accounts are not created through public registration.");
+  }
   throw new Error("Candidates access assessments through invitation links or access codes, not platform registration.");
 }
 
@@ -313,5 +378,31 @@ function toAuthUserRecord(user: PrismaUserRow): AuthUserRecord {
     passwordHash: user.passwordHash,
     role: fromPrismaRole(user.role),
     organizationId: user.organizationId ?? undefined,
+  };
+}
+
+export function createGoogleTokenVerifierFromEnv(): GoogleTokenVerifier | null {
+  const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+  if (!clientId) return null;
+  const client = new OAuth2Client(clientId);
+  return {
+    async verify(idToken: string) {
+      try {
+        const ticket = await client.verifyIdToken({
+          idToken,
+          audience: clientId,
+        });
+        const payload = ticket.getPayload();
+        if (!payload?.email) throw new Error("Google token is missing an email claim.");
+        return {
+          email: payload.email,
+          name: payload.name?.trim() || payload.email.split("@")[0] || "Google User",
+          emailVerified: payload.email_verified === true,
+        };
+      } catch (error) {
+        if (error instanceof Error && /missing an email|not verified/i.test(error.message)) throw error;
+        throw new Error("Invalid or expired Google sign-in token.");
+      }
+    },
   };
 }

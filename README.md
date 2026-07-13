@@ -49,8 +49,13 @@ The frontend runs separately at <http://localhost:3010>.
 ## Environment highlights
 
 - `DATABASE_URL`, `JWT_SECRET`
-- `FRONTEND_URL`
+- `GOOGLE_CLIENT_ID` — Google Identity Services client ID for `POST /auth/google` (same value as frontend `NEXT_PUBLIC_GOOGLE_CLIENT_ID`)
+- `FRONTEND_URL`, `APP_URL` (absolute links in emails; defaults to first frontend origin)
 - `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, `DEEPSEEK_MODEL`
+- Email (optional): `EMAIL_PROVIDER=auto|gmail|resend`
+  - **Gmail SMTP** (free demos): `SMTP_USER`, `SMTP_PASS` (Google App Password), optional `SMTP_HOST`/`SMTP_PORT`
+  - **Resend**: `RESEND_API_KEY`, `EMAIL_FROM` — test domain only mails your Resend account email unless you verify a domain
+  - Without either, invites still work with `emailDelivery.status = "skipped"` (copy link)
 - `CODE_EXECUTION_PROVIDER=judge0|piston`
 - `JUDGE0_API_URL`, optional Judge0 credentials/language ID
 - `PISTON_URL`, optional Piston API key

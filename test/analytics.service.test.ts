@@ -8,16 +8,42 @@ test("analytics summary uses organization-scoped persisted sessions and reports"
   const calls: Array<{ method: string; args: unknown }> = [];
   const prisma = {
     interviewSession: {
-      findMany: async (args: unknown) => {
-        calls.push({ method: "session.findMany", args });
+      groupBy: async (args: unknown) => {
+        calls.push({ method: "session.groupBy", args });
         return [
-          { id: "s1", candidateId: "c1", status: "COMPLETED", createdAt: new Date(), updatedAt: new Date(), completedAt: new Date(), candidate: { name: "A", email: "a@example.com" }, template: { title: "T", roleType: "Engineer" }, report: { overallScore: 4.2 } },
-          { id: "s2", candidateId: "c2", status: "IN_PROGRESS", createdAt: new Date(), updatedAt: new Date(), completedAt: null, candidate: { name: "B", email: "b@example.com" }, template: { title: "T", roleType: "Engineer" }, report: null },
+          { status: "COMPLETED", _count: { _all: 1 } },
+          { status: "IN_PROGRESS", _count: { _all: 1 } },
+        ];
+      },
+      findMany: async (args: any) => {
+        calls.push({ method: "session.findMany", args });
+        if (args?.distinct) {
+          return [{ candidateId: "c1" }, { candidateId: "c2" }];
+        }
+        return [
+          {
+            id: "s1",
+            completedAt: new Date(),
+            candidate: { name: "A", email: "a@example.com" },
+            template: { title: "T", roleType: "Engineer" },
+            report: { overallScore: 4.2 },
+          },
         ];
       },
     },
-    assessmentTemplate: { count: async (args: unknown) => { calls.push({ method: "template.count", args }); return 3; } },
-    candidateReport: { findMany: async (args: unknown) => { calls.push({ method: "report.findMany", args }); return [{ overallScore: 4.2 }]; } },
+    assessmentTemplate: {
+      count: async (args: unknown) => {
+        calls.push({ method: "template.count", args });
+        return 3;
+      },
+    },
+    candidateReport: {
+      aggregate: async (args: unknown) => {
+        calls.push({ method: "report.aggregate", args });
+        return { _avg: { overallScore: 4.2 }, _count: { _all: 1 } };
+      },
+      findMany: async () => [{ overallScore: 4.2 }],
+    },
     evaluation: { findMany: async () => [] },
   };
   const service = new AnalyticsService(prisma as never);
@@ -30,6 +56,9 @@ test("analytics summary uses organization-scoped persisted sessions and reports"
   assert.equal(summary.inProgressAssessments, 1);
   assert.equal(summary.completionRate, 0.5);
   assert.equal(summary.averageScore, 4.2);
-  assert.deepEqual((calls[0].args as { where: unknown }).where, { organizationId: "org-1" });
-  assert.deepEqual((calls[1].args as { where: unknown }).where, { organizationId: "org-1" });
+  assert.equal(summary.totalSessions, 2);
+  assert.ok(calls.some((call) => call.method === "session.groupBy"));
+  assert.ok(calls.some((call) => call.method === "report.aggregate"));
+  const scoped = calls.find((call) => call.method === "session.groupBy");
+  assert.deepEqual((scoped?.args as { where: unknown }).where, { organizationId: "org-1" });
 });

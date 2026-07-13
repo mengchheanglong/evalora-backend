@@ -1,0 +1,424 @@
+import { randomBytes } from "node:crypto";
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  GoneException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import * as bcrypt from "bcryptjs";
+import type { UserRole } from "../../domain/evalora.types";
+import {
+  assertIsWorkspaceOwner,
+  requireOrganizationId,
+  type AccessContext,
+} from "../auth/access-control";
+import type { PrismaService } from "../../prisma/prisma.service";
+import type { EmailDeliveryResult, EmailService } from "../email/email.service";
+
+const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const SALT_ROUNDS = 12;
+
+export interface WorkspaceMemberDto {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  /** UI-friendly label: "Owner" | "Interviewer" */
+  roleLabel: string;
+  organizationId?: string;
+  createdAt?: string;
+  isCurrentUser?: boolean;
+}
+
+export interface WorkspaceInviteDto {
+  id: string;
+  email: string;
+  role: UserRole;
+  status: "pending" | "accepted" | "cancelled" | "expired";
+  token: string;
+  inviteUrlPath: string;
+  /** Full absolute URL when APP_URL / FRONTEND_URL is known. */
+  inviteUrl?: string;
+  invitedBy?: { id: string; name: string };
+  expiresAt: string;
+  createdAt?: string;
+  acceptedAt?: string;
+  emailDelivery?: EmailDeliveryResult;
+}
+
+export interface InvitePreviewDto {
+  email: string;
+  organizationName: string;
+  role: UserRole;
+  roleLabel: string;
+  expiresAt: string;
+  inviterName?: string;
+}
+
+export interface CreateInviteInput {
+  email?: string;
+}
+
+export interface AcceptInviteInput {
+  token?: string;
+  name?: string;
+  password?: string;
+}
+
+@Injectable()
+export class OrganizationService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly emailService?: EmailService,
+  ) {}
+
+  async listMembers(access: AccessContext, currentUserId?: string): Promise<WorkspaceMemberDto[]> {
+    const organizationId = requireOrganizationId(access);
+    const users = await this.prisma.user.findMany({
+      where: {
+        organizationId,
+        role: { in: ["ORGANIZATION", "INTERVIEWER"] },
+      },
+      orderBy: [{ role: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        organizationId: true,
+        createdAt: true,
+      },
+    });
+
+    const members = users.map((user) => ({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: fromPrismaRole(user.role),
+      roleLabel: roleLabel(fromPrismaRole(user.role)),
+      organizationId: user.organizationId ?? undefined,
+      createdAt: user.createdAt.toISOString(),
+      isCurrentUser: currentUserId ? user.id === currentUserId : false,
+    }));
+
+    return members.sort((a, b) => {
+      const rank = (role: UserRole) => (role === "organization" ? 0 : role === "interviewer" ? 1 : 2);
+      return rank(a.role) - rank(b.role) || a.name.localeCompare(b.name);
+    });
+  }
+
+  async listInvites(access: AccessContext): Promise<WorkspaceInviteDto[]> {
+    assertIsWorkspaceOwner(access);
+    const organizationId = requireOrganizationId(access);
+    await this.expireStaleInvites(organizationId);
+
+    const invites = await this.prisma.organizationInvite.findMany({
+      where: { organizationId, status: { in: ["PENDING", "ACCEPTED", "CANCELLED", "EXPIRED"] } },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      include: { invitedBy: { select: { id: true, name: true } } },
+    });
+
+    return invites.map(toInviteDto);
+  }
+
+  async createInvite(access: AccessContext, input: CreateInviteInput): Promise<WorkspaceInviteDto> {
+    assertIsWorkspaceOwner(access);
+    const organizationId = requireOrganizationId(access);
+    const email = normalizeEmail(requireNonEmpty(input.email, "Email is required."));
+
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true, organizationId: true, role: true },
+    });
+    if (existingUser) {
+      if (existingUser.organizationId === organizationId) {
+        throw new ConflictException("This person is already a member of your workspace.");
+      }
+      if (existingUser.role !== "CANDIDATE") {
+        throw new ConflictException("An account with this email already exists. Ask them to use a different work email.");
+      }
+    }
+
+    await this.expireStaleInvites(organizationId);
+
+    const pending = await this.prisma.organizationInvite.findFirst({
+      where: { organizationId, email, status: "PENDING", expiresAt: { gt: new Date() } },
+    });
+    if (pending) {
+      throw new ConflictException("A pending invitation already exists for this email.");
+    }
+
+    const invite = await this.prisma.organizationInvite.create({
+      data: {
+        organizationId,
+        email,
+        role: "INTERVIEWER",
+        token: createInviteToken(),
+        invitedById: access.userId,
+        expiresAt: new Date(Date.now() + INVITE_TTL_MS),
+        status: "PENDING",
+      },
+      include: { invitedBy: { select: { id: true, name: true } } },
+    });
+
+    const organization = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { name: true },
+    });
+
+    const inviteUrlPath = `/invite/${invite.token}`;
+    const inviteUrl = this.emailService?.buildInviteUrl(invite.token) ?? inviteUrlPath;
+
+    // Do not block the HTTP response on SMTP/API latency (often 1–4s).
+    const emailDelivery = queueEmailDelivery(() =>
+      this.emailService
+        ? this.emailService.sendWorkspaceInvite({
+            to: email,
+            organizationName: organization?.name ?? "Evalora workspace",
+            inviterName: invite.invitedBy?.name,
+            inviteUrl,
+            expiresAt: invite.expiresAt,
+          })
+        : Promise.resolve({
+            status: "skipped" as const,
+            reason: "Email service unavailable. Share the invite link manually.",
+          }),
+    );
+
+    return {
+      ...toInviteDto(invite),
+      inviteUrl,
+      emailDelivery,
+    };
+  }
+
+  async cancelInvite(access: AccessContext, inviteId: string): Promise<{ id: string; cancelled: boolean }> {
+    assertIsWorkspaceOwner(access);
+    const organizationId = requireOrganizationId(access);
+
+    const invite = await this.prisma.organizationInvite.findFirst({
+      where: { id: inviteId, organizationId },
+    });
+    if (!invite) throw new NotFoundException("Invitation not found.");
+    if (invite.status !== "PENDING") {
+      throw new BadRequestException("Only pending invitations can be cancelled.");
+    }
+
+    await this.prisma.organizationInvite.update({
+      where: { id: invite.id },
+      data: { status: "CANCELLED" },
+    });
+    return { id: invite.id, cancelled: true };
+  }
+
+  async getInvitePreview(token: string): Promise<InvitePreviewDto> {
+    const invite = await this.findActiveInviteByToken(token);
+    const organization = await this.prisma.organization.findUnique({
+      where: { id: invite.organizationId },
+      select: { name: true },
+    });
+    const inviter = await this.prisma.user.findUnique({
+      where: { id: invite.invitedById },
+      select: { name: true },
+    });
+
+    return {
+      email: invite.email,
+      organizationName: organization?.name ?? "Evalora workspace",
+      role: fromPrismaRole(invite.role),
+      roleLabel: roleLabel(fromPrismaRole(invite.role)),
+      expiresAt: invite.expiresAt.toISOString(),
+      inviterName: inviter?.name,
+    };
+  }
+
+  async acceptInvite(input: AcceptInviteInput): Promise<{
+    token: string;
+    user: { id: string; name: string; email: string; role: UserRole; organizationId?: string };
+    message: string;
+  }> {
+    const inviteToken = requireNonEmpty(input.token, "Invite token is required.");
+    const name = requireNonEmpty(input.name, "Name is required.");
+    const password = requirePassword(input.password);
+    const invite = await this.findActiveInviteByToken(inviteToken);
+
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: invite.email },
+      select: { id: true, organizationId: true, role: true },
+    });
+    if (existingUser && existingUser.role !== "CANDIDATE") {
+      throw new ConflictException("An account with this email already exists. Sign in instead.");
+    }
+
+    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+
+    const user = await this.prisma.$transaction(async (tx) => {
+      // Candidate rows with the same email are rare; block rather than overwrite.
+      if (existingUser?.role === "CANDIDATE") {
+        throw new ConflictException(
+          "This email is already used for a candidate invitation. Use a different work email for workspace access.",
+        );
+      }
+
+      const created = await tx.user.create({
+        data: {
+          name,
+          email: invite.email,
+          passwordHash,
+          role: "INTERVIEWER",
+          organizationId: invite.organizationId,
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          organizationId: true,
+        },
+      });
+
+      await tx.organizationInvite.update({
+        where: { id: invite.id },
+        data: { status: "ACCEPTED", acceptedAt: new Date() },
+      });
+
+      return created;
+    });
+
+    // Sign JWT via a lightweight path — OrganizationService should not depend on AuthService circularly.
+    // Caller controller will use AuthService or we sign here. Prefer returning user and let controller login-like sign.
+    return {
+      token: "", // filled by controller via AuthService helper if available
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: fromPrismaRole(user.role),
+        organizationId: user.organizationId ?? undefined,
+      },
+      message: "Invitation accepted. Welcome to the workspace.",
+    };
+  }
+
+  async removeMember(access: AccessContext, memberId: string): Promise<{ id: string; removed: boolean }> {
+    assertIsWorkspaceOwner(access);
+    const organizationId = requireOrganizationId(access);
+
+    if (memberId === access.userId) {
+      throw new BadRequestException("You cannot remove yourself from the workspace.");
+    }
+
+    const member = await this.prisma.user.findFirst({
+      where: { id: memberId, organizationId },
+      select: { id: true, role: true },
+    });
+    if (!member) throw new NotFoundException("Member not found.");
+    if (member.role === "ORGANIZATION") {
+      throw new ForbiddenException("The workspace owner cannot be removed.");
+    }
+    if (member.role !== "INTERVIEWER") {
+      throw new BadRequestException("Only interviewers can be removed from the workspace.");
+    }
+
+    // Detach rather than delete history: keep user row for audit of created sessions/templates.
+    await this.prisma.user.update({
+      where: { id: member.id },
+      data: { organizationId: null },
+    });
+
+    return { id: member.id, removed: true };
+  }
+
+  private async findActiveInviteByToken(token: string) {
+    const invite = await this.prisma.organizationInvite.findUnique({ where: { token } });
+    if (!invite) throw new NotFoundException("Invitation not found.");
+    if (invite.status === "CANCELLED") throw new GoneException("This invitation was cancelled.");
+    if (invite.status === "ACCEPTED") throw new GoneException("This invitation has already been used.");
+    if (invite.status === "EXPIRED" || invite.expiresAt.getTime() <= Date.now()) {
+      if (invite.status === "PENDING") {
+        await this.prisma.organizationInvite.update({
+          where: { id: invite.id },
+          data: { status: "EXPIRED" },
+        });
+      }
+      throw new GoneException("This invitation has expired. Ask the workspace owner to send a new invite.");
+    }
+    if (invite.status !== "PENDING") throw new GoneException("This invitation is no longer valid.");
+    return invite;
+  }
+
+  private async expireStaleInvites(organizationId: string) {
+    await this.prisma.organizationInvite.updateMany({
+      where: { organizationId, status: "PENDING", expiresAt: { lte: new Date() } },
+      data: { status: "EXPIRED" },
+    });
+  }
+}
+
+function queueEmailDelivery(send: () => Promise<EmailDeliveryResult>): EmailDeliveryResult {
+  void send().catch(() => undefined);
+  return {
+    status: "queued",
+    reason: "Email is being sent in the background. You can also copy the link below.",
+  };
+}
+
+function toInviteDto(invite: {
+  id: string;
+  email: string;
+  role: "ADMIN" | "ORGANIZATION" | "INTERVIEWER" | "CANDIDATE";
+  status: "PENDING" | "ACCEPTED" | "CANCELLED" | "EXPIRED";
+  token: string;
+  expiresAt: Date;
+  createdAt: Date;
+  acceptedAt?: Date | null;
+  invitedBy?: { id: string; name: string } | null;
+}): WorkspaceInviteDto {
+  return {
+    id: invite.id,
+    email: invite.email,
+    role: fromPrismaRole(invite.role),
+    status: invite.status.toLowerCase() as WorkspaceInviteDto["status"],
+    token: invite.token,
+    inviteUrlPath: `/invite/${invite.token}`,
+    invitedBy: invite.invitedBy ? { id: invite.invitedBy.id, name: invite.invitedBy.name } : undefined,
+    expiresAt: invite.expiresAt.toISOString(),
+    createdAt: invite.createdAt.toISOString(),
+    acceptedAt: invite.acceptedAt?.toISOString(),
+  };
+}
+
+function createInviteToken(): string {
+  return randomBytes(24).toString("base64url");
+}
+
+function fromPrismaRole(role: string): UserRole {
+  return role.toLowerCase() as UserRole;
+}
+
+function roleLabel(role: UserRole): string {
+  if (role === "organization") return "Owner";
+  if (role === "interviewer") return "Interviewer";
+  if (role === "admin") return "Platform admin";
+  return role;
+}
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function requireNonEmpty(value: string | undefined, message: string): string {
+  const trimmed = value?.trim();
+  if (!trimmed) throw new BadRequestException(message);
+  return trimmed;
+}
+
+function requirePassword(value: string | undefined): string {
+  const password = requireNonEmpty(value, "Password is required.");
+  if (password.length < 8) throw new BadRequestException("Password must be at least 8 characters.");
+  if (password.length > 128) throw new BadRequestException("Password must be at most 128 characters.");
+  return password;
+}

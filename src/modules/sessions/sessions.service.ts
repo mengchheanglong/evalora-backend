@@ -3,6 +3,7 @@ import * as bcrypt from "bcryptjs";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { AssessmentTemplateDto, InterviewSessionDto, JsonValue, ModuleType, QuestionType, SessionStatus } from "../../domain/evalora.types";
 import { buildSessionOwnershipWhere, buildTemplateOwnershipWhere, forbiddenResourceError, mergeWhere, requireOrganizationId, type AccessContext } from "../auth/access-control";
+import type { EmailDeliveryResult, EmailService } from "../email/email.service";
 import { selectCandidateQuestions } from "./candidate-assignment";
 
 type PrismaSessionStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "EXPIRED";
@@ -13,6 +14,7 @@ type PrismaQuestionType = "MCQ" | "SCALE" | "SHORT_ANSWER" | "CODING" | "SCENARI
 interface SessionUserRow {
   name: string;
   email?: string;
+  role?: PrismaRole;
 }
 
 interface SessionTemplateRow {
@@ -22,6 +24,12 @@ interface SessionTemplateRow {
 
 interface SessionReportRow {
   overallScore: number;
+}
+
+interface SessionCreatorRow {
+  id?: string;
+  name: string;
+  role?: PrismaRole;
 }
 
 interface CandidateQuestionRow {
@@ -61,6 +69,18 @@ interface SessionRow {
   templateId: string;
   template?: SessionTemplateRow | null;
   report?: SessionReportRow | null;
+  createdById?: string | null;
+  createdBy?: SessionCreatorRow | null;
+  title?: string | null;
+  interviewType?: string | null;
+  interviewers?: JsonValue | null;
+  notes?: string | null;
+  targetRole?: string | null;
+  department?: string | null;
+  scheduledAt?: Date | null;
+  durationMin?: number | null;
+  language?: string | null;
+  timeZone?: string | null;
   organizationId?: string | null;
   accessCode: string;
   status: PrismaSessionStatus;
@@ -94,6 +114,9 @@ interface SessionPrismaClient {
     findUnique?: UserFindUniqueFn;
     create?: UserCreateFn;
   };
+  organization?: {
+    findUnique?: (args: any) => Promise<{ name: string } | null>;
+  };
   assessmentTemplate?: {
     findFirst?: (args: any) => Promise<{ id: string; organizationId?: string | null } | null>;
   };
@@ -113,6 +136,22 @@ export interface CreateSessionInput {
   templateId?: string;
   organizationId?: string;
   expiresAt?: Date | string;
+  /** Optional workspace label shown on the sessions list. */
+  title?: string;
+  interviewType?: string;
+  /** Named interviewers (string array). Empty/invalid values are ignored. */
+  interviewers?: string[] | string;
+  notes?: string;
+  /** Candidate position/role for this session. */
+  targetRole?: string;
+  department?: string;
+  /** Preferred over sessionDate+startTime when both are sent. */
+  scheduledAt?: Date | string;
+  sessionDate?: string;
+  startTime?: string;
+  durationMin?: number | string;
+  language?: string;
+  timeZone?: string;
 }
 
 export interface ListSessionsFilter {
@@ -129,16 +168,19 @@ export interface CandidateAccessSessionDto extends InterviewSessionDto {
 interface SessionsServiceOptions {
   generateAccessCode?: () => string;
   now?: () => Date;
+  emailService?: EmailService;
 }
 
 export const SESSION_INCLUDE = {
   candidate: { select: { name: true, email: true } },
+  createdBy: { select: { id: true, name: true, role: true } },
   template: { select: { title: true, roleType: true } },
   report: { select: { overallScore: true } },
 };
 
 export const CANDIDATE_SESSION_INCLUDE = {
   candidate: { select: { name: true, email: true } },
+  createdBy: { select: { id: true, name: true, role: true } },
   template: {
     select: {
       id: true,
@@ -165,6 +207,7 @@ const SALT_ROUNDS = 12;
 export class SessionsService {
   private readonly generateAccessCode: () => string;
   private readonly now: () => Date;
+  private readonly emailService?: EmailService;
 
   constructor(
     private readonly prisma: SessionPrismaClient,
@@ -172,6 +215,7 @@ export class SessionsService {
   ) {
     this.generateAccessCode = options.generateAccessCode ?? defaultAccessCode;
     this.now = options.now ?? (() => new Date());
+    this.emailService = options.emailService;
   }
 
   async createSession(input: CreateSessionInput, access?: AccessContext): Promise<InterviewSessionDto> {
@@ -180,19 +224,74 @@ export class SessionsService {
     const templateId = requireNonEmpty(input.templateId, "Template id is required.");
     await this.assertTemplateAssignment(templateId, organizationId, access);
     const candidateId = await this.resolveCandidateId(input, organizationId, access);
+    const metadata = normalizeSessionMetadata(input, this.now());
     const session = await create({
       data: {
         candidateId,
         templateId,
         organizationId,
+        createdById: access?.userId,
         accessCode: this.generateAccessCode(),
         status: "NOT_STARTED",
         expiresAt: resolveExpiry(input.expiresAt, this.now()),
+        ...metadata,
       },
       include: SESSION_INCLUDE,
     });
 
-    return toSessionDto(session);
+    const dto = toSessionDto(session);
+    const candidateEmail = dto.candidateEmail?.trim();
+    const assessmentUrl = this.emailService?.buildAssessmentUrl(dto.accessCode);
+
+    if (!candidateEmail || !this.emailService) {
+      return {
+        ...dto,
+        assessmentUrl,
+        emailDelivery: {
+          status: "skipped",
+          reason: candidateEmail
+            ? "Email service unavailable. Share the assessment link manually."
+            : "No candidate email on the session. Share the assessment link manually.",
+        } satisfies EmailDeliveryResult,
+      };
+    }
+
+    // Fire-and-forget so session creation stays fast (SMTP often takes seconds).
+    const emailService = this.emailService;
+    const accessCode = dto.accessCode;
+    const candidateName = dto.candidateName;
+    const assessmentTitle = dto.title || dto.templateTitle;
+    const expiresAt = dto.expiresAt;
+    const resolvedAssessmentUrl = assessmentUrl ?? emailService.buildAssessmentUrl(accessCode);
+
+    void (async () => {
+      let organizationName: string | undefined;
+      if (organizationId && this.prisma.organization?.findUnique) {
+        const organization = await this.prisma.organization.findUnique({
+          where: { id: organizationId },
+          select: { name: true },
+        });
+        organizationName = organization?.name;
+      }
+      await emailService.sendCandidateAssessmentInvite({
+        to: candidateEmail,
+        candidateName,
+        organizationName,
+        assessmentTitle,
+        accessCode,
+        assessmentUrl: resolvedAssessmentUrl,
+        expiresAt,
+      });
+    })().catch(() => undefined);
+
+    return {
+      ...dto,
+      assessmentUrl: resolvedAssessmentUrl,
+      emailDelivery: {
+        status: "queued",
+        reason: "Email is being sent in the background. You can also copy the assessment link below.",
+      } satisfies EmailDeliveryResult,
+    };
   }
 
   async listSessions(filter: ListSessionsFilter = {}, access?: AccessContext): Promise<InterviewSessionDto[]> {
@@ -372,6 +471,14 @@ function resolveWritableOrganizationId(requestedOrganizationId: string | undefin
 }
 
 function toSessionDto(session: SessionRow): InterviewSessionDto {
+  const interviewers = parseInterviewers(session.interviewers);
+  const interviewerName = interviewers[0] ?? session.createdBy?.name;
+  const interviewerRole = interviewers[0]
+    ? "Interviewer"
+    : session.createdBy?.role
+      ? fromPrismaRole(session.createdBy.role)
+      : undefined;
+
   return {
     id: session.id,
     candidateId: session.candidateId,
@@ -379,7 +486,19 @@ function toSessionDto(session: SessionRow): InterviewSessionDto {
     candidateEmail: session.candidate?.email,
     templateId: session.templateId,
     templateTitle: session.template?.title,
-    targetRole: session.template?.roleType,
+    targetRole: session.targetRole?.trim() || session.template?.roleType,
+    title: session.title ?? undefined,
+    interviewType: session.interviewType ?? undefined,
+    interviewers: interviewers.length ? interviewers : undefined,
+    interviewerName,
+    interviewerRole,
+    notes: session.notes ?? undefined,
+    department: session.department ?? undefined,
+    scheduledAt: toIso(session.scheduledAt),
+    durationMin: session.durationMin ?? undefined,
+    language: session.language ?? undefined,
+    timeZone: session.timeZone ?? undefined,
+    createdById: session.createdById ?? session.createdBy?.id ?? undefined,
     organizationId: session.organizationId ?? undefined,
     status: fromPrismaSessionStatus(session.status),
     accessCode: session.accessCode,
@@ -391,6 +510,125 @@ function toSessionDto(session: SessionRow): InterviewSessionDto {
     createdAt: toIso(session.createdAt),
     updatedAt: toIso(session.updatedAt),
   };
+}
+
+function normalizeSessionMetadata(
+  input: CreateSessionInput,
+  now: Date,
+): {
+  title?: string;
+  interviewType?: string;
+  interviewers?: string[];
+  notes?: string;
+  targetRole?: string;
+  department?: string;
+  scheduledAt?: Date;
+  durationMin?: number;
+  language?: string;
+  timeZone?: string;
+} {
+  const interviewers = normalizeInterviewers(input.interviewers);
+  const durationMin = normalizeDurationMin(input.durationMin);
+  const scheduledAt = resolveScheduledAt(input.scheduledAt, input.sessionDate, input.startTime, now);
+
+  return {
+    title: optionalTrimmed(input.title),
+    interviewType: optionalTrimmed(input.interviewType),
+    interviewers: interviewers.length ? interviewers : undefined,
+    notes: optionalTrimmed(input.notes),
+    targetRole: optionalTrimmed(input.targetRole),
+    department: optionalTrimmed(input.department),
+    scheduledAt,
+    durationMin,
+    language: optionalTrimmed(input.language),
+    timeZone: optionalTrimmed(input.timeZone),
+  };
+}
+
+function normalizeInterviewers(value: CreateSessionInput["interviewers"]): string[] {
+  if (value == null) return [];
+  const values = Array.isArray(value)
+    ? value
+    : String(value)
+        .split(",")
+        .map((item) => item.trim());
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of values) {
+    const name = String(item ?? "").trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(name);
+    if (result.length >= 20) break;
+  }
+  return result;
+}
+
+function parseInterviewers(value: JsonValue | null | undefined): string[] {
+  if (value == null) return [];
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item ?? "").trim())
+      .filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return normalizeInterviewers(value);
+  }
+  return [];
+}
+
+function normalizeDurationMin(value: number | string | undefined): number | undefined {
+  if (value == null || value === "") return undefined;
+  const parsed = typeof value === "number" ? value : Number(String(value).trim());
+  if (!Number.isFinite(parsed) || parsed <= 0) throw new Error("Duration must be a positive number of minutes.");
+  return Math.min(Math.round(parsed), 24 * 60);
+}
+
+function resolveScheduledAt(
+  scheduledAt: Date | string | undefined,
+  sessionDate: string | undefined,
+  startTime: string | undefined,
+  now: Date,
+): Date | undefined {
+  if (scheduledAt != null && String(scheduledAt).trim() !== "") {
+    const direct = toDate(scheduledAt);
+    if (!direct || Number.isNaN(direct.getTime())) throw new Error("Scheduled time is invalid.");
+    return direct;
+  }
+
+  const datePart = optionalTrimmed(sessionDate);
+  if (!datePart) return undefined;
+
+  const timePart = optionalTrimmed(startTime) ?? "09:00";
+  // Interpret sessionDate + startTime as UTC wall-clock when no full ISO scheduledAt is sent.
+  const combined = new Date(`${datePart}T${normalizeClockTime(timePart)}.000Z`);
+  if (Number.isNaN(combined.getTime())) throw new Error("Session date/time is invalid.");
+  // Allow past scheduled labels for historical imports; only reject absurd far-future values.
+  if (combined.getTime() > now.getTime() + 5 * 365 * 24 * 60 * 60 * 1_000) {
+    throw new Error("Scheduled time is too far in the future.");
+  }
+  return combined;
+}
+
+function normalizeClockTime(value: string): string {
+  const trimmed = value.trim();
+  if (/^\d{2}:\d{2}$/.test(trimmed)) return `${trimmed}:00`;
+  if (/^\d{2}:\d{2}:\d{2}$/.test(trimmed)) return trimmed;
+  throw new Error("Start time must use HH:mm format.");
+}
+
+function optionalTrimmed(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function fromPrismaRole(role: PrismaRole): string {
+  if (role === "ORGANIZATION") return "Organization";
+  if (role === "ADMIN") return "Admin";
+  if (role === "INTERVIEWER") return "Interviewer";
+  return "Candidate";
 }
 
 function toCandidateAccessSessionDto(session: CandidateSessionRow): CandidateAccessSessionDto {

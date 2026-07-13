@@ -20,6 +20,9 @@ import { SessionsService } from "./modules/sessions/sessions.service";
 import { CandidateAccessRateLimitGuard } from "./modules/sessions/access-rate-limit.guard";
 import { TemplatesController } from "./modules/templates/templates.controller";
 import { TemplatesService } from "./modules/templates/templates.service";
+import { OrganizationController } from "./modules/organization/organization.controller";
+import { OrganizationService } from "./modules/organization/organization.service";
+import { createEmailServiceFromEnv, EmailService } from "./modules/email/email.service";
 import { PrismaService } from "./prisma/prisma.service";
 
 @Module({
@@ -27,6 +30,7 @@ import { PrismaService } from "./prisma/prisma.service";
   controllers: [
     AppController,
     AuthController,
+    OrganizationController,
     TemplatesController,
     SessionsController,
     CandidateSessionAccessController,
@@ -54,6 +58,15 @@ import { PrismaService } from "./prisma/prisma.service";
       inject: [PrismaService],
     },
     {
+      provide: EmailService,
+      useFactory: () => createEmailServiceFromEnv(),
+    },
+    {
+      provide: OrganizationService,
+      useFactory: (prisma: PrismaService, email: EmailService) => new OrganizationService(prisma, email),
+      inject: [PrismaService, EmailService],
+    },
+    {
       provide: ReportsService,
       useFactory: (prisma: PrismaService, aiService: AiService) => new ReportsService(prisma, aiService),
       inject: [PrismaService, AiService],
@@ -65,8 +78,8 @@ import { PrismaService } from "./prisma/prisma.service";
     },
     {
       provide: SessionsService,
-      useFactory: (prisma: PrismaService) => new SessionsService(prisma),
-      inject: [PrismaService],
+      useFactory: (prisma: PrismaService, email: EmailService) => new SessionsService(prisma, { emailService: email }),
+      inject: [PrismaService, EmailService],
     },
     {
       provide: ResponsesService,

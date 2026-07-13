@@ -54,10 +54,34 @@ export interface InterviewSessionDto {
   candidateEmail?: string;
   templateId: string;
   templateTitle?: string;
+  /** Session-level position/role; falls back to template role type. */
   targetRole?: string;
+  title?: string;
+  interviewType?: string;
+  /** Named interviewers from the workspace create form. */
+  interviewers?: string[];
+  /** Primary interviewer label for list/detail UI. */
+  interviewerName?: string;
+  interviewerRole?: string;
+  notes?: string;
+  department?: string;
+  scheduledAt?: string;
+  durationMin?: number;
+  language?: string;
+  timeZone?: string;
+  createdById?: string;
   organizationId?: string;
   status: SessionStatus;
   accessCode: string;
+  /** Absolute candidate assessment URL when APP_URL / FRONTEND_URL is configured. */
+  assessmentUrl?: string;
+  /** Result of Resend (or skipped/failed) delivery for the candidate invite email. */
+  emailDelivery?: {
+    status: "sent" | "skipped" | "failed" | "queued";
+    reason?: string;
+    messageId?: string;
+    provider?: "resend" | "gmail" | "none";
+  };
   overallScore?: number;
   reportReady?: boolean;
   startedAt?: string;

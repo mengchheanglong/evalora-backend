@@ -50,6 +50,17 @@ export function assertCanWriteOrganizationResource(access: AccessContext | undef
   throw new ForbiddenException("You do not have permission to modify this resource.");
 }
 
+/** Workspace owner (`organization` role) can manage members and invites. Platform admin also allowed for ops. */
+export function assertIsWorkspaceOwner(access: AccessContext | undefined): void {
+  if (!access) throw new UnauthorizedException("Authentication required.");
+  if (access.role === "organization" || access.role === "admin") return;
+  throw new ForbiddenException("Only the workspace owner can manage members and invitations.");
+}
+
+export function isWorkspaceOwner(access: AccessContext | undefined): boolean {
+  return Boolean(access && (access.role === "organization" || access.role === "admin"));
+}
+
 export function forbiddenResourceError(resource = "Resource"): ForbiddenException {
   return new ForbiddenException(`${resource} not found or access denied.`);
 }

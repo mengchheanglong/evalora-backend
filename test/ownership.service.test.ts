@@ -99,12 +99,19 @@ test("organization session lists and candidate session reads are scoped by owner
   await (service as any).listSessions({}, orgAccess);
   await (service as any).getSession("session-1", candidateAccess);
 
+  const sessionInclude = {
+    candidate: { select: { name: true, email: true } },
+    template: { select: { title: true, roleType: true } },
+    createdBy: { select: { id: true, name: true, role: true } },
+    report: { select: { overallScore: true } },
+  };
+
   assert.deepEqual(calls, [
     {
       method: "findMany",
       args: {
         where: { organizationId: "org-1" },
-        include: { candidate: { select: { name: true, email: true } }, template: { select: { title: true, roleType: true } }, report: { select: { overallScore: true } } },
+        include: sessionInclude,
         orderBy: { updatedAt: "desc" },
       },
     },
@@ -112,7 +119,7 @@ test("organization session lists and candidate session reads are scoped by owner
       method: "findFirst",
       args: {
         where: { id: "session-1", candidateId: "candidate-1" },
-        include: { candidate: { select: { name: true, email: true } }, template: { select: { title: true, roleType: true } }, report: { select: { overallScore: true } } },
+        include: sessionInclude,
       },
     },
   ]);

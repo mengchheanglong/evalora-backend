@@ -67,7 +67,8 @@ Implemented session persistence slice:
 
 - `src/modules/sessions/sessions.service.ts` creates `InterviewSession` records with generated access codes.
 - Session creation accepts either an existing `candidateId` or candidate name/email. Name/email creation stores an invite-only candidate user row with a random password hash, not a platform login.
-- Session DTOs include candidate/template labels from Prisma relations when available.
+- Session creation also accepts optional workspace form fields: title, interview type, interviewers, notes, target role, department, schedule (`scheduledAt` or `sessionDate`+`startTime`), duration, language, and time zone. The authenticated creator is stored as `createdById`.
+- Session DTOs include candidate/template labels plus interviewer labels (`interviewerName` / `interviewerRole`) from named interviewers or the session creator.
 - Candidate access-code endpoints return the assigned assessment template/modules/questions without a platform JWT.
 - Candidate payloads omit scoring rules, rubrics, internal ownership metadata, and coding-bank contents. Question selection is deterministic and restricted again when responses are saved.
 - `PUT /api/sessions/:id/start` writes `IN_PROGRESS` and `startedAt`.

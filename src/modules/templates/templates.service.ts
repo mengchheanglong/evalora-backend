@@ -96,6 +96,23 @@ export const TEMPLATE_INCLUDE = {
   },
 };
 
+/** List payloads skip rubrics/options and only need question ids for counts — much smaller on Neon. */
+export const TEMPLATE_LIST_INCLUDE = {
+  modules: {
+    orderBy: { orderIndex: "asc" as const },
+    select: {
+      id: true,
+      moduleType: true,
+      title: true,
+      description: true,
+      weight: true,
+      orderIndex: true,
+      settings: true,
+      questions: { select: { id: true, questionText: true, questionType: true } },
+    },
+  },
+};
+
 @Injectable()
 export class TemplatesService {
   constructor(private readonly prisma: TemplatePrismaClient) {}
@@ -105,7 +122,7 @@ export class TemplatesService {
     const findMany = requireMethod(this.prisma.assessmentTemplate.findMany, "assessmentTemplate.findMany");
     const templates = await findMany({
       where: buildListTemplateWhere(normalized),
-      include: TEMPLATE_INCLUDE,
+      include: TEMPLATE_LIST_INCLUDE,
       orderBy: { updatedAt: "desc" },
     });
 
