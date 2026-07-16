@@ -1,4 +1,4 @@
-import { GoneException, Injectable } from "@nestjs/common";
+import { BadRequestException, ConflictException, GoneException, Injectable } from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { AssessmentTemplateDto, InterviewSessionDto, JsonValue, ModuleType, QuestionType, SessionStatus } from "../../domain/evalora.types";
@@ -360,7 +360,7 @@ export class SessionsService {
       const current = await this.getSession(id, access);
       if (!current) throw forbiddenResourceError("Session");
       if (current.status === "in_progress") return current;
-      if (current.status !== "not_started") throw new Error("Only a not-started session can be started.");
+      if (current.status !== "not_started") throw new ConflictException("Only a not-started session can be started.");
     }
 
     const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
@@ -404,7 +404,7 @@ export class SessionsService {
       const current = await this.getSession(id, access);
       if (!current) throw forbiddenResourceError("Session");
       if (current.status === "completed") return current;
-      if (current.status !== "in_progress") throw new Error("Start the session before completing it.");
+      if (current.status !== "in_progress") throw new ConflictException("Start the session before completing it.");
     }
 
     const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
@@ -753,11 +753,19 @@ function toCandidateTemplateDto(template: CandidateTemplateRow | null | undefine
   };
 }
 
+// Server-side auto-expiry (triggered by interviewer reads) waits this long past
+// the deadline before flipping a session to EXPIRED. It matches the candidate
+// timeout path's clock-skew tolerance (CLOCK_SKEW_GRACE_MS in
+// expireSessionByAccessCode) so an interviewer opening the dashboard exactly at
+// the deadline can't expire the session out from under a candidate who is still
+// submitting their final answer.
+const AUTO_EXPIRY_GRACE_MS = 5_000;
+
 function isSessionTimedOut(session: SessionRow, nowMs: number): boolean {
   if (session.status !== "IN_PROGRESS" || !session.startedAt) return false;
   const timeLimitMin = session.template?.timeLimitMin ?? null;
   if (!timeLimitMin || timeLimitMin <= 0) return false;
-  return session.startedAt.getTime() + timeLimitMin * 60_000 <= nowMs;
+  return session.startedAt.getTime() + timeLimitMin * 60_000 + AUTO_EXPIRY_GRACE_MS <= nowMs;
 }
 
 function assertCandidateAccessOpen(session: CandidateSessionRow): void {
@@ -770,8 +778,19 @@ function assertCandidateAccessOpen(session: CandidateSessionRow): void {
   }
 }
 
+const VALID_SESSION_STATUSES: readonly SessionStatus[] = ["not_started", "in_progress", "completed", "expired"];
+
 function toPrismaSessionStatus(status: SessionStatus): PrismaSessionStatus {
-  return status.toUpperCase() as PrismaSessionStatus;
+  // The filter arrives from an unvalidated query string; reject unknown values
+  // with a 400 instead of passing garbage to Prisma (which throws a 500 on the
+  // enum column).
+  const normalized = String(status).toLowerCase();
+  if (!VALID_SESSION_STATUSES.includes(normalized as SessionStatus)) {
+    throw new BadRequestException(
+      `Invalid session status "${status}". Expected one of: ${VALID_SESSION_STATUSES.join(", ")}.`,
+    );
+  }
+  return normalized.toUpperCase() as PrismaSessionStatus;
 }
 
 function fromPrismaSessionStatus(status: PrismaSessionStatus): SessionStatus {

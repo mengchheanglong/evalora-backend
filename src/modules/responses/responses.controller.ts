@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, HttpException, Inject, Param, Post, Req, UseGuards } from "@nestjs/common";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { type SaveResponseInput, ResponsesService } from "./responses.service";
@@ -15,6 +15,7 @@ export class ResponsesController {
     try {
       return await this.responsesService.saveResponse(body, toAccessContext(request.user));
     } catch (error) {
+      if (error instanceof HttpException) throw error;
       throw new BadRequestException(error instanceof Error ? error.message : "Response save failed.");
     }
   }
@@ -36,6 +37,7 @@ export class CandidateResponsesAccessController {
     try {
       return await this.responsesService.saveResponseByAccessCode(accessCode, body);
     } catch (error) {
+      if (error instanceof HttpException) throw error;
       throw new BadRequestException(error instanceof Error ? error.message : "Response save failed.");
     }
   }

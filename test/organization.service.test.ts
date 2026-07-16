@@ -220,6 +220,37 @@ test("workspace owner can invite an interviewer by email", async () => {
   assert.equal(invite.inviteUrlPath, `/invite/${invite.token}`);
 });
 
+test("inviting an email already registered as a candidate is rejected up front (no dead-end invite)", async () => {
+  const { prisma, users, invites } = createFakePrisma();
+  users.push({
+    id: "owner-1",
+    name: "Owner",
+    email: "owner@acme.com",
+    passwordHash: "hash",
+    role: "ORGANIZATION",
+    organizationId: "org-1",
+    createdAt: new Date(),
+  });
+  users.push({
+    id: "cand-1",
+    name: "Prior Candidate",
+    email: "candidate@acme.com",
+    passwordHash: "hash",
+    role: "CANDIDATE",
+    organizationId: null,
+    createdAt: new Date(),
+  });
+  const service = new OrganizationService(prisma as never);
+
+  // acceptInvite always blocks candidate accounts, so createInvite must reject too
+  // rather than sending an invitation that can never be accepted.
+  await assert.rejects(
+    () => service.createInvite(ownerAccess, { email: "candidate@acme.com" }),
+    /already registered as a candidate/i,
+  );
+  assert.equal(invites.length, 0);
+});
+
 test("interviewers cannot create invites", async () => {
   const { prisma } = createFakePrisma();
   const service = new OrganizationService(prisma as never);

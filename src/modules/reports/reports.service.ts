@@ -117,7 +117,11 @@ const REPORT_EVALUATION_SESSION_INCLUDE = {
     select: {
       title: true,
       modules: {
-        where: { moduleType: "CODING" },
+        // CODING + AI_INTERVIEW modules are needed here because their candidate
+        // work is not linked through Response.question: coding lives in
+        // codeSubmissions, and adaptive AI answers are stored without a
+        // questionId. Both are folded into their module in evaluateSessionResponses.
+        where: { moduleType: { in: ["CODING", "AI_INTERVIEW"] } },
         select: { id: true, title: true, moduleType: true, weight: true },
       },
     },
@@ -352,6 +356,34 @@ export class ReportsService {
       });
     }
 
+    // Adaptive AI-interview answers are stored as responses with no linked
+    // question (they are AI-generated, not part of the template's question bank),
+    // so groupResponsesByModule skips them. Fold them into the AI_INTERVIEW
+    // module — mirroring the coding-submission handling below — so the interview
+    // the candidate actually completed contributes to its score and evidence.
+    const adaptiveText = buildAdaptiveInterviewText(session.responses ?? []);
+    if (adaptiveText) {
+      const aiModule = session.template?.modules?.find(
+        (module) => fromPrismaModuleType(module.moduleType) === "ai_interview",
+      );
+      if (aiModule) {
+        const aiModuleId = optionalString(aiModule.id);
+        const existing = aiModuleId ? inputs.find((input) => input.moduleId === aiModuleId) : undefined;
+        if (existing) {
+          existing.responseText = [existing.responseText, adaptiveText].filter(Boolean).join("\n\n");
+        } else {
+          inputs.push({
+            moduleId: aiModuleId,
+            moduleTitle: optionalString(aiModule.title) ?? "AI Interview",
+            moduleType: "ai_interview",
+            responseText: adaptiveText,
+            rubric: [],
+            weight: numberValue(aiModule.weight, 1),
+          });
+        }
+      }
+    }
+
     const codingModule = session.template?.modules?.find(
       (module) => fromPrismaModuleType(module.moduleType) === "coding",
     );
@@ -439,6 +471,22 @@ function groupResponsesByModule(responses: EvaluationResponseRow[]): Map<string,
   }
 
   return groups;
+}
+
+/** Concatenates the candidate's adaptive AI-interview answers (responses stored
+ *  without a linked question, tagged `responseJson.adaptive: true`). The stored
+ *  responseText already embeds the AI-generated question and the answer. */
+function buildAdaptiveInterviewText(responses: EvaluationResponseRow[]): string {
+  return responses
+    .filter((response) => !response.question && isAdaptiveResponse(response))
+    .map((response) => optionalString(response.responseText))
+    .filter((text): text is string => Boolean(text))
+    .join("\n\n");
+}
+
+function isAdaptiveResponse(response: EvaluationResponseRow): boolean {
+  const json = response.responseJson;
+  return typeof json === "object" && json !== null && !Array.isArray(json) && (json as Record<string, unknown>).adaptive === true;
 }
 
 function buildModuleResponseText(entries: GroupedResponseEntry[]): string {

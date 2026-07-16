@@ -244,7 +244,7 @@ test("generateAndPersistReport evaluates saved responses by module and persists 
           select: {
             title: true,
             modules: {
-              where: { moduleType: "CODING" },
+              where: { moduleType: { in: ["CODING", "AI_INTERVIEW"] } },
               select: { id: true, title: true, moduleType: true, weight: true },
             },
           },
@@ -282,6 +282,89 @@ test("generateAndPersistReport evaluates saved responses by module and persists 
     "evaluation.createMany",
     "candidateReport.upsert",
   ]);
+});
+
+test("generateAndPersistReport folds adaptive AI-interview answers (no linked question) into the AI module", async () => {
+  const calls: Array<{ action: string; args: unknown }> = [];
+  const aiInputs: any[] = [];
+  const completedAt = new Date("2026-07-09T09:30:00.000Z");
+  const fakePrisma = {
+    interviewSession: {
+      findFirst: async () => ({
+        id: "session-9",
+        organizationId: "org-1",
+        completedAt,
+        candidate: { name: "Adaptive Candidate" },
+        template: {
+          title: "AI Interview Assessment",
+          // Query fetches CODING + AI_INTERVIEW modules; here only the AI module exists.
+          modules: [{ id: "module-ai", title: "AI Interview", moduleType: "AI_INTERVIEW", weight: 1.5 }],
+        },
+        // Only adaptive answers were saved — each has NO questionId (question === null)
+        // and is tagged adaptive. Before the fix these were dropped entirely, so the
+        // report had no evaluations and persistence was skipped.
+        responses: [
+          {
+            id: "resp-a1",
+            responseText: "AI interview — Tell me about a hard trade-off.\n\nResponse: I weighed latency vs cost and documented it.",
+            responseJson: { adaptive: true, question: "Tell me about a hard trade-off." },
+            question: null,
+          },
+          {
+            id: "resp-a2",
+            responseText: "AI interview — How did the team react?\n\nResponse: I aligned them with a short RFC and a demo.",
+            responseJson: { adaptive: true, question: "How did the team react?" },
+            question: null,
+          },
+        ],
+      }),
+    },
+    evaluation: {
+      deleteMany: async (args: unknown) => {
+        calls.push({ action: "evaluation.deleteMany", args });
+        return { count: 0 };
+      },
+      createMany: async (args: unknown) => {
+        calls.push({ action: "evaluation.createMany", args });
+        return { count: 1 };
+      },
+    },
+    candidateReport: {
+      upsert: async (args: unknown) => {
+        calls.push({ action: "candidateReport.upsert", args });
+        return { id: "report-9" };
+      },
+    },
+    $transaction: async <T>(operations: Array<Promise<T>>) => Promise.all(operations),
+  };
+  const fakeAi = {
+    evaluateResponse: async (input: any) => {
+      aiInputs.push(input);
+      return sampleEvaluation({
+        moduleId: input.moduleId,
+        moduleTitle: input.moduleTitle,
+        moduleType: input.moduleType,
+        weight: input.weight,
+        score: 4.1,
+        evidence: [input.responseText],
+      });
+    },
+  };
+  const service = new ReportsService(fakePrisma as any, fakeAi as any);
+
+  const result = await service.generateAndPersistReport("session-9", organizationAccess);
+
+  // The adaptive interview must produce exactly one AI-interview evaluation...
+  assert.equal(aiInputs.length, 1);
+  assert.equal(aiInputs[0].moduleId, "module-ai");
+  assert.equal(aiInputs[0].moduleType, "ai_interview");
+  assert.equal(aiInputs[0].weight, 1.5);
+  // ...carrying BOTH adaptive answers as evidence.
+  assert.match(aiInputs[0].responseText, /hard trade-off/i);
+  assert.match(aiInputs[0].responseText, /How did the team react/i);
+  // ...and the report is actually persisted (previously skipped: "no candidate responses").
+  assert.equal(result.persistence.status, "persisted");
+  assert.equal(result.persistence.evaluationCount, 1);
 });
 
 test("generateAndPersistDemoReport checks organization ownership before writing report data", async () => {

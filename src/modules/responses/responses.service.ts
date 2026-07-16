@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { ForbiddenException, Injectable } from "@nestjs/common";
 import type { CandidateResponseDto, JsonValue } from "../../domain/evalora.types";
 import { buildSessionOwnershipWhere, forbiddenResourceError, mergeWhere, type AccessContext } from "../auth/access-control";
 import { selectCandidateQuestions } from "../sessions/candidate-assignment";
@@ -162,11 +162,13 @@ function buildResponseOwnershipWhere(access?: AccessContext): Record<string, unk
 }
 
 function assertCandidateAccessOpen(session: ResponseSessionAccessRow): void {
+  // A finished/expired assessment reads as a clean 403 with a standalone message —
+  // not the awkward "<resource> not found or access denied." template.
   if (session.status === "COMPLETED" || session.status === "EXPIRED") {
-    throw forbiddenResourceError("Session no longer available");
+    throw new ForbiddenException("This assessment is no longer available.");
   }
   if (session.expiresAt && session.expiresAt.getTime() < Date.now()) {
-    throw forbiddenResourceError("Session no longer available");
+    throw new ForbiddenException("This assessment is no longer available.");
   }
 }
 

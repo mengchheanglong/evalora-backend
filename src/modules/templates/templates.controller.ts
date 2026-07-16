@@ -65,6 +65,7 @@ export class TemplatesController {
     try {
       return await this.templatesService.createTemplate(body, toAccessContext(request.user));
     } catch (error) {
+      if (error instanceof HttpException) throw error;
       throw new BadRequestException(error instanceof Error ? error.message : "Template creation failed.");
     }
   }
@@ -94,6 +95,7 @@ export class TemplatesController {
     try {
       return await this.templatesService.updateTemplate(id, body, toAccessContext(request.user));
     } catch (error) {
+      if (error instanceof HttpException) throw error;
       throw new BadRequestException(error instanceof Error ? error.message : "Template update failed.");
     }
   }

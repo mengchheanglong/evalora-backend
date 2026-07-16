@@ -444,9 +444,15 @@ export class OrganizationService {
       if (existingUser.organizationId === organizationId) {
         throw new ConflictException("This person is already a member of your workspace.");
       }
-      if (existingUser.role !== "CANDIDATE") {
-        throw new ConflictException("An account with this email already exists. Ask them to use a different work email.");
+      if (existingUser.role === "CANDIDATE") {
+        // acceptInvite refuses to upgrade an existing candidate account into a
+        // workspace member, so allowing the invite here would send a link that can
+        // never be accepted (a dead-end). Reject up front with clear guidance.
+        throw new ConflictException(
+          "This email is already registered as a candidate. Use a different work email for workspace access.",
+        );
       }
+      throw new ConflictException("An account with this email already exists. Ask them to use a different work email.");
     }
 
     await this.expireStaleInvites(organizationId);

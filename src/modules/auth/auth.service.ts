@@ -122,6 +122,7 @@ const PASSWORD_RESET_PURPOSE = "password_reset";
 const PASSWORD_RESET_TTL = "1h";
 const PASSWORD_RESET_GENERIC_MESSAGE =
   "If an account exists for that email, password reset instructions have been sent.";
+const EMAIL_NOT_CONFIGURED_REASON = "Email is not configured. Share the reset link manually.";
 
 const USER_SELECT: Record<keyof PrismaUserRow, true> = {
   id: true,
@@ -340,42 +341,46 @@ export class AuthService {
   async requestPasswordReset(input: { email?: string }): Promise<PasswordResetRequestResult> {
     const email = requireEmail(input.email);
     const user = await this.users.findByEmail(email);
+    const eligibleUser = user && user.role !== "candidate" ? user : null;
 
-    if (!user || user.role === "candidate") {
-      return {
-        message: PASSWORD_RESET_GENERIC_MESSAGE,
-        emailDelivery: {
-          status: "skipped",
-          reason: "No matching workspace account for this email, or email delivery not required.",
-        },
-      };
+    let delivery: { status: "sent" | "skipped" | "failed" | "queued"; reason?: string; provider?: string };
+    let resetUrl: string | undefined;
+
+    if (eligibleUser) {
+      const token = this.signPasswordResetToken(eligibleUser);
+      resetUrl = this.emailService?.buildPasswordResetUrl(token) ?? defaultPasswordResetUrl(token);
+      delivery = this.emailService
+        ? await this.emailService.sendPasswordReset({
+            to: eligibleUser.email,
+            userName: eligibleUser.name,
+            resetUrl,
+            expiresInLabel: "1 hour",
+          })
+        : { status: "skipped", reason: EMAIL_NOT_CONFIGURED_REASON };
+    } else {
+      // No eligible account: return the same response shape a real account would,
+      // without generating a token, so this endpoint cannot be used to tell which
+      // emails are registered (account enumeration).
+      delivery = this.emailService ? { status: "sent" } : { status: "skipped", reason: EMAIL_NOT_CONFIGURED_REASON };
     }
-
-    const token = this.signPasswordResetToken(user);
-    const resetUrl = this.emailService?.buildPasswordResetUrl(token) ?? defaultPasswordResetUrl(token);
-    const delivery = this.emailService
-      ? await this.emailService.sendPasswordReset({
-          to: user.email,
-          userName: user.name,
-          resetUrl,
-          expiresInLabel: "1 hour",
-        })
-      : {
-          status: "skipped" as const,
-          reason: "Email is not configured. Share the reset link manually.",
-        };
 
     const result: PasswordResetRequestResult = {
       message: PASSWORD_RESET_GENERIC_MESSAGE,
       emailDelivery: {
         status: delivery.status,
-        reason: delivery.reason,
-        provider: delivery.provider,
+        // Only surface a reason that depends on email *configuration* (identical
+        // for every caller). Provider-specific send details ("sent via Gmail",
+        // messageId, the mail provider name) are withheld because they differ
+        // between a real and a non-existent account and would leak which emails
+        // are registered.
+        reason: delivery.status === "skipped" ? delivery.reason : undefined,
       },
     };
 
-    // Surface the link when mail was not delivered so local/demo flows still work.
-    if (delivery.status !== "sent") {
+    // Dev convenience only: in production the reset link is delivered by email and
+    // must never appear in the API response — returning it there would let anyone
+    // who can call this endpoint take over the account.
+    if (resetUrl && delivery.status !== "sent" && process.env.NODE_ENV !== "production") {
       result.resetUrl = resetUrl;
     }
 

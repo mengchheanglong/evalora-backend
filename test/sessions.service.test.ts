@@ -375,6 +375,34 @@ test("listSessions lazily expires an in-progress session past its time limit", a
   assert.equal(result.find((session) => session.id === "still-going")?.status, "in_progress");
 });
 
+test("listSessions does not auto-expire a session within the clock-skew grace just past its deadline", async () => {
+  const updateManyCalls: any[] = [];
+  // timeLimitMin = 30. "within-grace" is 2s past the deadline (inside the 5s
+  // grace); "past-grace" is 8s past. Only the latter may be auto-expired, so an
+  // interviewer read at the boundary can't reject a candidate's final answer.
+  const withinGraceStart = new Date(now.getTime() - 30 * 60_000 - 2_000);
+  const pastGraceStart = new Date(now.getTime() - 30 * 60_000 - 8_000);
+  const service = new SessionsService(
+    {
+      interviewSession: {
+        findMany: async () => [
+          { ...sessionRow, id: "within-grace", status: "IN_PROGRESS", startedAt: withinGraceStart, template: { title: "T", roleType: "R", timeLimitMin: 30 } },
+          { ...sessionRow, id: "past-grace", status: "IN_PROGRESS", startedAt: pastGraceStart, template: { title: "T", roleType: "R", timeLimitMin: 30 } },
+        ],
+        updateMany: async (args: any) => { updateManyCalls.push(args); return { count: 1 }; },
+      },
+    } as any,
+    { generateAccessCode: () => "EV-123456", now: () => now },
+  );
+
+  const result = await service.listSessions();
+
+  assert.equal(updateManyCalls.length, 1);
+  assert.deepEqual(updateManyCalls[0].where.id, { in: ["past-grace"] });
+  assert.equal(result.find((session) => session.id === "within-grace")?.status, "in_progress");
+  assert.equal(result.find((session) => session.id === "past-grace")?.status, "expired");
+});
+
 test("deleteSession removes a session scoped to the caller's organization", async () => {
   const calls: any[] = [];
   const service = new SessionsService(
@@ -456,6 +484,62 @@ test("startSession and completeSession write status timestamps through Prisma", 
       },
     },
   ]);
+});
+
+test("completeSession rejects a not-started session with 409 Conflict (not a 500)", async () => {
+  const service = new SessionsService({
+    interviewSession: {
+      findFirst: async () => ({ ...sessionRow, status: "NOT_STARTED", startedAt: null }),
+    },
+  } as any);
+
+  await assert.rejects(
+    () => service.completeSession("session-1", interviewerAccess),
+    (err: any) => {
+      assert.equal(err.getStatus(), 409, "wrong-state transition must be 409, not 500");
+      assert.match(err.message, /start the session/i);
+      return true;
+    },
+  );
+});
+
+test("startSession rejects an already-completed session with 409 Conflict (not a 500)", async () => {
+  const service = new SessionsService({
+    interviewSession: {
+      findFirst: async () => ({ ...sessionRow, status: "COMPLETED", startedAt: now, completedAt: now }),
+    },
+  } as any);
+
+  await assert.rejects(
+    () => service.startSession("session-1", interviewerAccess),
+    (err: any) => {
+      assert.equal(err.getStatus(), 409);
+      assert.match(err.message, /not-started session can be started/i);
+      return true;
+    },
+  );
+});
+
+test("listSessions rejects an invalid status filter with 400 before querying (not a 500)", async () => {
+  let queried = false;
+  const service = new SessionsService({
+    interviewSession: {
+      findMany: async () => {
+        queried = true;
+        return [];
+      },
+    },
+  } as any);
+
+  await assert.rejects(
+    () => service.listSessions({ status: "garbage" as never }),
+    (err: any) => {
+      assert.equal(err.getStatus(), 400, "invalid enum filter must be 400, not a Prisma 500");
+      assert.match(err.message, /invalid session status/i);
+      return true;
+    },
+  );
+  assert.equal(queried, false, "must reject before hitting Prisma");
 });
 
 test("listSessions and getSession map Prisma rows to API DTOs", async () => {

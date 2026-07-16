@@ -201,7 +201,14 @@ test("candidate invite access cannot save after session completion", async () =>
 
   await assert.rejects(
     () => service.saveResponseByAccessCode("EV-123456", { questionId: "question-1", responseText: "Late answer" }),
-    /no longer available/i,
+    (err: any) => {
+      // Must be a clean 403 with a standalone message — not the garbled
+      // "Session no longer available not found or access denied." template.
+      assert.equal(err.getStatus(), 403);
+      assert.match(err.message, /no longer available/i);
+      assert.doesNotMatch(err.message, /not found or access denied/i);
+      return true;
+    },
   );
 });
 

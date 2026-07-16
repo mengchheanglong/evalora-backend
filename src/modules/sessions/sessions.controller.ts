@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpException,
   Inject,
   NotFoundException,
   Param,
@@ -34,6 +35,7 @@ export class SessionsController {
     try {
       return await this.sessionsService.createSession(body, toAccessContext(request.user));
     } catch (error) {
+      if (error instanceof HttpException) throw error;
       throw new BadRequestException(error instanceof Error ? error.message : "Session creation failed.");
     }
   }

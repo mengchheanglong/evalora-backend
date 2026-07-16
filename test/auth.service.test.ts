@@ -230,6 +230,38 @@ test("forgot password returns generic message and reset link when email is skipp
   assert.match(known.resetUrl ?? "", /reset-password\?token=/);
 });
 
+test("forgot password does not reveal whether an account exists when email delivery is configured", async () => {
+  const repo = createRepo();
+  const sent: Array<{ to: string }> = [];
+  const emailService = {
+    isConfigured: true,
+    buildPasswordResetUrl: (token: string) => `https://app.example.com/reset-password?token=${token}`,
+    async sendPasswordReset(input: { to: string; userName: string; resetUrl: string; expiresInLabel: string }) {
+      sent.push({ to: input.to });
+      return { status: "sent" as const, provider: "test-mail" };
+    },
+  };
+  const service = new AuthService(repo, "test-jwt-secret", undefined, emailService);
+  await service.register({ name: "Owner", email: "owner@example.com", password: "OldPassword1" });
+
+  const known = await service.requestPasswordReset({ email: "owner@example.com" });
+  const unknown = await service.requestPasswordReset({ email: "missing@example.com" });
+
+  // Both responses must be indistinguishable to a caller: same message and a
+  // byte-for-byte identical emailDelivery (no provider name, no send reason, no
+  // leaked reset link) — otherwise the endpoint is an oracle for which emails
+  // have accounts.
+  assert.equal(known.message, unknown.message);
+  assert.equal(known.emailDelivery.status, "sent");
+  assert.deepEqual(known.emailDelivery, unknown.emailDelivery);
+  assert.doesNotMatch(unknown.emailDelivery.reason ?? "", /no matching|not found|no account|workspace account/i);
+  assert.equal(known.resetUrl, undefined);
+  assert.equal(unknown.resetUrl, undefined);
+
+  // Only the real account triggers an email (and a token); the unknown one must not.
+  assert.deepEqual(sent, [{ to: "owner@example.com" }]);
+});
+
 test("reset password updates hash and invalidates the previous token", async () => {
   const repo = createRepo();
   const service = new AuthService(repo, "test-jwt-secret");
