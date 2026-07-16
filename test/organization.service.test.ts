@@ -258,7 +258,7 @@ test("accept invite creates interviewer in the same organization", async () => {
   const result = await service.acceptInvite({
     token: "tok-abc",
     name: "New Hire",
-    password: "secure-password",
+    password: "SecurePass1",
   });
 
   assert.equal(result.user.email, "newhire@acme.com");
@@ -266,7 +266,7 @@ test("accept invite creates interviewer in the same organization", async () => {
   assert.equal(result.user.organizationId, "org-1");
   assert.equal(invites[0].status, "ACCEPTED");
   assert.equal(users.some((user) => user.email === "newhire@acme.com" && user.role === "INTERVIEWER"), true);
-  assert.equal(await bcrypt.compare("secure-password", users.find((user) => user.email === "newhire@acme.com")!.passwordHash), true);
+  assert.equal(await bcrypt.compare("SecurePass1", users.find((user) => user.email === "newhire@acme.com")!.passwordHash), true);
 });
 
 test("owner can remove interviewer but not themselves", async () => {

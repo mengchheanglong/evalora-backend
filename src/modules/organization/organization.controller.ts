@@ -1,12 +1,15 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
   Get,
   HttpCode,
+  HttpException,
   Inject,
   Param,
   Post,
+  Put,
   Req,
   UseGuards,
 } from "@nestjs/common";
@@ -22,6 +25,57 @@ export class OrganizationController {
     @Inject(OrganizationService) private readonly organizationService: OrganizationService,
     @Inject(AuthService) private readonly authService: AuthService,
   ) {}
+
+  @Get()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("organization", "interviewer", "admin")
+  getWorkspace(@Req() request: AuthenticatedRequest) {
+    return this.organizationService.getWorkspace(toAccessContext(request.user));
+  }
+
+  @Put()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("organization", "admin")
+  async updateWorkspace(@Req() request: AuthenticatedRequest, @Body() body: { name?: string }) {
+    try {
+      return await this.organizationService.updateWorkspace(toAccessContext(request.user), body);
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new BadRequestException(error instanceof Error ? error.message : "Unable to update workspace.");
+    }
+  }
+
+  @Get("privacy")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("organization", "interviewer", "admin")
+  getPrivacy(@Req() request: AuthenticatedRequest) {
+    return this.organizationService.getPrivacySummary(toAccessContext(request.user));
+  }
+
+  @Get("export")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("organization", "admin")
+  async exportWorkspace(@Req() request: AuthenticatedRequest) {
+    try {
+      return await this.organizationService.exportWorkspaceData(toAccessContext(request.user));
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new BadRequestException(error instanceof Error ? error.message : "Unable to export workspace data.");
+    }
+  }
+
+  @Delete("data")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("organization", "admin")
+  @HttpCode(200)
+  async deleteWorkspaceData(@Req() request: AuthenticatedRequest, @Body() body: { confirmName?: string }) {
+    try {
+      return await this.organizationService.deleteWorkspaceData(toAccessContext(request.user), body);
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new BadRequestException(error instanceof Error ? error.message : "Unable to delete workspace data.");
+    }
+  }
 
   @Get("members")
   @UseGuards(JwtAuthGuard, RolesGuard)
