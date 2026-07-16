@@ -4,7 +4,7 @@ import { OAuth2Client } from "google-auth-library";
 import * as jwt from "jsonwebtoken";
 import { randomBytes } from "node:crypto";
 import type { UserRole } from "../../domain/evalora.types";
-import { assertPasswordPolicy } from "./password-policy";
+import { assertPasswordPolicy, PASSWORD_MAX_LENGTH } from "./password-policy";
 
 type PrismaRole = "ADMIN" | "ORGANIZATION" | "INTERVIEWER" | "CANDIDATE";
 
@@ -235,8 +235,8 @@ export class AuthService {
   ) {}
 
   async register(input: RegisterInput): Promise<AuthResult> {
-    const name = requireNonEmpty(input.name, "Name is required.");
-    const email = normalizeEmail(requireNonEmpty(input.email, "Email is required."));
+    const name = requireNonEmpty(input.name, "Name is required.", NAME_MAX_LENGTH);
+    const email = requireEmail(input.email);
     const password = requirePassword(input.password);
     const role = resolvePublicRegistrationRole(input.role);
     if (input.organizationId?.trim()) {
@@ -264,11 +264,14 @@ export class AuthService {
   }
 
   async login(input: LoginInput): Promise<AuthResult> {
-    const email = normalizeEmail(requireNonEmpty(input.email, "Email is required."));
-    const password = requireNonEmpty(input.password, "Password is required.");
+    const email = requireEmail(input.email);
+    const password = requireNonEmpty(input.password, "Password is required.", PASSWORD_MAX_LENGTH);
     let user = await this.users.findByEmail(email);
 
-    if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+    // Always run a bcrypt comparison — even when the account is missing — so the
+    // response time does not reveal whether an email is registered (enumeration).
+    const passwordMatches = await bcrypt.compare(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
+    if (!user || !passwordMatches) {
       throw new Error("Invalid email or password.");
     }
     if (user.role === "candidate") {
@@ -335,7 +338,7 @@ export class AuthService {
    * When email delivery is unavailable, includes `resetUrl` so local demos still work.
    */
   async requestPasswordReset(input: { email?: string }): Promise<PasswordResetRequestResult> {
-    const email = normalizeEmail(requireNonEmpty(input.email, "Email is required."));
+    const email = requireEmail(input.email);
     const user = await this.users.findByEmail(email);
 
     if (!user || user.role === "candidate") {
@@ -459,13 +462,27 @@ function defaultPasswordResetUrl(token: string): string {
   return `${base || "http://localhost:3010"}/reset-password?token=${encodeURIComponent(token)}`;
 }
 
+const NAME_MAX_LENGTH = 200;
+const EMAIL_MAX_LENGTH = 320;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Precomputed hash used to keep login response time constant when an account is
+// missing, so timing cannot be used to enumerate registered emails.
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync("evalora-timing-equalizer", SALT_ROUNDS);
+
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-function requireNonEmpty(value: string | undefined, message: string): string {
+function requireEmail(value: string | undefined): string {
+  const email = normalizeEmail(requireNonEmpty(value, "Email is required.", EMAIL_MAX_LENGTH));
+  if (!EMAIL_PATTERN.test(email)) throw new Error("Enter a valid email address.");
+  return email;
+}
+
+function requireNonEmpty(value: string | undefined, message: string, maxLength = 10_000): string {
   const trimmed = value?.trim();
   if (!trimmed) throw new Error(message);
+  if (trimmed.length > maxLength) throw new Error("This value is longer than allowed.");
   return trimmed;
 }
 

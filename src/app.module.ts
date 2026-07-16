@@ -9,6 +9,7 @@ import { CandidateAiService } from "./modules/ai/candidate-ai.service";
 import { createDeepSeekProviderFromEnv } from "./modules/ai/deepseek.provider";
 import { AuthController } from "./modules/auth/auth.controller";
 import { JwtAuthGuard, RolesGuard } from "./modules/auth/auth.guard";
+import { AuthRateLimitGuard } from "./modules/auth/auth-rate-limit.guard";
 import { AuthService, PrismaAuthRepository } from "./modules/auth/auth.service";
 import { CodeModule } from "./modules/code/code.module";
 import { ReportsController } from "./modules/reports/reports.controller";
@@ -44,6 +45,7 @@ import { PrismaService } from "./prisma/prisma.service";
   providers: [
     PrismaService,
     AnalyticsService,
+    AuthRateLimitGuard,
     CandidateAccessRateLimitGuard,
     CandidateAiService,
     JwtAuthGuard,

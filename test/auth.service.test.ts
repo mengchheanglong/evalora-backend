@@ -261,3 +261,48 @@ test("reset password rejects weak replacement passwords", async () => {
   await assert.rejects(() => service.resetPassword({ token: token!, password: "WEAKPASS1" }), /lowercase/i);
   await assert.rejects(() => service.resetPassword({ token: token!, password: "WeakPassword" }), /number/i);
 });
+
+test("register rejects a malformed email address", async () => {
+  const repo = createRepo();
+  const service = new AuthService(repo, "test-jwt-secret");
+
+  await assert.rejects(
+    () => service.register({ name: "No At Sign", email: "not-an-email", password: "SecurePass1" }),
+    /valid email/i,
+  );
+  await assert.rejects(
+    () => service.register({ name: "Spaces", email: "a b@example.com", password: "SecurePass1" }),
+    /valid email/i,
+  );
+  assert.equal(repo.users.length, 0);
+});
+
+test("register rejects an over-long name and email", async () => {
+  const repo = createRepo();
+  const service = new AuthService(repo, "test-jwt-secret");
+
+  await assert.rejects(
+    () => service.register({ name: "x".repeat(201), email: "long@example.com", password: "SecurePass1" }),
+    /longer than allowed/i,
+  );
+  await assert.rejects(
+    () => service.register({ name: "Fine", email: `${"a".repeat(320)}@example.com`, password: "SecurePass1" }),
+    /longer than allowed/i,
+  );
+  assert.equal(repo.users.length, 0);
+});
+
+test("login returns the same generic error for a missing account and a wrong password", async () => {
+  const repo = createRepo();
+  const service = new AuthService(repo, "test-jwt-secret");
+  await service.register({ name: "Real User", email: "real@example.com", password: "SecurePass1" });
+
+  await assert.rejects(
+    () => service.login({ email: "real@example.com", password: "WrongPass1" }),
+    /invalid email or password/i,
+  );
+  await assert.rejects(
+    () => service.login({ email: "ghost@example.com", password: "AnyPass123" }),
+    /invalid email or password/i,
+  );
+});

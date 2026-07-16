@@ -1,5 +1,6 @@
-import { BadRequestException, Body, Controller, Get, Inject, Post, Req, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Inject, Post, Req, UnauthorizedException, UseGuards } from "@nestjs/common";
 import type { UserRole } from "../../domain/evalora.types";
+import { AuthRateLimitGuard } from "./auth-rate-limit.guard";
 import { type AuthenticatedRequest, tryExtractAuthUserFromHeader } from "./auth.guard";
 import { AuthService } from "./auth.service";
 
@@ -32,10 +33,13 @@ interface ResetPasswordRequest {
   password?: string;
 }
 
+// Rate limiting is applied per sensitive endpoint (not the whole controller) so
+// the frequent, harmless GET /auth/me session probe is never throttled.
 @Controller("auth")
 export class AuthController {
   constructor(@Inject(AuthService) private readonly authService: AuthService) {}
 
+  @UseGuards(AuthRateLimitGuard)
   @Post("register")
   async register(@Body() body: RegisterRequest) {
     try {
@@ -46,6 +50,7 @@ export class AuthController {
     }
   }
 
+  @UseGuards(AuthRateLimitGuard)
   @Post("login")
   async login(@Body() body: LoginRequest) {
     try {
@@ -56,6 +61,7 @@ export class AuthController {
     }
   }
 
+  @UseGuards(AuthRateLimitGuard)
   @Post("google")
   async google(@Body() body: GoogleAuthRequest) {
     try {
@@ -70,6 +76,7 @@ export class AuthController {
     }
   }
 
+  @UseGuards(AuthRateLimitGuard)
   @Post("forgot-password")
   async forgotPassword(@Body() body: ForgotPasswordRequest) {
     try {
@@ -79,6 +86,7 @@ export class AuthController {
     }
   }
 
+  @UseGuards(AuthRateLimitGuard)
   @Post("reset-password")
   async resetPassword(@Body() body: ResetPasswordRequest) {
     try {
