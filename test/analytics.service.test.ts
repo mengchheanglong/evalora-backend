@@ -62,3 +62,28 @@ test("analytics summary uses organization-scoped persisted sessions and reports"
   const scoped = calls.find((call) => call.method === "session.groupBy");
   assert.deepEqual((scoped?.args as { where: unknown }).where, { organizationId: "org-1" });
 });
+
+test("analytics trend averages report scores per day as a percentage, scoped to the org", async () => {
+  let capturedWhere: unknown;
+  const prisma = {
+    candidateReport: {
+      findMany: async (args: any) => {
+        capturedWhere = args.where;
+        return [
+          { overallScore: 4, createdAt: new Date("2026-07-15T10:00:00Z"), session: { completedAt: new Date("2026-07-15T12:00:00Z") } },
+          { overallScore: 5, createdAt: new Date("2026-07-15T11:00:00Z"), session: { completedAt: new Date("2026-07-15T13:00:00Z") } },
+          { overallScore: 3, createdAt: new Date("2026-07-16T09:00:00Z"), session: { completedAt: null } },
+        ];
+      },
+    },
+  };
+  const service = new AnalyticsService(prisma as never);
+
+  const trend = await service.trend(access);
+
+  assert.deepEqual(trend, [
+    { date: "2026-07-15", score: 90 },
+    { date: "2026-07-16", score: 60 },
+  ]);
+  assert.deepEqual(capturedWhere, { session: { organizationId: "org-1" } });
+});

@@ -105,7 +105,7 @@ test("createSession generates an access code and maps candidate/template assignm
     include: {
       candidate: { select: { name: true, email: true } },
       createdBy: { select: { id: true, name: true, role: true } },
-      template: { select: { title: true, roleType: true } },
+      template: { select: { title: true, roleType: true, timeLimitMin: true } },
       report: { select: { overallScore: true } },
     },
   });
@@ -286,6 +286,127 @@ test("candidate invite access code is closed after completion", async () => {
   await assert.rejects(() => service.getSessionByAccessCode("EV-123456"), /no longer available/i);
 });
 
+const timedTemplate = { title: "Backend Engineer Assessment", roleType: "Backend Engineer", timeLimitMin: 30, modules: [candidateModuleRow] };
+
+test("expireSessionByAccessCode marks a timed-out in-progress session as EXPIRED", async () => {
+  const calls: Array<{ method: string; args: any }> = [];
+  const startedAt = new Date(now.getTime() - 60 * 60_000); // started 60 min ago; 30 min limit elapsed
+  const service = new SessionsService(
+    {
+      interviewSession: {
+        findFirst: async (args: any) => {
+          calls.push({ method: "findFirst", args });
+          return { ...sessionRow, status: "IN_PROGRESS", startedAt, template: timedTemplate };
+        },
+        update: async (args: any) => {
+          calls.push({ method: "update", args });
+          return { ...sessionRow, status: args.data.status, startedAt, template: timedTemplate };
+        },
+      },
+    } as any,
+    { generateAccessCode: () => "EV-123456", now: () => now },
+  );
+
+  const result = await service.expireSessionByAccessCode("EV-123456");
+
+  assert.equal(result.status, "expired");
+  const updateCall = calls.find((call) => call.method === "update");
+  assert.ok(updateCall, "update should be called");
+  assert.equal(updateCall.args.data.status, "EXPIRED");
+});
+
+test("expireSessionByAccessCode rejects before the time limit has elapsed", async () => {
+  const updates: string[] = [];
+  const service = new SessionsService(
+    {
+      interviewSession: {
+        findFirst: async () => ({ ...sessionRow, status: "IN_PROGRESS", startedAt: now, template: timedTemplate }),
+        update: async () => { updates.push("update"); return sessionRow; },
+      },
+    } as any,
+    { generateAccessCode: () => "EV-123456", now: () => now },
+  );
+
+  await assert.rejects(() => service.expireSessionByAccessCode("EV-123456"), /not elapsed/i);
+  assert.equal(updates.length, 0);
+});
+
+test("expireSessionByAccessCode does not downgrade a completed session", async () => {
+  const updates: string[] = [];
+  const service = new SessionsService(
+    {
+      interviewSession: {
+        findFirst: async () => ({ ...sessionRow, status: "COMPLETED", startedAt: new Date(now.getTime() - 60 * 60_000), completedAt: now, template: timedTemplate }),
+        update: async () => { updates.push("update"); return sessionRow; },
+      },
+    } as any,
+    { generateAccessCode: () => "EV-123456", now: () => now },
+  );
+
+  const result = await service.expireSessionByAccessCode("EV-123456");
+
+  assert.equal(result.status, "completed");
+  assert.equal(updates.length, 0);
+});
+
+test("listSessions lazily expires an in-progress session past its time limit", async () => {
+  const updateManyCalls: any[] = [];
+  const startedAt = new Date(now.getTime() - 60 * 60_000); // 60 min ago, 30 min limit
+  const service = new SessionsService(
+    {
+      interviewSession: {
+        findMany: async () => [
+          { ...sessionRow, id: "timed-out", status: "IN_PROGRESS", startedAt, template: { title: "T", roleType: "R", timeLimitMin: 30 } },
+          { ...sessionRow, id: "still-going", status: "IN_PROGRESS", startedAt: now, template: { title: "T", roleType: "R", timeLimitMin: 30 } },
+        ],
+        updateMany: async (args: any) => { updateManyCalls.push(args); return { count: 1 }; },
+      },
+    } as any,
+    { generateAccessCode: () => "EV-123456", now: () => now },
+  );
+
+  const result = await service.listSessions();
+
+  assert.equal(updateManyCalls.length, 1);
+  assert.deepEqual(updateManyCalls[0].where.id, { in: ["timed-out"] });
+  assert.equal(updateManyCalls[0].where.status, "IN_PROGRESS");
+  assert.equal(updateManyCalls[0].data.status, "EXPIRED");
+  assert.equal(result.find((session) => session.id === "timed-out")?.status, "expired");
+  assert.equal(result.find((session) => session.id === "still-going")?.status, "in_progress");
+});
+
+test("deleteSession removes a session scoped to the caller's organization", async () => {
+  const calls: any[] = [];
+  const service = new SessionsService(
+    {
+      interviewSession: {
+        deleteMany: async (args: any) => { calls.push(args); return { count: 1 }; },
+      },
+    } as any,
+    { generateAccessCode: () => "EV-123456", now: () => now },
+  );
+
+  await service.deleteSession("session-1", interviewerAccess);
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].where, { id: "session-1", organizationId: "org-1" });
+});
+
+test("deleteSession rejects when nothing matches the caller's scope", async () => {
+  let deleteCalled = false;
+  const service = new SessionsService(
+    {
+      interviewSession: {
+        deleteMany: async () => { deleteCalled = true; return { count: 0 }; },
+      },
+    } as any,
+    { generateAccessCode: () => "EV-123456", now: () => now },
+  );
+
+  await assert.rejects(() => service.deleteSession("session-x", interviewerAccess));
+  assert.equal(deleteCalled, true);
+});
+
 test("startSession and completeSession write status timestamps through Prisma", async () => {
   const calls: unknown[] = [];
   const service = new SessionsService(
@@ -320,7 +441,7 @@ test("startSession and completeSession write status timestamps through Prisma", 
       include: {
         candidate: { select: { name: true, email: true } },
         createdBy: { select: { id: true, name: true, role: true } },
-        template: { select: { title: true, roleType: true } },
+        template: { select: { title: true, roleType: true, timeLimitMin: true } },
         report: { select: { overallScore: true } },
       },
     },
@@ -330,7 +451,7 @@ test("startSession and completeSession write status timestamps through Prisma", 
       include: {
         candidate: { select: { name: true, email: true } },
         createdBy: { select: { id: true, name: true, role: true } },
-        template: { select: { title: true, roleType: true } },
+        template: { select: { title: true, roleType: true, timeLimitMin: true } },
         report: { select: { overallScore: true } },
       },
     },

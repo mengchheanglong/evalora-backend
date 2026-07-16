@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Inject,
   NotFoundException,
@@ -73,6 +74,13 @@ export class SessionsController {
     return { ...session, reportStatus: session.reportReady ? "generated" as const : "pending" as const };
   }
 
+  @Delete(":id")
+  @Roles("admin", "organization", "interviewer")
+  async remove(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
+    await this.sessionsService.deleteSession(id, toAccessContext(request.user));
+    return { id, deleted: true };
+  }
+
   private queueReportGeneration(id: string, access: ReturnType<typeof toAccessContext>) {
     void this.reportsService.generateAndPersistReport(id, access).catch(() => undefined);
   }
@@ -101,5 +109,10 @@ export class CandidateSessionAccessController {
     const session = await this.sessionsService.completeSessionByAccessCode(accessCode);
     void this.reportsService.generateAndPersistReport(session.id).catch(() => undefined);
     return { ...session, reportStatus: "pending" as const };
+  }
+
+  @Put(":accessCode/timeout")
+  timeoutByAccessCode(@Param("accessCode") accessCode: string) {
+    return this.sessionsService.expireSessionByAccessCode(accessCode);
   }
 }

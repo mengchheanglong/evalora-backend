@@ -180,6 +180,36 @@ export class AnalyticsService {
     return buckets.map(({ label, count }) => ({ label, count }));
   }
 
+  /**
+   * Assessment performance trend: average overall score per day (converted from
+   * the 0-5 report scale to a 0-100 percentage), scoped to the caller's
+   * workspace, ordered oldest-to-newest. Powers the dashboard trend chart.
+   */
+  async trend(access: AccessContext): Promise<Array<{ date: string; score: number }>> {
+    const reports = await this.prisma.candidateReport.findMany({
+      where: { session: sessionScope(access) },
+      select: { overallScore: true, createdAt: true, session: { select: { completedAt: true } } },
+      orderBy: { createdAt: "asc" },
+      take: 1000,
+    });
+
+    const byDay = new Map<string, { total: number; count: number }>();
+    for (const report of reports) {
+      const when = report.session?.completedAt ?? report.createdAt;
+      if (!when) continue;
+      const day = when.toISOString().slice(0, 10);
+      const entry = byDay.get(day) ?? { total: 0, count: 0 };
+      entry.total += report.overallScore;
+      entry.count += 1;
+      byDay.set(day, entry);
+    }
+
+    return Array.from(byDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, { total, count }]) => ({ date, score: Math.round((total / count) * 20) }))
+      .slice(-14);
+  }
+
   async themes(access: AccessContext) {
     const reports = await this.prisma.candidateReport.findMany({
       where: { session: sessionScope(access) },

@@ -32,6 +32,12 @@ export class AnalyticsController {
     return this.analyticsService.scoreDistribution(toAccessContext(request.user));
   }
 
+  @Get("trend")
+  @Roles("admin", "organization", "interviewer")
+  trend(@Req() request: AuthenticatedRequest) {
+    return this.analyticsService.trend(toAccessContext(request.user));
+  }
+
   @Get("themes")
   @Roles("admin", "organization", "interviewer")
   themes(@Req() request: AuthenticatedRequest) {

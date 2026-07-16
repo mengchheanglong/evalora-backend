@@ -20,6 +20,7 @@ interface SessionUserRow {
 interface SessionTemplateRow {
   title: string;
   roleType?: string;
+  timeLimitMin?: number | null;
 }
 
 interface SessionReportRow {
@@ -126,6 +127,8 @@ interface SessionPrismaClient {
     findUnique?: SessionFindUniqueFn;
     findFirst?: SessionFindFirstFn;
     update?: SessionUpdateFn;
+    updateMany?: (args: any) => Promise<{ count: number }>;
+    deleteMany?: (args: any) => Promise<{ count: number }>;
   };
 }
 
@@ -174,7 +177,7 @@ interface SessionsServiceOptions {
 export const SESSION_INCLUDE = {
   candidate: { select: { name: true, email: true } },
   createdBy: { select: { id: true, name: true, role: true } },
-  template: { select: { title: true, roleType: true } },
+  template: { select: { title: true, roleType: true, timeLimitMin: true } },
   report: { select: { overallScore: true } },
 };
 
@@ -302,26 +305,48 @@ export class SessionsService {
       orderBy: { updatedAt: "desc" },
     });
 
-    return sessions.map(toSessionDto);
+    const reconciled = await this.reconcileTimedOutSessions(sessions as SessionRow[]);
+    return reconciled.map(toSessionDto);
   }
 
   async getSession(id: string, access?: AccessContext): Promise<InterviewSessionDto | null> {
+    let session: SessionRow | null;
     if (access) {
       const findFirst = requireMethod(this.prisma.interviewSession.findFirst, "interviewSession.findFirst");
-      const session = await findFirst({
+      session = (await findFirst({
         where: mergeWhere({ id }, buildSessionOwnershipWhere(access)),
         include: SESSION_INCLUDE,
-      });
-      return session ? toSessionDto(session as SessionRow) : null;
+      })) as SessionRow | null;
+    } else {
+      const findUnique = requireMethod(this.prisma.interviewSession.findUnique, "interviewSession.findUnique");
+      session = (await findUnique({ where: { id }, include: SESSION_INCLUDE })) as SessionRow | null;
     }
 
-    const findUnique = requireMethod(this.prisma.interviewSession.findUnique, "interviewSession.findUnique");
-    const session = await findUnique({
-      where: { id },
-      include: SESSION_INCLUDE,
+    if (!session) return null;
+    const [reconciled] = await this.reconcileTimedOutSessions([session]);
+    return toSessionDto(reconciled);
+  }
+
+  /**
+   * Lazily reconciles sessions whose time limit lapsed while the candidate was
+   * away (tab closed, network lost) and never fired the client timeout call. On
+   * any workspace read, an IN_PROGRESS session past `startedAt + timeLimitMin` is
+   * persisted as EXPIRED so it surfaces as "Withdrawn / Rejected". The updateMany
+   * is guarded on IN_PROGRESS so a concurrent completion is never overwritten.
+   */
+  private async reconcileTimedOutSessions<T extends SessionRow>(rows: T[]): Promise<T[]> {
+    const nowMs = this.now().getTime();
+    const timedOutIds = rows.filter((row) => isSessionTimedOut(row, nowMs)).map((row) => row.id);
+    if (timedOutIds.length === 0) return rows;
+
+    const updateMany = requireMethod(this.prisma.interviewSession.updateMany, "interviewSession.updateMany");
+    await updateMany({
+      where: { id: { in: timedOutIds }, status: "IN_PROGRESS" },
+      data: { status: "EXPIRED" },
     });
 
-    return session ? toSessionDto(session) : null;
+    const expired = new Set(timedOutIds);
+    return rows.map((row) => (expired.has(row.id) ? { ...row, status: "EXPIRED" as PrismaSessionStatus } : row));
   }
 
   async getSessionByAccessCode(accessCode: string): Promise<CandidateAccessSessionDto> {
@@ -362,6 +387,18 @@ export class SessionsService {
     return toCandidateAccessSessionDto(session as CandidateSessionRow);
   }
 
+  /**
+   * Deletes a session (and its cascaded responses, code submissions, evaluations,
+   * report, and reviewer notes). Scoped through deleteMany + the caller's
+   * ownership filter so one workspace cannot delete another's records; a miss
+   * (wrong id or not owned) surfaces as a forbidden/not-found error.
+   */
+  async deleteSession(id: string, access?: AccessContext): Promise<void> {
+    const deleteMany = requireMethod(this.prisma.interviewSession.deleteMany, "interviewSession.deleteMany");
+    const result = await deleteMany({ where: mergeWhere({ id }, buildSessionOwnershipWhere(access)) });
+    if (result.count === 0) throw forbiddenResourceError("Session");
+  }
+
   async completeSession(id: string, access?: AccessContext): Promise<InterviewSessionDto> {
     if (access) {
       const current = await this.getSession(id, access);
@@ -388,6 +425,44 @@ export class SessionsService {
     const session = await update({
       where: { id: current.id },
       data: { status: "COMPLETED", completedAt: this.now() },
+      include: CANDIDATE_SESSION_INCLUDE,
+    });
+    return toCandidateAccessSessionDto(session as CandidateSessionRow);
+  }
+
+  /**
+   * Marks a timed assessment as EXPIRED (shown to the workspace as
+   * "Withdrawn / Rejected") once the candidate's time limit has elapsed. Called
+   * by the candidate app when the countdown reaches zero. The elapsed time is
+   * re-checked server-side so a client cannot expire a session early.
+   */
+  async expireSessionByAccessCode(accessCode: string): Promise<CandidateAccessSessionDto> {
+    const current = await this.findCandidateSessionByAccessCode(accessCode);
+    const status = fromPrismaSessionStatus(current.status);
+
+    // Terminal states are left untouched: a submitted assessment must not be
+    // downgraded to expired, and repeated timeout signals are idempotent.
+    if (status === "completed" || status === "expired") {
+      return toCandidateAccessSessionDto(current);
+    }
+    if (status !== "in_progress") {
+      throw forbiddenResourceError("Only an in-progress session can time out");
+    }
+
+    const timeLimitMin = current.template?.timeLimitMin ?? null;
+    if (!timeLimitMin || !current.startedAt) {
+      throw forbiddenResourceError("This assessment is not timed");
+    }
+    const deadline = current.startedAt.getTime() + timeLimitMin * 60_000;
+    const CLOCK_SKEW_GRACE_MS = 5_000;
+    if (deadline - this.now().getTime() > CLOCK_SKEW_GRACE_MS) {
+      throw forbiddenResourceError("The assessment time limit has not elapsed");
+    }
+
+    const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
+    const session = await update({
+      where: { id: current.id },
+      data: { status: "EXPIRED" },
       include: CANDIDATE_SESSION_INCLUDE,
     });
     return toCandidateAccessSessionDto(session as CandidateSessionRow);
@@ -676,6 +751,13 @@ function toCandidateTemplateDto(template: CandidateTemplateRow | null | undefine
       })),
     })),
   };
+}
+
+function isSessionTimedOut(session: SessionRow, nowMs: number): boolean {
+  if (session.status !== "IN_PROGRESS" || !session.startedAt) return false;
+  const timeLimitMin = session.template?.timeLimitMin ?? null;
+  if (!timeLimitMin || timeLimitMin <= 0) return false;
+  return session.startedAt.getTime() + timeLimitMin * 60_000 <= nowMs;
 }
 
 function assertCandidateAccessOpen(session: CandidateSessionRow): void {

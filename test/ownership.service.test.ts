@@ -101,7 +101,7 @@ test("organization session lists and candidate session reads are scoped by owner
 
   const sessionInclude = {
     candidate: { select: { name: true, email: true } },
-    template: { select: { title: true, roleType: true } },
+    template: { select: { title: true, roleType: true, timeLimitMin: true } },
     createdBy: { select: { id: true, name: true, role: true } },
     report: { select: { overallScore: true } },
   };

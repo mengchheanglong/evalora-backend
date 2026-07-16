@@ -129,9 +129,11 @@ The backend derives `createdById` and organization ownership from the JWT. A tem
 | GET | `/sessions/:id` | Workspace | Read one session with candidate/template labels and report readiness. |
 | PUT | `/sessions/:id/start` | Workspace | Start a not-started session; idempotent while in progress. |
 | PUT | `/sessions/:id/complete` | Workspace | Complete a session and queue report generation. |
+| DELETE | `/sessions/:id` | Workspace | Permanently delete a scoped session and its cascaded responses, submissions, evaluations, report, and notes. |
 | GET | `/sessions/access/:accessCode` | Candidate link | Read the sanitized assigned assessment while access is open. |
 | PUT | `/sessions/access/:accessCode/start` | Candidate link | Start the assigned assessment. |
 | PUT | `/sessions/access/:accessCode/complete` | Candidate link | Complete the assessment and immediately return `reportStatus: "pending"`. |
+| PUT | `/sessions/access/:accessCode/timeout` | Candidate link | Mark an in-progress timed assessment `expired` (shown as "Withdrawn / Rejected") once its time limit has elapsed. Server re-checks elapsed time; idempotent for finished sessions. |
 
 Session creation request:
 
