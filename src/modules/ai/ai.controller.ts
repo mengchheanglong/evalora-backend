@@ -83,4 +83,14 @@ export class CandidateAiController {
   followUp(@Param("accessCode") accessCode: string, @Body() body: { question?: string; answer?: string; rubric?: string[] }) {
     return this.candidateAiService.followUp(accessCode, body);
   }
+
+  @Post(":accessCode/adaptive-questions")
+  adaptiveQuestions(@Param("accessCode") accessCode: string, @Body() body: { count?: number }) {
+    return this.candidateAiService.adaptiveQuestions(accessCode, body.count ?? 3);
+  }
+
+  @Post(":accessCode/adaptive-answer")
+  saveAdaptiveAnswer(@Param("accessCode") accessCode: string, @Body() body: { question?: string; answer?: string }) {
+    return this.candidateAiService.saveAdaptiveAnswer(accessCode, body);
+  }
 }

@@ -742,7 +742,7 @@ function toCandidateTemplateDto(template: CandidateTemplateRow | null | undefine
       weight: module.weight,
       orderIndex: module.orderIndex,
       settings: module.settings ?? undefined,
-      questions: selectCandidateQuestions(module.questions ?? [], accessCode, module.id, module.moduleType === "CODING" ? 0 : 2).map((question) => ({
+      questions: selectCandidateQuestions(module.questions ?? [], accessCode, module.id, module.moduleType === "CODING" ? 0 : (module.questions?.length ?? 0)).map((question) => ({
         id: question.id,
         questionText: question.questionText,
         questionType: fromPrismaQuestionType(question.questionType),

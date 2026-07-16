@@ -117,7 +117,7 @@ export class ResponsesService {
     });
     if (!session) throw forbiddenResourceError("Session");
     const assignedIds = (session.template?.modules ?? []).flatMap((module: any) =>
-      selectCandidateQuestions(module.questions ?? [], session.accessCode, module.id, module.moduleType === "CODING" ? 0 : 2).map((question) => question.id),
+      selectCandidateQuestions(module.questions ?? [], session.accessCode, module.id, module.moduleType === "CODING" ? 0 : (module.questions?.length ?? 0)).map((question) => question.id),
     );
     if (!assignedIds.includes(questionId)) throw forbiddenResourceError("Question");
   }
