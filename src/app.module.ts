@@ -53,13 +53,14 @@ import { PrismaService } from "./prisma/prisma.service";
       useFactory: () => new AiService(createDeepSeekProviderFromEnv()),
     },
     {
-      provide: AuthService,
-      useFactory: (prisma: PrismaService) => new AuthService(new PrismaAuthRepository(prisma)),
-      inject: [PrismaService],
-    },
-    {
       provide: EmailService,
       useFactory: () => createEmailServiceFromEnv(),
+    },
+    {
+      provide: AuthService,
+      useFactory: (prisma: PrismaService, email: EmailService) =>
+        new AuthService(new PrismaAuthRepository(prisma), undefined, undefined, email),
+      inject: [PrismaService, EmailService],
     },
     {
       provide: OrganizationService,

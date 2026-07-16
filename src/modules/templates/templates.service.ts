@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import type { AssessmentModuleDto, AssessmentTemplateDto, JsonValue, ModuleType, QuestionDto, QuestionType } from "../../domain/evalora.types";
 import { assertCanWriteOrganizationResource, buildTemplateOwnershipWhere, forbiddenResourceError, mergeWhere, requireOrganizationId, type AccessContext } from "../auth/access-control";
 import {
@@ -55,6 +55,21 @@ interface TemplatePrismaClient {
     findFirst?: TemplateFindFirstFn;
     update?: TemplateUpdateFn;
     delete?: TemplateDeleteFn;
+  };
+  interviewSession?: {
+    count?: (args: { where: { templateId: string } }) => Promise<number>;
+  };
+  assessmentModule?: {
+    findMany?: (args: {
+      where: { templateId: string };
+      select: { id: true };
+    }) => Promise<Array<{ id: string }>>;
+  };
+  evaluation?: {
+    updateMany?: (args: {
+      where: { moduleId: { in: string[] } };
+      data: { moduleId: null };
+    }) => Promise<{ count: number }>;
   };
 }
 
@@ -307,9 +322,40 @@ export class TemplatesService {
     assertCanWriteOrganizationResource(access);
     await this.assertTemplateAccess(id, access);
 
+    const sessionCountFn = this.prisma.interviewSession?.count;
+    if (typeof sessionCountFn === "function") {
+      const sessionCount = await sessionCountFn({ where: { templateId: id } });
+      if (sessionCount > 0) {
+        throw new ConflictException(
+          `Cannot delete this template because ${sessionCount} interview session${sessionCount === 1 ? "" : "s"} still use it. Remove or complete those sessions first.`,
+        );
+      }
+    }
+
+    // Evaluations may reference modules; clear links so cascade module delete can succeed.
+    const findModules = this.prisma.assessmentModule?.findMany;
+    const clearEvaluations = this.prisma.evaluation?.updateMany;
+    if (typeof findModules === "function" && typeof clearEvaluations === "function") {
+      const modules = await findModules({ where: { templateId: id }, select: { id: true } });
+      const moduleIds = modules.map((module) => module.id);
+      if (moduleIds.length) {
+        await clearEvaluations({ where: { moduleId: { in: moduleIds } }, data: { moduleId: null } });
+      }
+    }
+
     const deleteTemplate = requireMethod(this.prisma.assessmentTemplate.delete, "assessmentTemplate.delete");
-    const deleted = await deleteTemplate({ where: { id } });
-    return { id: deleted.id, deleted: true };
+    try {
+      const deleted = await deleteTemplate({ where: { id } });
+      return { id: deleted.id, deleted: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/foreign key|restrict|reference/i.test(message)) {
+        throw new ConflictException(
+          "Cannot delete this template because related interview data still references it.",
+        );
+      }
+      throw error;
+    }
   }
 
   private async assertTemplateAccess(id: string, access?: AccessContext): Promise<void> {

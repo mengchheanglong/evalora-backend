@@ -23,6 +23,15 @@ interface GoogleAuthRequest {
   organizationName?: string;
 }
 
+interface ForgotPasswordRequest {
+  email?: string;
+}
+
+interface ResetPasswordRequest {
+  token?: string;
+  password?: string;
+}
+
 @Controller("auth")
 export class AuthController {
   constructor(@Inject(AuthService) private readonly authService: AuthService) {}
@@ -58,6 +67,24 @@ export class AuthController {
         throw new BadRequestException(message);
       }
       throw new UnauthorizedException(message);
+    }
+  }
+
+  @Post("forgot-password")
+  async forgotPassword(@Body() body: ForgotPasswordRequest) {
+    try {
+      return await this.authService.requestPasswordReset(body);
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : "Unable to start password reset.");
+    }
+  }
+
+  @Post("reset-password")
+  async resetPassword(@Body() body: ResetPasswordRequest) {
+    try {
+      return await this.authService.resetPassword(body);
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : "Unable to reset password.");
     }
   }
 

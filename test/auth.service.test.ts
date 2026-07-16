@@ -34,6 +34,12 @@ function createRepo(): AuthUserRepository & { users: AuthUserRecord[] } {
       user.organizationId = `org-${workspaceName.replace(/\s+/g, "-").toLowerCase()}`;
       return user;
     },
+    async updatePasswordHash(userId, passwordHash) {
+      const user = users.find((row) => row.id === userId);
+      if (!user) throw new Error("User not found.");
+      user.passwordHash = passwordHash;
+      return user;
+    },
   };
 }
 
@@ -44,14 +50,14 @@ test("public register creates a workspace owner account and signs JWT with role 
   const result = await service.register({
     name: "Long Mengchheang",
     email: "long@example.com",
-    password: "secure-password",
+    password: "SecurePass1",
   });
 
   assert.equal(result.user.email, "long@example.com");
   assert.equal(result.user.role, "organization");
   assert.equal("passwordHash" in result.user, false);
-  assert.notEqual(repo.users[0].passwordHash, "secure-password");
-  assert.equal(await bcrypt.compare("secure-password", repo.users[0].passwordHash), true);
+  assert.notEqual(repo.users[0].passwordHash, "SecurePass1");
+  assert.equal(await bcrypt.compare("SecurePass1", repo.users[0].passwordHash), true);
 
   const decoded = jwt.verify(result.token, "test-jwt-secret") as { sub: string; email: string; role: string };
   assert.equal(decoded.sub, "user-1");
@@ -64,11 +70,11 @@ test("public register does not create admin or candidate platform accounts", asy
   const service = new AuthService(repo, "test-jwt-secret");
 
   await assert.rejects(
-    () => service.register({ name: "Admin", email: "admin@example.com", password: "secure-password", role: "admin" }),
+    () => service.register({ name: "Admin", email: "admin@example.com", password: "SecurePass1", role: "admin" }),
     /platform admin accounts are not created/i,
   );
   await assert.rejects(
-    () => service.register({ name: "Candidate", email: "candidate@example.com", password: "secure-password", role: "candidate" }),
+    () => service.register({ name: "Candidate", email: "candidate@example.com", password: "SecurePass1", role: "candidate" }),
     /candidates access assessments through invitation links/i,
   );
 
@@ -83,7 +89,7 @@ test("public register cannot join an existing organization by supplying its id",
     () => service.register({
       name: "Unauthorized Member",
       email: "outsider@example.com",
-      password: "secure-password",
+      password: "SecurePass1",
       organizationId: "another-tenant",
     }),
     /organization membership cannot be selected/i,
@@ -94,13 +100,36 @@ test("public register cannot join an existing organization by supplying its id",
 test("login verifies hashed password before issuing token", async () => {
   const repo = createRepo();
   const service = new AuthService(repo, "test-jwt-secret");
-  await service.register({ name: "Demo User", email: "demo@example.com", password: "correct-password", role: "interviewer" });
+  await service.register({ name: "Demo User", email: "demo@example.com", password: "CorrectPass1", role: "interviewer" });
 
-  await assert.rejects(() => service.login({ email: "demo@example.com", password: "wrong-password" }), /invalid email or password/i);
+  await assert.rejects(() => service.login({ email: "demo@example.com", password: "WrongPass1" }), /invalid email or password/i);
 
-  const result = await service.login({ email: "demo@example.com", password: "correct-password" });
+  const result = await service.login({ email: "demo@example.com", password: "CorrectPass1" });
   assert.equal(result.user.role, "organization");
   assert.equal(typeof result.token, "string");
+});
+
+test("register rejects passwords missing uppercase, lowercase, or a number", async () => {
+  const repo = createRepo();
+  const service = new AuthService(repo, "test-jwt-secret");
+
+  await assert.rejects(
+    () => service.register({ name: "Weak", email: "weak1@example.com", password: "alllowercase1" }),
+    /uppercase/i,
+  );
+  await assert.rejects(
+    () => service.register({ name: "Weak", email: "weak2@example.com", password: "ALLUPPERCASE1" }),
+    /lowercase/i,
+  );
+  await assert.rejects(
+    () => service.register({ name: "Weak", email: "weak3@example.com", password: "NoNumberHere" }),
+    /number/i,
+  );
+  await assert.rejects(
+    () => service.register({ name: "Weak", email: "weak4@example.com", password: "Ab1" }),
+    /at least 8 characters/i,
+  );
+  assert.equal(repo.users.length, 0);
 });
 
 test("login blocks invite-only candidate records even with a valid password", async () => {
@@ -184,4 +213,51 @@ test("Google sign-in rejects candidate emails and unverified accounts", async ()
 
   const unconfigured = new AuthService(repo, "test-jwt-secret", null);
   await assert.rejects(() => unconfigured.loginWithGoogle({ credential: "tok" }), /not configured/i);
+});
+
+test("forgot password returns generic message and reset link when email is skipped", async () => {
+  const repo = createRepo();
+  const service = new AuthService(repo, "test-jwt-secret");
+  await service.register({ name: "Owner", email: "owner@example.com", password: "OldPassword1" });
+
+  const unknown = await service.requestPasswordReset({ email: "missing@example.com" });
+  assert.match(unknown.message, /if an account exists/i);
+  assert.equal(unknown.resetUrl, undefined);
+
+  const known = await service.requestPasswordReset({ email: "owner@example.com" });
+  assert.match(known.message, /if an account exists/i);
+  assert.equal(typeof known.resetUrl, "string");
+  assert.match(known.resetUrl ?? "", /reset-password\?token=/);
+});
+
+test("reset password updates hash and invalidates the previous token", async () => {
+  const repo = createRepo();
+  const service = new AuthService(repo, "test-jwt-secret");
+  await service.register({ name: "Owner", email: "owner@example.com", password: "OldPassword1" });
+
+  const request = await service.requestPasswordReset({ email: "owner@example.com" });
+  const token = new URL(request.resetUrl ?? "").searchParams.get("token");
+  assert.ok(token);
+
+  const result = await service.resetPassword({ token: token!, password: "NewPassword9" });
+  assert.match(result.message, /password updated/i);
+
+  await assert.rejects(() => service.login({ email: "owner@example.com", password: "OldPassword1" }), /invalid email or password/i);
+  const login = await service.login({ email: "owner@example.com", password: "NewPassword9" });
+  assert.equal(login.user.email, "owner@example.com");
+
+  await assert.rejects(() => service.resetPassword({ token: token!, password: "AnotherPass1" }), /invalid or has expired/i);
+});
+
+test("reset password rejects weak replacement passwords", async () => {
+  const repo = createRepo();
+  const service = new AuthService(repo, "test-jwt-secret");
+  await service.register({ name: "Owner", email: "owner@example.com", password: "OldPassword1" });
+  const request = await service.requestPasswordReset({ email: "owner@example.com" });
+  const token = new URL(request.resetUrl ?? "").searchParams.get("token");
+  assert.ok(token);
+
+  await assert.rejects(() => service.resetPassword({ token: token!, password: "weakpass1" }), /uppercase/i);
+  await assert.rejects(() => service.resetPassword({ token: token!, password: "WEAKPASS1" }), /lowercase/i);
+  await assert.rejects(() => service.resetPassword({ token: token!, password: "WeakPassword" }), /number/i);
 });

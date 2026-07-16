@@ -24,6 +24,8 @@ The frontend reads `NEXT_PUBLIC_API_URL` and proxies browser requests through `/
 | POST | `/auth/register` | Public | Create a **workspace owner** (`organization` role) and a new organization. |
 | POST | `/auth/login` | Public | Return a signed JWT and safe user object. |
 | POST | `/auth/google` | Public | Verify a Google Identity Services ID token, then login or create a workspace owner. |
+| POST | `/auth/forgot-password` | Public | Start password reset for a workspace account. Always returns a generic success message. |
+| POST | `/auth/reset-password` | Public | Set a new password using a one-time reset token from email (or demo `resetUrl`). |
 | POST | `/auth/logout` | Public | Acknowledge logout; the frontend proxy clears its cookie. |
 | GET | `/auth/me` | Workspace | Return the current persisted user. |
 
@@ -33,7 +35,7 @@ Registration request:
 {
   "name": "Demo Owner",
   "email": "owner@example.com",
-  "password": "minimum-8-characters",
+  "password": "SecurePass1",
   "organizationName": "Demo Workspace"
 }
 ```
@@ -51,12 +53,46 @@ Google sign-in request:
 
 `POST /auth/google` verifies the ID token against `GOOGLE_CLIENT_ID`, requires a verified email, blocks candidate-only emails, logs in existing workspace users, and creates a new **owner** workspace when the email is new. The frontend proxy also treats `auth/google` as an auth response path and stores the JWT cookie.
 
+Password reset request:
+
+```json
+{ "email": "owner@example.com" }
+```
+
+Response shape:
+
+```json
+{
+  "message": "If an account exists for that email, password reset instructions have been sent.",
+  "emailDelivery": { "status": "sent|skipped|failed", "reason": "optional" },
+  "resetUrl": "http://localhost:3010/reset-password?token=... optional when email was not sent"
+}
+```
+
+Reset tokens are short-lived JWTs (1 hour) bound to the current password hash fingerprint, so a successful reset invalidates older links. Candidate invite-only rows cannot reset a platform password.
+
+Password reset confirm:
+
+```json
+{
+  "token": "reset-token-from-email-or-resetUrl",
+  "password": "SecurePass1"
+}
+```
+
+Workspace passwords must be 8–128 characters and include at least one uppercase letter, one lowercase letter, and one number. The same policy applies to register, invite accept, and password reset.
+
 ## Organization members and invites
 
 One organization can have many workspace users. The first registrant is the **owner**. Owners invite **interviewers** who share the same `organizationId` data (templates, sessions, reports, analytics).
 
 | Method | Endpoint | Access | Description |
 | --- | --- | --- | --- |
+| GET | `/organization` | Owner, interviewer | Current workspace profile (name, member count, owner). |
+| PUT | `/organization` | Owner | Rename the workspace (`{ "name": "Acme Hiring" }`). |
+| GET | `/organization/privacy` | Owner, interviewer | Live data counts and retention policy for Settings. |
+| GET | `/organization/export` | Owner | Full JSON export of members, templates, sessions, and reports. |
+| DELETE | `/organization/data` | Owner | Wipe templates, sessions, and invites. Body: `{ "confirmName": "<exact org name>" }`. Keeps accounts. |
 | GET | `/organization/members` | Owner, interviewer | List workspace members (owner + interviewers). |
 | POST | `/organization/invites` | Owner | Create a pending interviewer invite; returns `token` and `inviteUrlPath`. |
 | GET | `/organization/invites` | Owner | List recent invites for the workspace. |
@@ -77,7 +113,7 @@ Accept invite request:
 {
   "token": "invite-token-from-link",
   "name": "Alex Interviewer",
-  "password": "minimum-8-characters"
+  "password": "SecurePass1"
 }
 ```
 
@@ -243,6 +279,7 @@ All analytics are computed from organization-scoped persisted data.
 | GET | `/analytics/module-performance` | Average persisted evaluation score by module. |
 | GET | `/analytics/score-distribution` | Persisted report score buckets. |
 | GET | `/analytics/themes` | Common evidence-backed strengths and deeper-review themes. |
+| GET | `/analytics/trend` | Chronological performance points for the dashboard chart: `{ date, score }[]` with score 0–100. |
 
 ## Alignment checklist
 

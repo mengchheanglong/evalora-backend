@@ -4,6 +4,7 @@ import { OAuth2Client } from "google-auth-library";
 import * as jwt from "jsonwebtoken";
 import { randomBytes } from "node:crypto";
 import type { UserRole } from "../../domain/evalora.types";
+import { assertPasswordPolicy } from "./password-policy";
 
 type PrismaRole = "ADMIN" | "ORGANIZATION" | "INTERVIEWER" | "CANDIDATE";
 
@@ -25,6 +26,7 @@ export interface AuthUserRepository {
     workspaceName: string,
   ): Promise<AuthUserRecord>;
   ensureUserWorkspace?(user: AuthUserRecord, workspaceName: string): Promise<AuthUserRecord>;
+  updatePasswordHash?(userId: string, passwordHash: string): Promise<AuthUserRecord>;
 }
 
 export interface RegisterInput {
@@ -92,7 +94,7 @@ interface PrismaUserClient {
     }): Promise<PrismaUserRow>;
     update(args: {
       where: { id: string };
-      data: { organizationId: string };
+      data: { organizationId?: string; passwordHash?: string };
       select: Record<keyof PrismaUserRow, true>;
     }): Promise<PrismaUserRow>;
   };
@@ -100,6 +102,26 @@ interface PrismaUserClient {
     create(args: { data: { name: string }; select: { id: true } }): Promise<{ id: string }>;
   };
 }
+
+export interface PasswordResetRequestResult {
+  message: string;
+  emailDelivery: {
+    status: "sent" | "skipped" | "failed" | "queued";
+    reason?: string;
+    provider?: string;
+  };
+  /** Present when a matching workspace account exists and email could not be sent (local demos). */
+  resetUrl?: string;
+}
+
+export interface PasswordResetConfirmResult {
+  message: string;
+}
+
+const PASSWORD_RESET_PURPOSE = "password_reset";
+const PASSWORD_RESET_TTL = "1h";
+const PASSWORD_RESET_GENERIC_MESSAGE =
+  "If an account exists for that email, password reset instructions have been sent.";
 
 const USER_SELECT: Record<keyof PrismaUserRow, true> = {
   id: true,
@@ -181,6 +203,26 @@ export class PrismaAuthRepository implements AuthUserRepository {
 
     return toAuthUserRecord(updatedUser);
   }
+
+  async updatePasswordHash(userId: string, passwordHash: string): Promise<AuthUserRecord> {
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+      select: USER_SELECT,
+    });
+    return toAuthUserRecord(user);
+  }
+}
+
+export interface PasswordResetEmailSender {
+  isConfigured: boolean;
+  buildPasswordResetUrl(token: string): string;
+  sendPasswordReset(input: {
+    to: string;
+    userName: string;
+    resetUrl: string;
+    expiresInLabel: string;
+  }): Promise<{ status: "sent" | "skipped" | "failed" | "queued"; reason?: string; provider?: string }>;
 }
 
 @Injectable()
@@ -189,6 +231,7 @@ export class AuthService {
     private readonly users: AuthUserRepository,
     private readonly jwtSecret = resolveJwtSecret(),
     private readonly googleVerifier: GoogleTokenVerifier | null = createGoogleTokenVerifierFromEnv(),
+    private readonly emailService: PasswordResetEmailSender | null = null,
   ) {}
 
   async register(input: RegisterInput): Promise<AuthResult> {
@@ -286,6 +329,105 @@ export class AuthService {
     return this.toAuthResult(user);
   }
 
+  /**
+   * Request a password reset for a workspace account.
+   * Always returns a generic success message to avoid account enumeration.
+   * When email delivery is unavailable, includes `resetUrl` so local demos still work.
+   */
+  async requestPasswordReset(input: { email?: string }): Promise<PasswordResetRequestResult> {
+    const email = normalizeEmail(requireNonEmpty(input.email, "Email is required."));
+    const user = await this.users.findByEmail(email);
+
+    if (!user || user.role === "candidate") {
+      return {
+        message: PASSWORD_RESET_GENERIC_MESSAGE,
+        emailDelivery: {
+          status: "skipped",
+          reason: "No matching workspace account for this email, or email delivery not required.",
+        },
+      };
+    }
+
+    const token = this.signPasswordResetToken(user);
+    const resetUrl = this.emailService?.buildPasswordResetUrl(token) ?? defaultPasswordResetUrl(token);
+    const delivery = this.emailService
+      ? await this.emailService.sendPasswordReset({
+          to: user.email,
+          userName: user.name,
+          resetUrl,
+          expiresInLabel: "1 hour",
+        })
+      : {
+          status: "skipped" as const,
+          reason: "Email is not configured. Share the reset link manually.",
+        };
+
+    const result: PasswordResetRequestResult = {
+      message: PASSWORD_RESET_GENERIC_MESSAGE,
+      emailDelivery: {
+        status: delivery.status,
+        reason: delivery.reason,
+        provider: delivery.provider,
+      },
+    };
+
+    // Surface the link when mail was not delivered so local/demo flows still work.
+    if (delivery.status !== "sent") {
+      result.resetUrl = resetUrl;
+    }
+
+    return result;
+  }
+
+  async resetPassword(input: { token?: string; password?: string }): Promise<PasswordResetConfirmResult> {
+    const token = requireNonEmpty(input.token, "Reset token is required.");
+    const password = requirePassword(input.password);
+
+    let payload: jwt.JwtPayload;
+    try {
+      payload = jwt.verify(token, this.jwtSecret) as jwt.JwtPayload;
+    } catch {
+      throw new Error("This password reset link is invalid or has expired.");
+    }
+
+    if (payload.purpose !== PASSWORD_RESET_PURPOSE || typeof payload.sub !== "string") {
+      throw new Error("This password reset link is invalid or has expired.");
+    }
+
+    if (!this.users.findById || !this.users.updatePasswordHash) {
+      throw new Error("Password reset is unavailable.");
+    }
+
+    const user = await this.users.findById(payload.sub);
+    if (!user || user.role === "candidate") {
+      throw new Error("This password reset link is invalid or has expired.");
+    }
+
+    const fingerprint = typeof payload.ph === "string" ? payload.ph : "";
+    if (!fingerprint || fingerprint !== passwordResetFingerprint(user.passwordHash)) {
+      throw new Error("This password reset link is invalid or has expired.");
+    }
+
+    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+    await this.users.updatePasswordHash(user.id, passwordHash);
+
+    return { message: "Password updated. You can sign in with your new password." };
+  }
+
+  private signPasswordResetToken(user: AuthUserRecord): string {
+    return jwt.sign(
+      {
+        sub: user.id,
+        email: user.email,
+        purpose: PASSWORD_RESET_PURPOSE,
+        // Binds the token to the current password hash so it dies after a successful reset.
+        ph: passwordResetFingerprint(user.passwordHash),
+      },
+      this.jwtSecret,
+      { expiresIn: PASSWORD_RESET_TTL },
+    );
+  }
+
   private toAuthResult(user: AuthUserRecord): AuthResult {
     const safeUser = stripPasswordHash(user);
     return {
@@ -304,6 +446,19 @@ export class AuthService {
   }
 }
 
+function passwordResetFingerprint(passwordHash: string): string {
+  // Last 16 chars of the bcrypt hash are enough to invalidate tokens after a password change.
+  return passwordHash.slice(-16);
+}
+
+function defaultPasswordResetUrl(token: string): string {
+  const base = (process.env.APP_URL ?? process.env.FRONTEND_URL ?? "http://localhost:3010")
+    .split(",")[0]
+    ?.trim()
+    .replace(/\/$/, "");
+  return `${base || "http://localhost:3010"}/reset-password?token=${encodeURIComponent(token)}`;
+}
+
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
@@ -315,10 +470,8 @@ function requireNonEmpty(value: string | undefined, message: string): string {
 }
 
 function requirePassword(value: string | undefined): string {
-  const password = requireNonEmpty(value, "Password is required.");
-  if (password.length < 8) throw new Error("Password must be at least 8 characters.");
-  if (password.length > 128) throw new Error("Password must be at most 128 characters.");
-  return password;
+  requireNonEmpty(value, "Password is required.");
+  return assertPasswordPolicy(value);
 }
 
 function workspaceName(requestedName: string | undefined, userName: string): string {

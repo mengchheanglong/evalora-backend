@@ -14,6 +14,7 @@ import {
   requireOrganizationId,
   type AccessContext,
 } from "../auth/access-control";
+import { assertPasswordPolicy } from "../auth/password-policy";
 import type { PrismaService } from "../../prisma/prisma.service";
 import type { EmailDeliveryResult, EmailService } from "../email/email.service";
 
@@ -67,12 +68,318 @@ export interface AcceptInviteInput {
   password?: string;
 }
 
+export interface WorkspaceProfileDto {
+  id: string;
+  name: string;
+  memberCount: number;
+  ownerName?: string;
+  ownerEmail?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface UpdateWorkspaceInput {
+  name?: string;
+}
+
+export interface WorkspacePrivacySummaryDto {
+  organizationId: string;
+  organizationName: string;
+  memberCount: number;
+  templateCount: number;
+  sessionCount: number;
+  completedSessionCount: number;
+  reportCount: number;
+  inviteCount: number;
+  oldestSessionAt?: string;
+  newestSessionAt?: string;
+  retentionPolicy: string;
+  advisoryNotice: string;
+}
+
+export interface WorkspaceExportDto {
+  exportedAt: string;
+  organization: WorkspaceProfileDto;
+  privacy: WorkspacePrivacySummaryDto;
+  members: WorkspaceMemberDto[];
+  templates: Array<{
+    id: string;
+    title: string;
+    description?: string;
+    roleType: string;
+    timeLimitMin?: number | null;
+    moduleCount: number;
+    questionCount: number;
+    createdAt?: string;
+    updatedAt?: string;
+  }>;
+  sessions: Array<{
+    id: string;
+    title?: string | null;
+    candidateName?: string;
+    candidateEmail?: string;
+    templateId: string;
+    templateTitle?: string;
+    status: string;
+    accessCode: string;
+    startedAt?: string | null;
+    completedAt?: string | null;
+    createdAt?: string;
+  }>;
+  reports: Array<{
+    sessionId: string;
+    overallScore: number;
+    summary: string;
+    createdAt?: string;
+  }>;
+}
+
+export interface DeleteWorkspaceDataResult {
+  deleted: true;
+  organizationId: string;
+  deletedTemplates: number;
+  deletedSessions: number;
+  deletedInvites: number;
+  message: string;
+}
+
 @Injectable()
 export class OrganizationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly emailService?: EmailService,
   ) {}
+
+  async getWorkspace(access: AccessContext): Promise<WorkspaceProfileDto> {
+    const organizationId = requireOrganizationId(access);
+    const organization = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: {
+        id: true,
+        name: true,
+        createdAt: true,
+        updatedAt: true,
+        users: {
+          where: { role: { in: ["ORGANIZATION", "INTERVIEWER"] } },
+          select: { id: true, name: true, email: true, role: true },
+          orderBy: [{ role: "asc" }, { createdAt: "asc" }],
+        },
+      },
+    });
+    if (!organization) throw new NotFoundException("Workspace not found.");
+
+    const owner = organization.users.find((user) => user.role === "ORGANIZATION");
+    return {
+      id: organization.id,
+      name: organization.name,
+      memberCount: organization.users.length,
+      ownerName: owner?.name,
+      ownerEmail: owner?.email,
+      createdAt: organization.createdAt.toISOString(),
+      updatedAt: organization.updatedAt.toISOString(),
+    };
+  }
+
+  async updateWorkspace(access: AccessContext, input: UpdateWorkspaceInput): Promise<WorkspaceProfileDto> {
+    assertIsWorkspaceOwner(access);
+    const organizationId = requireOrganizationId(access);
+    const name = requireNonEmpty(input.name, "Organization name is required.").slice(0, 120);
+
+    await this.prisma.organization.update({
+      where: { id: organizationId },
+      data: { name },
+      select: { id: true },
+    });
+
+    return this.getWorkspace(access);
+  }
+
+  async getPrivacySummary(access: AccessContext): Promise<WorkspacePrivacySummaryDto> {
+    const organizationId = requireOrganizationId(access);
+    const organization = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { id: true, name: true },
+    });
+    if (!organization) throw new NotFoundException("Workspace not found.");
+
+    const [memberCount, templateCount, sessionCount, completedSessionCount, inviteCount, sessionDates, reportCount] =
+      await Promise.all([
+        this.prisma.user.count({
+          where: { organizationId, role: { in: ["ORGANIZATION", "INTERVIEWER"] } },
+        }),
+        this.prisma.assessmentTemplate.count({ where: { organizationId } }),
+        this.prisma.interviewSession.count({ where: { organizationId } }),
+        this.prisma.interviewSession.count({ where: { organizationId, status: "COMPLETED" } }),
+        this.prisma.organizationInvite.count({ where: { organizationId } }),
+        this.prisma.interviewSession.aggregate({
+          where: { organizationId },
+          _min: { createdAt: true },
+          _max: { createdAt: true },
+        }),
+        this.prisma.candidateReport.count({
+          where: { session: { organizationId } },
+        }),
+      ]);
+
+    return {
+      organizationId: organization.id,
+      organizationName: organization.name,
+      memberCount,
+      templateCount,
+      sessionCount,
+      completedSessionCount,
+      reportCount,
+      inviteCount,
+      oldestSessionAt: sessionDates._min.createdAt?.toISOString(),
+      newestSessionAt: sessionDates._max.createdAt?.toISOString(),
+      retentionPolicy:
+        "Assessment sessions, responses, code submissions, evaluations, and reports are retained while this workspace is active. Owners can export or permanently wipe operational data from Settings.",
+      advisoryNotice:
+        "AI feedback is advisory and must be reviewed by a human interviewer. Behavioral results are not medical or mental-health diagnoses.",
+    };
+  }
+
+  async exportWorkspaceData(access: AccessContext): Promise<WorkspaceExportDto> {
+    assertIsWorkspaceOwner(access);
+    const organizationId = requireOrganizationId(access);
+    const [organization, privacy, members, templates, sessions, reports] = await Promise.all([
+      this.getWorkspace(access),
+      this.getPrivacySummary(access),
+      this.listMembers(access),
+      this.prisma.assessmentTemplate.findMany({
+        where: { organizationId },
+        orderBy: { updatedAt: "desc" },
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          roleType: true,
+          timeLimitMin: true,
+          createdAt: true,
+          updatedAt: true,
+          modules: {
+            select: {
+              id: true,
+              _count: { select: { questions: true } },
+            },
+          },
+        },
+      }),
+      this.prisma.interviewSession.findMany({
+        where: { organizationId },
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          title: true,
+          templateId: true,
+          status: true,
+          accessCode: true,
+          startedAt: true,
+          completedAt: true,
+          createdAt: true,
+          candidate: { select: { name: true, email: true } },
+          template: { select: { title: true } },
+        },
+      }),
+      this.prisma.candidateReport.findMany({
+        where: { session: { organizationId } },
+        orderBy: { createdAt: "desc" },
+        select: {
+          sessionId: true,
+          overallScore: true,
+          summary: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+
+    return {
+      exportedAt: new Date().toISOString(),
+      organization,
+      privacy,
+      members: members.map((member) => ({
+        id: member.id,
+        name: member.name,
+        email: member.email,
+        role: member.role,
+        roleLabel: member.roleLabel,
+        organizationId: member.organizationId,
+        createdAt: member.createdAt,
+      })),
+      templates: templates.map((template) => ({
+        id: template.id,
+        title: template.title,
+        description: template.description ?? undefined,
+        roleType: template.roleType,
+        timeLimitMin: template.timeLimitMin,
+        moduleCount: template.modules.length,
+        questionCount: template.modules.reduce((sum, module) => sum + module._count.questions, 0),
+        createdAt: template.createdAt.toISOString(),
+        updatedAt: template.updatedAt.toISOString(),
+      })),
+      sessions: sessions.map((session) => ({
+        id: session.id,
+        title: session.title,
+        candidateName: session.candidate?.name,
+        candidateEmail: session.candidate?.email,
+        templateId: session.templateId,
+        templateTitle: session.template?.title,
+        status: session.status.toLowerCase(),
+        accessCode: session.accessCode,
+        startedAt: session.startedAt?.toISOString() ?? null,
+        completedAt: session.completedAt?.toISOString() ?? null,
+        createdAt: session.createdAt.toISOString(),
+      })),
+      reports: reports.map((report) => ({
+        sessionId: report.sessionId,
+        overallScore: report.overallScore,
+        summary: report.summary,
+        createdAt: report.createdAt.toISOString(),
+      })),
+    };
+  }
+
+  /**
+   * Permanently removes operational workspace data (templates, sessions, invites).
+   * Keeps the organization and owner/interviewer accounts so the owner can continue using Evalora.
+   */
+  async deleteWorkspaceData(access: AccessContext, input: { confirmName?: string }): Promise<DeleteWorkspaceDataResult> {
+    assertIsWorkspaceOwner(access);
+    const organizationId = requireOrganizationId(access);
+    const organization = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { id: true, name: true },
+    });
+    if (!organization) throw new NotFoundException("Workspace not found.");
+
+    const confirmName = requireNonEmpty(input.confirmName, "Type the organization name to confirm deletion.");
+    if (confirmName !== organization.name) {
+      throw new BadRequestException("Confirmation name does not match the organization name.");
+    }
+
+    const [sessionCount, templateCount, inviteCount] = await Promise.all([
+      this.prisma.interviewSession.count({ where: { organizationId } }),
+      this.prisma.assessmentTemplate.count({ where: { organizationId } }),
+      this.prisma.organizationInvite.count({ where: { organizationId } }),
+    ]);
+
+    await this.prisma.$transaction(async (tx) => {
+      // Sessions first (responses/messages/submissions/evaluations/reports cascade from session).
+      await tx.interviewSession.deleteMany({ where: { organizationId } });
+      // Templates cascade modules/questions.
+      await tx.assessmentTemplate.deleteMany({ where: { organizationId } });
+      await tx.organizationInvite.deleteMany({ where: { organizationId } });
+    });
+
+    return {
+      deleted: true,
+      organizationId,
+      deletedTemplates: templateCount,
+      deletedSessions: sessionCount,
+      deletedInvites: inviteCount,
+      message: `Deleted ${sessionCount} session(s), ${templateCount} template(s), and ${inviteCount} invite(s). Workspace account retained.`,
+    };
+  }
 
   async listMembers(access: AccessContext, currentUserId?: string): Promise<WorkspaceMemberDto[]> {
     const organizationId = requireOrganizationId(access);
@@ -417,8 +724,10 @@ function requireNonEmpty(value: string | undefined, message: string): string {
 }
 
 function requirePassword(value: string | undefined): string {
-  const password = requireNonEmpty(value, "Password is required.");
-  if (password.length < 8) throw new BadRequestException("Password must be at least 8 characters.");
-  if (password.length > 128) throw new BadRequestException("Password must be at most 128 characters.");
-  return password;
+  requireNonEmpty(value, "Password is required.");
+  try {
+    return assertPasswordPolicy(value);
+  } catch (error) {
+    throw new BadRequestException(error instanceof Error ? error.message : "Password does not meet requirements.");
+  }
 }

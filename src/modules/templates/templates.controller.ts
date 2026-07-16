@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpException,
   Inject,
   NotFoundException,
   Param,
@@ -99,7 +100,12 @@ export class TemplatesController {
 
   @Delete(":id")
   @Roles("admin", "organization", "interviewer")
-  remove(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
-    return this.templatesService.deleteTemplate(id, toAccessContext(request.user));
+  async remove(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
+    try {
+      return await this.templatesService.deleteTemplate(id, toAccessContext(request.user));
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new BadRequestException(error instanceof Error ? error.message : "Template delete failed.");
+    }
   }
 }

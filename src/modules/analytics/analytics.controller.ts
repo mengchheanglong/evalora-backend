@@ -43,4 +43,10 @@ export class AnalyticsController {
   themes(@Req() request: AuthenticatedRequest) {
     return this.analyticsService.themes(toAccessContext(request.user));
   }
+
+  @Get("trend")
+  @Roles("admin", "organization", "interviewer")
+  trend(@Req() request: AuthenticatedRequest) {
+    return this.analyticsService.trend(toAccessContext(request.user));
+  }
 }

@@ -30,9 +30,17 @@ export interface CandidateAssessmentEmailInput {
   expiresAt?: Date | string | null;
 }
 
+export interface PasswordResetEmailInput {
+  to: string;
+  userName: string;
+  resetUrl: string;
+  expiresInLabel: string;
+}
+
 export interface EmailSender {
   sendWorkspaceInvite(input: WorkspaceInviteEmailInput): Promise<EmailDeliveryResult>;
   sendCandidateAssessmentInvite(input: CandidateAssessmentEmailInput): Promise<EmailDeliveryResult>;
+  sendPasswordReset(input: PasswordResetEmailInput): Promise<EmailDeliveryResult>;
 }
 
 export type EmailRuntimeConfig =
@@ -83,6 +91,10 @@ export class EmailService implements EmailSender {
 
   buildAssessmentUrl(accessCode: string): string {
     return `${this.appUrl}/assessment/${encodeURIComponent(accessCode)}`;
+  }
+
+  buildPasswordResetUrl(token: string): string {
+    return `${this.appUrl}/reset-password?token=${encodeURIComponent(token)}`;
   }
 
   async sendWorkspaceInvite(input: WorkspaceInviteEmailInput): Promise<EmailDeliveryResult> {
@@ -167,6 +179,44 @@ export class EmailService implements EmailSender {
     ]
       .filter(Boolean)
       .join("\n");
+
+    return this.send({ to: input.to, subject, html, text });
+  }
+
+  async sendPasswordReset(input: PasswordResetEmailInput): Promise<EmailDeliveryResult> {
+    if (!this.config) {
+      return {
+        status: "skipped",
+        provider: "none",
+        reason:
+          "Email is not configured. Set EMAIL_PROVIDER=gmail (SMTP_USER/SMTP_PASS) or RESEND_API_KEY. Share the reset link manually.",
+      };
+    }
+
+    const name = input.userName?.trim() || "there";
+    const expires = input.expiresInLabel?.trim() || "1 hour";
+    const subject = "Reset your Evalora password";
+    const html = `
+      <div style="font-family:Segoe UI,Arial,sans-serif;line-height:1.5;color:#171b24;max-width:560px">
+        <h2 style="margin:0 0 12px">Reset your password</h2>
+        <p style="margin:0 0 12px">Hi ${escapeHtml(name)},</p>
+        <p style="margin:0 0 16px">We received a request to reset the password for your Evalora workspace account.</p>
+        <p style="margin:0 0 20px">
+          <a href="${escapeHtml(input.resetUrl)}" style="display:inline-block;background:#0b7ea4;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:600">
+            Choose a new password
+          </a>
+        </p>
+        <p style="margin:0 0 8px;font-size:13px;color:#5b6472">Or copy this link:</p>
+        <p style="margin:0 0 16px;font-size:13px;word-break:break-all"><a href="${escapeHtml(input.resetUrl)}">${escapeHtml(input.resetUrl)}</a></p>
+        <p style="margin:0;font-size:12px;color:#5b6472">This link expires in ${escapeHtml(expires)}. If you did not request a reset, you can ignore this email.</p>
+      </div>
+    `;
+    const text = [
+      `Hi ${name},`,
+      `Reset your Evalora password: ${input.resetUrl}`,
+      `This link expires in ${expires}.`,
+      `If you did not request this, ignore this email.`,
+    ].join("\n");
 
     return this.send({ to: input.to, subject, html, text });
   }
