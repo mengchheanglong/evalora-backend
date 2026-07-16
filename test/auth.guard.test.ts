@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import * as jwt from "jsonwebtoken";
-import { assertRoleAccess, extractAuthUserFromHeader } from "../src/modules/auth/auth.guard";
+import { assertRoleAccess, extractAuthUserFromHeader, tryExtractAuthUserFromHeader } from "../src/modules/auth/auth.guard";
 
 const jwtSecret = "guard-test-secret";
 
@@ -28,4 +28,13 @@ test("assertRoleAccess allows matching roles and rejects unauthorized roles", ()
 
   assert.doesNotThrow(() => assertRoleAccess(user, ["organization", "interviewer"]));
   assert.throws(() => assertRoleAccess(user, ["admin"]), /permission/i);
+});
+
+test("tryExtractAuthUserFromHeader returns the user for a valid token and null otherwise (no throw)", () => {
+  const token = jwt.sign({ sub: "user-1", email: "long@example.com", role: "organization" }, jwtSecret);
+
+  assert.equal(tryExtractAuthUserFromHeader(`Bearer ${token}`, jwtSecret)?.id, "user-1");
+  assert.equal(tryExtractAuthUserFromHeader(undefined, jwtSecret), null);
+  assert.equal(tryExtractAuthUserFromHeader("Basic abc", jwtSecret), null);
+  assert.equal(tryExtractAuthUserFromHeader("Bearer invalid-token", jwtSecret), null);
 });

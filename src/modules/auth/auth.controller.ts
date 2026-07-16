@@ -1,6 +1,6 @@
-import { BadRequestException, Body, Controller, Get, Inject, Post, Req, UnauthorizedException, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Inject, Post, Req, UnauthorizedException } from "@nestjs/common";
 import type { UserRole } from "../../domain/evalora.types";
-import { type AuthenticatedRequest, JwtAuthGuard } from "./auth.guard";
+import { type AuthenticatedRequest, tryExtractAuthUserFromHeader } from "./auth.guard";
 import { AuthService } from "./auth.service";
 
 interface RegisterRequest {
@@ -93,14 +93,17 @@ export class AuthController {
     return { message: "Client should clear token. Add server token invalidation if required." };
   }
 
+  // Soft session probe: returns the current user for a valid token, otherwise
+  // null with a 200 — so an anonymous check (login page, candidate flow, first
+  // paint) does not surface a 401 in the browser console.
   @Get("me")
-  @UseGuards(JwtAuthGuard)
   async me(@Req() request: AuthenticatedRequest) {
-    if (!request.user) throw new UnauthorizedException("Authentication required.");
+    const authUser = tryExtractAuthUserFromHeader(request.headers.authorization);
+    if (!authUser) return null;
     try {
-      return await this.authService.getCurrentUser(request.user.id);
+      return await this.authService.getCurrentUser(authUser.id);
     } catch {
-      throw new UnauthorizedException("Authentication required.");
+      return null;
     }
   }
 }

@@ -75,6 +75,19 @@ export function extractAuthUserFromHeader(authorization: string | string[] | und
   }
 }
 
+/**
+ * Soft variant for "who am I" probes (e.g. GET /auth/me). Returns the
+ * authenticated user when a valid Bearer token is present, or null otherwise —
+ * never throws — so an anonymous session check is a 200, not a noisy 401.
+ */
+export function tryExtractAuthUserFromHeader(authorization: string | string[] | undefined, jwtSecret?: string): AuthenticatedUser | null {
+  try {
+    return extractAuthUserFromHeader(authorization, jwtSecret);
+  } catch {
+    return null;
+  }
+}
+
 export function assertRoleAccess(user: AuthenticatedUser | undefined, allowedRoles: UserRole[]): void {
   if (!allowedRoles.length) return;
   if (!user) throw new UnauthorizedException("Authentication required.");
