@@ -68,6 +68,18 @@ export const teamLeaderLeadershipModule: PrebuiltModuleDefinition = {
         "risk-awareness",
         "coaching"
       ]
+    },
+    {
+      "id": "prebuilt-leader-leadership-peer-conflict",
+      "questionText": "Two high-performing team members are in conflict over a technical approach. It has become personal and is hurting morale. How do you handle it in the next 48 hours, and what is your longer-term approach?",
+      "questionType": "scenario",
+      "rubric": [
+        "conflict-resolution",
+        "team-health",
+        "directness",
+        "fairness",
+        "follow-through"
+      ]
     }
   ]
 };

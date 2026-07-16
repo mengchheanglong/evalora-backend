@@ -11,7 +11,7 @@ const communication: PrebuiltModuleDefinition = {
   questions: [
     {
       id: "prebuilt-cs-comm-escalation",
-      questionText: "A customer is frustrated after three support tickets failed. Write your first reply email.",
+      questionText: "A customer is frustrated because three previous support tickets did not solve their issue. Write your first reply email to rebuild trust and explain the next steps.",
       questionType: "roleplay",
       rubric: ["empathy", "clarity", "ownership", "next-steps"],
     },
@@ -83,7 +83,7 @@ const behavioral: PrebuiltModuleDefinition = {
   questions: [
     {
       id: "prebuilt-cs-beh-save",
-      questionText: "Tell us about a time you saved a at-risk customer relationship. What did you do specifically?",
+      questionText: "Tell us about a time you saved an at-risk customer relationship. What actions did you take and what was the result?",
       questionType: "short_answer",
       rubric: ["ownership", "empathy", "execution", "outcome"],
     },

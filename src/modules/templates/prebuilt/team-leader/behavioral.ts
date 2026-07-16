@@ -24,7 +24,7 @@ export const teamLeaderBehavioralModule: PrebuiltModuleDefinition = {
     },
     {
       "id": "prebuilt-leader-behavioral-failure",
-      "questionText": "Tell us about a leadership mistake you made. What did you change afterward?",
+      "questionText": "Tell us about a leadership mistake that had real consequences for your team or project. What specifically did you do wrong, how did you take accountability, and what changes did you make to your leadership afterward?",
       "questionType": "short_answer",
       "rubric": [
         "accountability",
@@ -46,7 +46,7 @@ export const teamLeaderBehavioralModule: PrebuiltModuleDefinition = {
     },
     {
       "id": "prebuilt-leader-behavioral-hard-decision",
-      "questionText": "Tell us about a difficult decision that disappointed some team members but was necessary.",
+      "questionText": "Describe a necessary decision you made that disappointed or upset some team members — for example cutting a feature, changing priorities, or a performance action. How did you communicate it and handle the aftermath?",
       "questionType": "short_answer",
       "rubric": [
         "decision-quality",

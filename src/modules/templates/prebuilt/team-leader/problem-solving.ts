@@ -13,7 +13,7 @@ export const teamLeaderProblemSolvingModule: PrebuiltModuleDefinition = {
   "questions": [
     {
       "id": "prebuilt-leader-problem-solving-quality-drop",
-      "questionText": "Quality has dropped for three sprints while the team still reports being busy. How would you find the real problem and fix the operating rhythm?",
+      "questionText": "Quality metrics have declined for three consecutive sprints, yet velocity is stable and the team reports being busy. How do you diagnose the root cause, what data do you gather, and what changes do you make to the operating rhythm?",
       "questionType": "scenario",
       "rubric": [
         "root-cause-analysis",
@@ -25,7 +25,7 @@ export const teamLeaderProblemSolvingModule: PrebuiltModuleDefinition = {
     },
     {
       "id": "prebuilt-leader-problem-solving-overloaded",
-      "questionText": "Your team has capacity for two of five urgent tasks. How do you decide what to cut, delay, delegate, or escalate?",
+      "questionText": "Your team has capacity for two of five urgent tasks this sprint: (1) a critical bug affecting 10% of users, (2) a Sales-requested feature for an enterprise deal, (3) technical debt frustrating developers, (4) a leadership-requested analytics dashboard, and (5) a performance optimization. Walk through your decision framework — what questions do you ask and who do you consult?",
       "questionType": "scenario",
       "rubric": [
         "prioritization",
@@ -36,7 +36,7 @@ export const teamLeaderProblemSolvingModule: PrebuiltModuleDefinition = {
     },
     {
       "id": "prebuilt-leader-problem-solving-bottleneck",
-      "questionText": "One senior teammate has become the bottleneck for every decision. What would you change?",
+      "questionText": "A senior team member has become the decision bottleneck — every major decision flows through them, slowing delivery, and they believe they are protecting quality. How do you address it while preserving their engagement and developing other team members?",
       "questionType": "scenario",
       "rubric": [
         "process-design",
@@ -47,7 +47,7 @@ export const teamLeaderProblemSolvingModule: PrebuiltModuleDefinition = {
     },
     {
       "id": "prebuilt-leader-problem-solving-customer",
-      "questionText": "A customer complains about repeated mistakes from your team. What do you do in the first 48 hours?",
+      "questionText": "A major customer complains about repeated mistakes from your team. In the first 48 hours: what is your immediate response to the customer, how do you investigate internally, what short-term fixes do you apply, and what long-term prevention do you put in place?",
       "questionType": "scenario",
       "rubric": [
         "customer-focus",
@@ -59,7 +59,7 @@ export const teamLeaderProblemSolvingModule: PrebuiltModuleDefinition = {
     },
     {
       "id": "prebuilt-leader-problem-solving-metrics",
-      "questionText": "What metrics would you track to know whether your team is improving?",
+      "questionText": "You are taking over a struggling team. What leading and lagging indicators would you track to know it is improving? How do you balance output, outcome, and team-health metrics, and what would you do if they conflict — for example, velocity up but quality down?",
       "questionType": "short_answer",
       "rubric": [
         "metric-selection",
