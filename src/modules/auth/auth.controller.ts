@@ -1,37 +1,8 @@
 import { BadRequestException, Body, Controller, Get, Inject, Post, Req, UnauthorizedException, UseGuards } from "@nestjs/common";
-import type { UserRole } from "../../domain/evalora.types";
 import { AuthRateLimitGuard } from "./auth-rate-limit.guard";
 import { type AuthenticatedRequest, tryExtractAuthUserFromHeader } from "./auth.guard";
 import { AuthService } from "./auth.service";
-
-interface RegisterRequest {
-  name?: string;
-  email?: string;
-  password?: string;
-  role?: UserRole;
-  organizationId?: string;
-  organizationName?: string;
-}
-
-interface LoginRequest {
-  email?: string;
-  password?: string;
-}
-
-interface GoogleAuthRequest {
-  credential?: string;
-  idToken?: string;
-  organizationName?: string;
-}
-
-interface ForgotPasswordRequest {
-  email?: string;
-}
-
-interface ResetPasswordRequest {
-  token?: string;
-  password?: string;
-}
+import { ForgotPasswordDto, GoogleAuthDto, LoginDto, RegisterDto, ResetPasswordDto } from "./dto/auth.dto";
 
 // Rate limiting is applied per sensitive endpoint (not the whole controller) so
 // the frequent, harmless GET /auth/me session probe is never throttled.
@@ -41,7 +12,7 @@ export class AuthController {
 
   @UseGuards(AuthRateLimitGuard)
   @Post("register")
-  async register(@Body() body: RegisterRequest) {
+  async register(@Body() body: RegisterDto) {
     try {
       const result = await this.authService.register(body);
       return { ...result, message: "Registration successful." };
@@ -52,7 +23,7 @@ export class AuthController {
 
   @UseGuards(AuthRateLimitGuard)
   @Post("login")
-  async login(@Body() body: LoginRequest) {
+  async login(@Body() body: LoginDto) {
     try {
       const result = await this.authService.login(body);
       return { ...result, message: "Login successful." };
@@ -63,7 +34,7 @@ export class AuthController {
 
   @UseGuards(AuthRateLimitGuard)
   @Post("google")
-  async google(@Body() body: GoogleAuthRequest) {
+  async google(@Body() body: GoogleAuthDto) {
     try {
       const result = await this.authService.loginWithGoogle(body);
       return { ...result, message: "Google sign-in successful." };
@@ -78,7 +49,7 @@ export class AuthController {
 
   @UseGuards(AuthRateLimitGuard)
   @Post("forgot-password")
-  async forgotPassword(@Body() body: ForgotPasswordRequest) {
+  async forgotPassword(@Body() body: ForgotPasswordDto) {
     try {
       return await this.authService.requestPasswordReset(body);
     } catch (error) {
@@ -88,7 +59,7 @@ export class AuthController {
 
   @UseGuards(AuthRateLimitGuard)
   @Post("reset-password")
-  async resetPassword(@Body() body: ResetPasswordRequest) {
+  async resetPassword(@Body() body: ResetPasswordDto) {
     try {
       return await this.authService.resetPassword(body);
     } catch (error) {
