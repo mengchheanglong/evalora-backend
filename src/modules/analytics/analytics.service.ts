@@ -224,31 +224,6 @@ export class AnalyticsService {
     };
   }
 
-  /**
-   * Performance trend for the dashboard chart.
-   * Returns chronological points: { date, score } with score on a 0–100 scale
-   * (from report overallScore on the 1–5 scale).
-   */
-  async trend(access: AccessContext) {
-    const reports = await this.prisma.candidateReport.findMany({
-      where: { session: sessionScope(access) },
-      select: {
-        overallScore: true,
-        createdAt: true,
-        session: { select: { completedAt: true } },
-      },
-      orderBy: { createdAt: "asc" },
-      take: 60,
-    });
-
-    if (!reports.length) return [];
-
-    return reports.map((report) => ({
-      date: (report.session.completedAt ?? report.createdAt).toISOString(),
-      // Dashboard chart uses 0–100; reports store 1–5.
-      score: Math.round(Math.min(5, Math.max(0, report.overallScore)) * 20),
-    }));
-  }
 }
 
 function sessionScope(access: AccessContext): Prisma.InterviewSessionWhereInput {
