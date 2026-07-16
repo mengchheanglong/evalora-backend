@@ -13,7 +13,7 @@ export const softwareSystemDesignModule: PrebuiltModuleDefinition = {
   "questions": [
     {
       "id": "prebuilt-se-design-notifications",
-      "questionText": "Design a notification system for interview reminders. Cover data model, delivery reliability, and failure handling.",
+      "questionText": "Design a notification system that sends interview reminders to tens of thousands of candidates. Cover the data model, delivery reliability, retries, and failure handling.",
       "questionType": "scenario",
       "rubric": [
         "requirements-clarification",

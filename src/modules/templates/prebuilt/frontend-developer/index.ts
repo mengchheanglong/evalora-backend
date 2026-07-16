@@ -89,7 +89,7 @@ const aiInterview: PrebuiltModuleDefinition = {
     },
     {
       id: "prebuilt-fe-ai-perf",
-      questionText: "A dashboard is slow on first load. What measurements and changes would you prioritize?",
+      questionText: "A dashboard takes six or more seconds on first load. Which measurements (for example Core Web Vitals) and which changes would you prioritize?",
       questionType: "scenario",
       rubric: ["performance", "measurement", "prioritization", "web-vitals"],
     },
