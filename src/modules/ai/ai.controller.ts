@@ -1,9 +1,20 @@
 import { Body, Controller, Get, Inject, Param, Post, UseGuards } from "@nestjs/common";
+import { ValidateDto } from "../../common/pipes/validate-dto.pipe";
 import { JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { CandidateAccessRateLimitGuard } from "../sessions/access-rate-limit.guard";
 import { CandidateAiService } from "./candidate-ai.service";
-import { AiService, type FollowUpInput, type InterviewQuestionInput } from "./ai.service";
-import type { EvaluateResponseInput, EvaluationResultDto } from "./evaluation.service";
+import { AiService } from "./ai.service";
+import type { EvaluationResultDto } from "./evaluation.service";
+import {
+  AdaptiveAnswerDto,
+  AdaptiveQuestionsDto,
+  CandidateFollowUpDto,
+  CandidateInterviewQuestionDto,
+  EvaluateDto,
+  FollowUpDto,
+  InterviewQuestionDto,
+  ReportDto,
+} from "./dto/ai.dto";
 
 @Controller("ai")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -12,17 +23,17 @@ export class AiController {
   constructor(@Inject(AiService) private readonly aiService: AiService) {}
 
   @Post("interview-question")
-  async interviewQuestion(@Body() body: InterviewQuestionInput) {
+  async interviewQuestion(@Body(new ValidateDto(InterviewQuestionDto)) body: InterviewQuestionDto) {
     return this.aiService.generateInterviewQuestion(body);
   }
 
   @Post("follow-up")
-  async followUp(@Body() body: FollowUpInput) {
+  async followUp(@Body(new ValidateDto(FollowUpDto)) body: FollowUpDto) {
     return this.aiService.generateFollowUp(body);
   }
 
   @Post("evaluate")
-  async evaluate(@Body() body: Partial<EvaluateResponseInput>) {
+  async evaluate(@Body(new ValidateDto(EvaluateDto)) body: EvaluateDto) {
     return this.aiService.evaluateResponse({
       moduleId: body.moduleId,
       moduleTitle: body.moduleTitle,
@@ -34,24 +45,14 @@ export class AiController {
   }
 
   @Post("report")
-  async report(
-    @Body()
-    body: {
-      sessionId?: string;
-      candidateName?: string;
-      assessmentName?: string;
-      completedAt?: string;
-      evaluations?: EvaluationResultDto[];
-      reviewerNotes?: string[];
-    },
-  ) {
+  async report(@Body(new ValidateDto(ReportDto)) body: ReportDto) {
     return this.aiService.generateCandidateReport({
       sessionId: body.sessionId ?? "demo-session",
       candidateName: body.candidateName ?? "Demo Candidate",
       assessmentName: body.assessmentName ?? "Evalora Assessment",
       completedAt: body.completedAt,
       evaluations: body.evaluations?.length
-        ? body.evaluations
+        ? (body.evaluations as EvaluationResultDto[])
         : [
             await this.aiService.evaluateResponse({
               moduleType: "ai_interview",
@@ -75,22 +76,22 @@ export class CandidateAiController {
   }
 
   @Post(":accessCode/interview-question")
-  interviewQuestion(@Param("accessCode") accessCode: string, @Body() body: { conversationHistory?: string[]; rubric?: string[] }) {
+  interviewQuestion(@Param("accessCode") accessCode: string, @Body(new ValidateDto(CandidateInterviewQuestionDto)) body: CandidateInterviewQuestionDto) {
     return this.candidateAiService.interviewQuestion(accessCode, body);
   }
 
   @Post(":accessCode/follow-up")
-  followUp(@Param("accessCode") accessCode: string, @Body() body: { question?: string; answer?: string; rubric?: string[] }) {
+  followUp(@Param("accessCode") accessCode: string, @Body(new ValidateDto(CandidateFollowUpDto)) body: CandidateFollowUpDto) {
     return this.candidateAiService.followUp(accessCode, body);
   }
 
   @Post(":accessCode/adaptive-questions")
-  adaptiveQuestions(@Param("accessCode") accessCode: string, @Body() body: { count?: number }) {
+  adaptiveQuestions(@Param("accessCode") accessCode: string, @Body(new ValidateDto(AdaptiveQuestionsDto)) body: AdaptiveQuestionsDto) {
     return this.candidateAiService.adaptiveQuestions(accessCode, body.count ?? 3);
   }
 
   @Post(":accessCode/adaptive-answer")
-  saveAdaptiveAnswer(@Param("accessCode") accessCode: string, @Body() body: { question?: string; answer?: string }) {
+  saveAdaptiveAnswer(@Param("accessCode") accessCode: string, @Body(new ValidateDto(AdaptiveAnswerDto)) body: AdaptiveAnswerDto) {
     return this.candidateAiService.saveAdaptiveAnswer(accessCode, body);
   }
 }

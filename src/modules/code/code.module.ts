@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { JwtAuthGuard, RolesGuard } from "../auth/auth.guard";
+import { CandidateAccessRateLimitGuard } from "../sessions/access-rate-limit.guard";
 import { CandidateCodeAccessController, CodeController } from "./code.controller";
 import { CodeExecutionService } from "./code-execution.service";
 import { CodeService } from "./code.service";
@@ -17,6 +18,7 @@ import { PrismaService } from "./prisma.service";
     CodeService,
     PrismaService,
     CodeRateLimitGuard,
+    CandidateAccessRateLimitGuard,
     JwtAuthGuard,
     RolesGuard,
   ],

@@ -131,7 +131,7 @@ test("listResponsesBySession maps saved responses to API DTOs", async () => {
   const service = new ResponsesService({
     response: {
       findMany: async (args: unknown) => {
-        assert.deepEqual(args, { where: { sessionId: "session-1" }, orderBy: { createdAt: "asc" } });
+        assert.deepEqual(args, { where: { sessionId: "session-1" }, orderBy: { createdAt: "asc" }, take: 500 });
         return [responseRow, { ...responseRow, id: "response-2", questionId: null, responseJson: null }];
       },
     },
@@ -210,6 +210,55 @@ test("candidate invite access cannot save after session completion", async () =>
       return true;
     },
   );
+});
+
+test("saveResponse upserts on (session, question) so a resubmit updates instead of duplicating", async () => {
+  const calls: Array<{ method: string; args?: any }> = [];
+  const service = new ResponsesService({
+    interviewSession: { findFirst: async () => assignedSessionRow() },
+    response: {
+      upsert: async (args: any) => {
+        calls.push({ method: "upsert", args });
+        return { id: "response-1", sessionId: "session-1", questionId: "question-1", responseText: args.create.responseText, responseJson: null };
+      },
+      create: async () => {
+        calls.push({ method: "create" });
+        throw new Error("create must not be called when upsert is available");
+      },
+    },
+  } as never);
+
+  await service.saveResponse({ sessionId: "session-1", questionId: "question-1", responseText: "first" });
+  await service.saveResponse({ sessionId: "session-1", questionId: "question-1", responseText: "edited" });
+
+  const upserts = calls.filter((call) => call.method === "upsert");
+  assert.equal(upserts.length, 2, "each save routes through the atomic upsert");
+  assert.deepEqual(upserts[0].args.where, { sessionId_questionId: { sessionId: "session-1", questionId: "question-1" } });
+  assert.ok(!calls.some((call) => call.method === "create"), "no duplicate insert");
+});
+
+test("saveResponse reconciles a concurrent insert race (P2002) by updating the existing row", async () => {
+  const calls: string[] = [];
+  const service = new ResponsesService({
+    interviewSession: { findFirst: async () => assignedSessionRow() },
+    response: {
+      upsert: async () => {
+        calls.push("upsert");
+        const error = new Error("duplicate key") as Error & { code?: string };
+        error.code = "P2002";
+        throw error;
+      },
+      findFirst: async () => ({ id: "existing-1", sessionId: "session-1", questionId: "question-1", responseText: "raced-in", responseJson: null }),
+      update: async (args: any) => {
+        calls.push("update");
+        return { id: args.where.id, sessionId: "session-1", questionId: "question-1", responseText: args.data.responseText, responseJson: null };
+      },
+    },
+  } as never);
+
+  const result = await service.saveResponse({ sessionId: "session-1", questionId: "question-1", responseText: "raced" });
+  assert.deepEqual(calls, ["upsert", "update"], "P2002 → update the row the race winner inserted");
+  assert.equal(result.responseText, "raced");
 });
 
 function assignedSessionRow() {

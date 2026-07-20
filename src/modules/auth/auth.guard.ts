@@ -62,7 +62,7 @@ export function extractAuthUserFromHeader(authorization: string | string[] | und
   }
 
   try {
-    const payload = jwt.verify(token, jwtSecret) as JwtRolePayload;
+    const payload = jwt.verify(token, jwtSecret, { algorithms: ["HS256"] }) as JwtRolePayload;
     const id = payload.sub ?? payload.id;
     if (!id || !payload.email || !isUserRole(payload.role)) {
       throw new Error("Invalid token payload.");
@@ -99,8 +99,11 @@ export function assertRoleAccess(user: AuthenticatedUser | undefined, allowedRol
 function getJwtSecret(): string {
   const configured = process.env.JWT_SECRET?.trim();
   if (configured) return configured;
-  if (process.env.NODE_ENV === "production") throw new Error("JWT_SECRET is required in production.");
-  return DEFAULT_JWT_SECRET;
+  // Fail closed: the public dev secret is only used in an explicit local
+  // dev/test context. An unset NODE_ENV (e.g. a staging host that forgot to set
+  // JWT_SECRET) throws rather than silently signing forgeable tokens.
+  if (process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test") return DEFAULT_JWT_SECRET;
+  throw new Error("JWT_SECRET is required. Set it, or set NODE_ENV=development for the local default.");
 }
 
 function isUserRole(role: string | undefined): role is UserRole {

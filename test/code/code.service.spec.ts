@@ -163,6 +163,7 @@ describe("CodeService", () => {
     expect(prismaMock.codeSubmission.findMany).toHaveBeenCalledWith({
       where: { sessionId: "session-1" },
       orderBy: { createdAt: "desc" },
+      take: 500,
     });
     expect(result).toBe(rows);
   });

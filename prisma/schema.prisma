@@ -205,6 +205,10 @@ model Response {
   createdAt    DateTime         @default(now()) @map("created_at")
   updatedAt    DateTime         @updatedAt @map("updated_at")
 
+  // One stored answer per (session, question) so a double-submit / retry updates
+  // rather than inserting a duplicate. questionId is nullable and Postgres treats
+  // NULLs as distinct, so AI-interview responses (no questionId) are unconstrained.
+  @@unique([sessionId, questionId])
   @@map("responses")
 }
 

@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, GoneException, Injectable } from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
 import { randomBytes, randomUUID } from "node:crypto";
+import { DEFAULT_LIST_LIMIT } from "../../common/query.constants";
 import type { AssessmentTemplateDto, InterviewSessionDto, JsonValue, ModuleType, QuestionType, SessionStatus } from "../../domain/evalora.types";
 import { buildSessionOwnershipWhere, buildTemplateOwnershipWhere, forbiddenResourceError, mergeWhere, requireOrganizationId, type AccessContext } from "../auth/access-control";
 import type { EmailDeliveryResult, EmailService } from "../email/email.service";
@@ -303,6 +304,7 @@ export class SessionsService {
       where: mergeWhere(buildSessionWhere(filter), buildSessionOwnershipWhere(access)),
       include: SESSION_INCLUDE,
       orderBy: { updatedAt: "desc" },
+      take: DEFAULT_LIST_LIMIT,
     });
 
     const reconciled = await this.reconcileTimedOutSessions(sessions as SessionRow[]);

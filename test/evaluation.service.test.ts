@@ -21,6 +21,41 @@ test("evaluateResponse returns bounded rubric output with evidence and advisory 
   assert.doesNotMatch(result.advisoryNotice, /hire|reject|diagnosis/i);
 });
 
+test("evaluateResponse gives no score or fabricated strengths for an empty/trivial answer", () => {
+  const empty = evaluateResponse({
+    moduleType: "behavioral",
+    moduleTitle: "Behavioral",
+    responseText: "",
+    rubric: ["clarity", "ownership"],
+  });
+  assert.equal(empty.score, 0, "empty answer must score 0, not a floor of 1 (20%)");
+  assert.deepEqual(empty.strengths, [], "empty answer must not invent strengths");
+  assert.match(empty.feedback, /no assessable response/i);
+
+  const trivial = evaluateResponse({
+    moduleType: "behavioral",
+    moduleTitle: "Behavioral",
+    responseText: "idk",
+    rubric: ["clarity", "ownership"],
+  });
+  assert.ok(trivial.score < 1, `a one-word answer should score below 1/5, got ${trivial.score}`);
+  assert.deepEqual(trivial.strengths, []);
+});
+
+test("generateCandidateReport reports no assessable work when nothing scored", () => {
+  const report = generateCandidateReport({
+    sessionId: "s-empty",
+    candidateName: "No Show",
+    assessmentName: "SE Assessment",
+    evaluations: [
+      evaluateResponse({ moduleType: "behavioral", moduleTitle: "Behavioral", responseText: "", rubric: ["clarity"] }),
+    ],
+  });
+  assert.equal(report.overallScore, 0);
+  assert.deepEqual(report.strengths, []);
+  assert.match(report.summary, /did not provide enough assessable responses/i);
+});
+
 test("generateCandidateReport computes weighted overall score and aggregates evidence", () => {
   const report = generateCandidateReport({
     sessionId: "session-1",

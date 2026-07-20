@@ -393,7 +393,7 @@ export class AuthService {
 
     let payload: jwt.JwtPayload;
     try {
-      payload = jwt.verify(token, this.jwtSecret) as jwt.JwtPayload;
+      payload = jwt.verify(token, this.jwtSecret, { algorithms: ["HS256"] }) as jwt.JwtPayload;
     } catch {
       throw new Error("This password reset link is invalid or has expired.");
     }
@@ -504,8 +504,9 @@ function workspaceName(requestedName: string | undefined, userName: string): str
 function resolveJwtSecret(): string {
   const configured = process.env.JWT_SECRET?.trim();
   if (configured) return configured;
-  if (process.env.NODE_ENV === "production") throw new Error("JWT_SECRET is required in production.");
-  return DEFAULT_JWT_SECRET;
+  // Fail closed outside an explicit local dev/test context (see auth.guard.ts).
+  if (process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test") return DEFAULT_JWT_SECRET;
+  throw new Error("JWT_SECRET is required. Set it, or set NODE_ENV=development for the local default.");
 }
 
 function resolvePublicRegistrationRole(role: UserRole | undefined): UserRole {

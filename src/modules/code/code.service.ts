@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { buildSessionOwnershipWhere, type AccessContext } from "../auth/access-control";
+import { DEFAULT_LIST_LIMIT } from "../../common/query.constants";
 import { CodeExecutionService } from "./code-execution.service";
 import { CODE_QUESTION_INDEX, CODE_QUESTIONS } from "./constants/code.constants";
 import type { CodeQuestion, SessionSnapshot } from "./interfaces/code.interfaces";
@@ -155,6 +156,7 @@ export class CodeService {
       orderBy: {
         createdAt: "desc",
       },
+      take: DEFAULT_LIST_LIMIT,
     });
   }
 

@@ -181,7 +181,9 @@ function fallbackFollowUp(input: FollowUpInput): GeneratedFollowUp {
 
 function normalizeScore(score: number | undefined, fallback: number): number {
   if (typeof score !== "number" || Number.isNaN(score)) return fallback;
-  return Math.round(Math.min(5, Math.max(1, score)) * 10) / 10;
+  // Floor is 0, not 1 — an empty / non-answer must be able to score 0 (0%) rather
+  // than being clamped up to a passing-looking 1/5 (20%).
+  return Math.round(Math.min(5, Math.max(0, score)) * 10) / 10;
 }
 
 function normalizeCriteriaScores(scores: Record<string, number> | undefined, fallback: Record<string, number>): Record<string, number> {

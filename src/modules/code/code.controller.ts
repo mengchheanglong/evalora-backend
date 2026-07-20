@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Inject, Param, Post, Req, UseGuards } from "@nestjs/common";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
+import { CandidateAccessRateLimitGuard } from "../sessions/access-rate-limit.guard";
 import { CodeService } from "./code.service";
 import { GradeCodeDto } from "./dto/grade-code.dto";
 import { RunCodeDto } from "./dto/run-code.dto";
@@ -43,6 +44,7 @@ export class CodeController {
 }
 
 @Controller("code/access")
+@UseGuards(CandidateAccessRateLimitGuard)
 export class CandidateCodeAccessController {
   constructor(@Inject(CodeService) private readonly codeService: CodeService) {}
 

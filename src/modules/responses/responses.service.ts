@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable } from "@nestjs/common";
 import type { CandidateResponseDto, JsonValue } from "../../domain/evalora.types";
+import { DEFAULT_LIST_LIMIT } from "../../common/query.constants";
 import { buildSessionOwnershipWhere, forbiddenResourceError, mergeWhere, type AccessContext } from "../auth/access-control";
 import { selectCandidateQuestions } from "../sessions/candidate-assignment";
 
@@ -25,6 +26,7 @@ interface ResponseSessionAccessRow {
 type ResponseFindFirstFn = (args: any) => Promise<ResponseRow | null>;
 type ResponseCreateFn = (args: any) => Promise<ResponseRow>;
 type ResponseUpdateFn = (args: any) => Promise<ResponseRow>;
+type ResponseUpsertFn = (args: any) => Promise<ResponseRow>;
 type ResponseFindManyFn = (args: any) => Promise<ResponseRow[]>;
 type SessionFindFirstFn = (args: any) => Promise<any | null>;
 
@@ -36,6 +38,7 @@ interface ResponsePrismaClient {
     findFirst?: ResponseFindFirstFn;
     create?: ResponseCreateFn;
     update?: ResponseUpdateFn;
+    upsert?: ResponseUpsertFn;
     findMany?: ResponseFindManyFn;
   };
 }
@@ -55,12 +58,45 @@ export class ResponsesService {
     const sessionId = requireNonEmpty(input.sessionId, "Session id is required.");
     const responseText = input.responseText ?? "";
     await this.assertSessionWritable(sessionId, access);
-    if (input.questionId) await this.assertQuestionAssigned(sessionId, input.questionId);
+    const questionId = input.questionId;
+    if (questionId) await this.assertQuestionAssigned(sessionId, questionId);
 
-    const existing = input.questionId ? await this.findExistingResponse(sessionId, input.questionId) : null;
-    const response = existing ? await this.updateResponse(existing.id, responseText, input.responseJson) : await this.createResponse(sessionId, input.questionId, responseText, input.responseJson);
+    // No linked question (non-candidate path): nothing to key idempotency on.
+    if (!questionId) {
+      return toResponseDto(await this.createResponse(sessionId, undefined, responseText, input.responseJson));
+    }
 
-    return toResponseDto(response);
+    // Idempotent write keyed on the @@unique([sessionId, questionId]) index, so a
+    // double-submit / autosave-plus-Save / network retry updates the same row
+    // instead of inserting a duplicate. Replaces the old read-then-write (TOCTOU).
+    const upsert = this.prisma.response.upsert;
+    if (upsert) {
+      try {
+        return toResponseDto(
+          await upsert({
+            where: { sessionId_questionId: { sessionId, questionId } },
+            create: { sessionId, questionId, responseText, responseJson: input.responseJson },
+            update: { responseText, responseJson: input.responseJson },
+          }),
+        );
+      } catch (error) {
+        // Lost a concurrent insert race: the DB unique constraint rejected the
+        // second insert (P2002). The row now exists — update it instead of erroring.
+        if (isUniqueViolation(error)) {
+          const existing = await this.findExistingResponse(sessionId, questionId);
+          if (existing) return toResponseDto(await this.updateResponse(existing.id, responseText, input.responseJson));
+        }
+        throw error;
+      }
+    }
+
+    // Fallback for clients/mocks without upsert (preserves the previous behavior).
+    const existing = await this.findExistingResponse(sessionId, questionId);
+    return toResponseDto(
+      existing
+        ? await this.updateResponse(existing.id, responseText, input.responseJson)
+        : await this.createResponse(sessionId, questionId, responseText, input.responseJson),
+    );
   }
 
   async listResponsesBySession(sessionId: string, access?: AccessContext): Promise<CandidateResponseDto[]> {
@@ -68,6 +104,7 @@ export class ResponsesService {
     const responses = await findMany({
       where: mergeWhere({ sessionId: requireNonEmpty(sessionId, "Session id is required.") }, buildResponseOwnershipWhere(access)),
       orderBy: { createdAt: "asc" },
+      take: DEFAULT_LIST_LIMIT,
     });
 
     return responses.map(toResponseDto);
@@ -159,6 +196,11 @@ export class ResponsesService {
 function buildResponseOwnershipWhere(access?: AccessContext): Record<string, unknown> | undefined {
   const sessionScope = buildSessionOwnershipWhere(access);
   return Object.keys(sessionScope).length ? { session: sessionScope } : undefined;
+}
+
+/** Prisma unique-constraint violation (used to reconcile a concurrent insert race). */
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "P2002";
 }
 
 function assertCandidateAccessOpen(session: ResponseSessionAccessRow): void {

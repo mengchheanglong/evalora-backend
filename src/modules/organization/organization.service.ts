@@ -8,6 +8,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
+import { DEFAULT_LIST_LIMIT } from "../../common/query.constants";
 import type { UserRole } from "../../domain/evalora.types";
 import {
   assertIsWorkspaceOwner,
@@ -389,6 +390,7 @@ export class OrganizationService {
         role: { in: ["ORGANIZATION", "INTERVIEWER"] },
       },
       orderBy: [{ role: "asc" }, { createdAt: "asc" }],
+      take: DEFAULT_LIST_LIMIT,
       select: {
         id: true,
         name: true,

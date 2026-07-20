@@ -131,9 +131,12 @@ export function evaluateResponse(input: EvaluateResponseInput): EvaluationResult
     weight: positiveWeight(input.weight),
     score,
     criteriaScores: Object.fromEntries(rubric.map((criterion) => [criterion, score])) as CriteriaScores,
-    feedback: `${moduleTitle} scored ${score}/5 based on rubric evidence from the candidate response.`,
-    strengths: inferStrengths(response, input.moduleType),
-    improvementAreas: inferImprovementAreas(response, input.moduleType),
+    feedback:
+      score > 0
+        ? `${moduleTitle} scored ${score}/5 from the rubric signals in the candidate's response.`
+        : `No assessable response was provided for ${moduleTitle}.`,
+    strengths: inferStrengths(response),
+    improvementAreas: inferImprovementAreas(response),
     evidence: extractEvidence(response),
     advisoryNotice: RESPONSE_ADVISORY_NOTICE,
   };
@@ -141,6 +144,7 @@ export function evaluateResponse(input: EvaluateResponseInput): EvaluationResult
 
 export function generateCandidateReport(input: GenerateCandidateReportInput): GeneratedCandidateReport {
   const overallScore = weightedAverage(input.evaluations);
+  const hasAssessableWork = input.evaluations.some((evaluation) => evaluation.score > 0);
 
   return {
     sessionId: input.sessionId,
@@ -149,7 +153,9 @@ export function generateCandidateReport(input: GenerateCandidateReportInput): Ge
     completedAt: input.completedAt,
     overallScore,
     moduleScores: Object.fromEntries(input.evaluations.map((evaluation) => [evaluation.moduleTitle, evaluation.score])),
-    summary: `${input.candidateName} completed ${input.assessmentName} with an overall score of ${overallScore}/5. The report is evidence-based and prepared for human reviewer judgment.`,
+    summary: hasAssessableWork
+      ? `${input.candidateName} completed ${input.assessmentName} with an overall score of ${overallScore}/5, based on the candidate's saved responses. AI feedback is advisory and prepared for human reviewer judgment.`
+      : `${input.candidateName} did not provide enough assessable responses in ${input.assessmentName} to produce a scored evaluation — no strengths or scores were inferred.`,
     strengths: unique(input.evaluations.flatMap((evaluation) => evaluation.strengths)),
     improvementAreas: unique(input.evaluations.flatMap((evaluation) => evaluation.improvementAreas)),
     evidence: unique(input.evaluations.flatMap((evaluation) => evaluation.evidence)),
@@ -158,32 +164,49 @@ export function generateCandidateReport(input: GenerateCandidateReportInput): Ge
   };
 }
 
-function scoreResponse(response: string, rubric: string[]): number {
-  if (!response) return 1;
+/** Below this word count a response is treated as a non-answer: it scores near
+ *  zero and yields no inferred strengths (so an empty/blank attempt can't read as
+ *  a passing 20% with fabricated positives). */
+const MIN_SUBSTANTIVE_WORDS = 6;
 
-  const wordCount = response.split(/\s+/).filter(Boolean).length;
+function wordCountOf(response: string): number {
+  return response.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function scoreResponse(response: string, rubric: string[]): number {
+  const wordCount = wordCountOf(response);
+  if (wordCount === 0) return 0;
+
   const criteriaHits = rubric.filter((criterion) => includesAny(response, criterion.split(/[\s-]+/))).length;
   const actionHits = countMatches(response, ["explain", "clarify", "listen", "test", "measure", "trade-off", "deadline", "client", "team", "evidence"]);
 
-  const rawScore = 1 + Math.min(2, wordCount / 25) + Math.min(1, criteriaHits / Math.max(1, rubric.length)) + Math.min(1, actionHits / 4);
-  return roundOne(clamp(rawScore, 1, 5));
+  // Attempt credit ramps to 1 point over the first few words, so a one- or
+  // two-word answer scores a fraction (≈5–15%), not a flat passing 20%.
+  const attempt = Math.min(1, wordCount / MIN_SUBSTANTIVE_WORDS);
+  const rawScore = attempt + Math.min(2, wordCount / 25) + Math.min(1, criteriaHits / Math.max(1, rubric.length)) + Math.min(1, actionHits / 4);
+  return roundOne(clamp(rawScore, 0, 5));
 }
 
-function inferStrengths(response: string, moduleType: ModuleType): string[] {
+function inferStrengths(response: string): string[] {
+  // No positives for a non-answer, and never a generic "provides a relevant
+  // response" filler — strengths must be earned by actual signal in the text.
+  if (wordCountOf(response) < MIN_SUBSTANTIVE_WORDS) return [];
+
   const strengths: string[] = [];
   if (includesAny(response, ["explain", "clarify", "communicate"])) strengths.push("Communicates reasoning clearly");
   if (includesAny(response, ["listen", "empathy", "client", "team"])) strengths.push("Shows professional collaboration awareness");
   if (includesAny(response, ["test", "debug", "edge", "trade-off", "measure"])) strengths.push("Uses practical evidence and problem-solving steps");
-
-  if (!strengths.length) strengths.push(`Provides a relevant ${titleForModule(moduleType).toLowerCase()} response`);
   return strengths;
 }
 
-function inferImprovementAreas(response: string, moduleType: ModuleType): string[] {
+function inferImprovementAreas(response: string): string[] {
+  if (wordCountOf(response) < MIN_SUBSTANTIVE_WORDS) {
+    return ["The response was too brief to assess — a complete, specific answer is needed."];
+  }
+
   const areas: string[] = [];
   if (!includesAny(response, ["metric", "measure", "result", "impact"])) areas.push("Add measurable results or impact where possible");
   if (!includesAny(response, ["example", "because", "evidence"])) areas.push("Include more concrete response evidence");
-  if (!areas.length) areas.push(`Keep responses concise while preserving ${titleForModule(moduleType).toLowerCase()} evidence`);
   return areas;
 }
 

@@ -1,5 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import type { AssessmentModuleDto, AssessmentTemplateDto, JsonValue, ModuleType, QuestionDto, QuestionType } from "../../domain/evalora.types";
+import { DEFAULT_LIST_LIMIT } from "../../common/query.constants";
 import { assertCanWriteOrganizationResource, buildTemplateOwnershipWhere, forbiddenResourceError, mergeWhere, requireOrganizationId, type AccessContext } from "../auth/access-control";
 import {
   PREBUILT_ASSESSMENT_TEMPLATES,
@@ -246,6 +247,7 @@ export class TemplatesService {
       where: buildListTemplateWhere(normalized),
       include: TEMPLATE_LIST_INCLUDE,
       orderBy: { updatedAt: "desc" },
+      take: DEFAULT_LIST_LIMIT,
     });
 
     return templates.map(toTemplateDto);

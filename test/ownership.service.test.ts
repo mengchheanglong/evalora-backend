@@ -69,6 +69,7 @@ test("template reads are scoped to the authenticated organization", async () => 
         where: { organizationId: "org-1" },
         include: { modules: { orderBy: { orderIndex: "asc" }, select: { id: true, moduleType: true, title: true, description: true, weight: true, orderIndex: true, settings: true, questions: { select: { id: true, questionText: true, questionType: true } } } } },
         orderBy: { updatedAt: "desc" },
+        take: 500,
       },
     },
     {
@@ -113,6 +114,7 @@ test("organization session lists and candidate session reads are scoped by owner
         where: { organizationId: "org-1" },
         include: sessionInclude,
         orderBy: { updatedAt: "desc" },
+        take: 500,
       },
     },
     {
@@ -201,6 +203,7 @@ test("candidate response autosave checks assigned session ownership before writi
       args: {
         where: { sessionId: "session-1", session: { candidateId: "candidate-1" } },
         orderBy: { createdAt: "asc" },
+        take: 500,
       },
     },
   ]);
