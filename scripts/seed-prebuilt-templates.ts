@@ -62,6 +62,7 @@ async function ensureSeedOwner() {
     update: {
       name: "Evalora Prebuilt Template Owner",
       email: SEED_OWNER_EMAIL,
+      emailVerified: true,
       role: "ORGANIZATION",
       organizationId: organization.id,
     },
@@ -69,6 +70,7 @@ async function ensureSeedOwner() {
       id: SEED_OWNER_ID,
       name: "Evalora Prebuilt Template Owner",
       email: SEED_OWNER_EMAIL,
+      emailVerified: true,
       passwordHash,
       role: "ORGANIZATION",
       organizationId: organization.id,

@@ -62,20 +62,21 @@ model Organization {
 }
 
 model User {
-  id               String                @id @default(uuid())
-  name             String
-  email            String                @unique
-  passwordHash     String                @map("password_hash")
-  role             UserRole
-  organizationId   String?               @map("organization_id")
-  organization     Organization?         @relation(fields: [organizationId], references: [id])
-  createdTemplates AssessmentTemplate[]  @relation("TemplateCreator")
+  id                String               @id @default(uuid())
+  name              String
+  email             String               @unique
+  emailVerified     Boolean              @default(false) @map("email_verified")
+  passwordHash      String               @map("password_hash")
+  role              UserRole
+  organizationId    String?              @map("organization_id")
+  organization      Organization?        @relation(fields: [organizationId], references: [id])
+  createdTemplates  AssessmentTemplate[] @relation("TemplateCreator")
   candidateSessions InterviewSession[]   @relation("CandidateSessions")
-  createdSessions  InterviewSession[]    @relation("SessionCreator")
-  reviewerNotes    ReviewerNote[]
-  sentInvites      OrganizationInvite[]  @relation("InviteSender")
-  createdAt        DateTime              @default(now()) @map("created_at")
-  updatedAt        DateTime              @updatedAt @map("updated_at")
+  createdSessions   InterviewSession[]   @relation("SessionCreator")
+  reviewerNotes     ReviewerNote[]
+  sentInvites       OrganizationInvite[] @relation("InviteSender")
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
 
   @@map("users")
 }
@@ -225,25 +226,24 @@ model AIMessage {
 }
 
 model CodeSubmission {
-  id             String           @id @default(uuid())
-  sessionId      String           @map("session_id")
-  session        InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  questionId     String           @map("question_id")
-  language       String
-  sourceCode     String           @map("source_code")
-  stdout         String           @default("")
-  stderr         String           @default("")
-  compileOutput  String           @default("") @map("compile_output")
-  status         String
-  executionTime  Float            @default(0) @map("execution_time")
-  score          Float            @default(0)
-  testResults    Json?            @map("test_results")
-  createdAt      DateTime         @default(now()) @map("created_at")
-  updatedAt      DateTime         @updatedAt @map("updated_at")
+  id            String           @id @default(uuid())
+  sessionId     String           @map("session_id")
+  session       InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  questionId    String           @map("question_id")
+  language      String
+  sourceCode    String           @map("source_code")
+  stdout        String           @default("")
+  stderr        String           @default("")
+  compileOutput String           @default("") @map("compile_output")
+  status        String
+  executionTime Float            @default(0) @map("execution_time")
+  score         Float            @default(0)
+  testResults   Json?            @map("test_results")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
 
   @@index([sessionId])
   @@index([questionId])
-
   @@map("code_submissions")
 }
 
@@ -280,13 +280,13 @@ model CandidateReport {
 }
 
 model ReviewerNote {
-  id        String           @id @default(uuid())
-  sessionId String           @map("session_id")
-  session   InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  reviewerId String          @map("reviewer_id")
-  reviewer  User             @relation(fields: [reviewerId], references: [id])
-  note      String
-  createdAt DateTime         @default(now()) @map("created_at")
+  id         String           @id @default(uuid())
+  sessionId  String           @map("session_id")
+  session    InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  reviewerId String           @map("reviewer_id")
+  reviewer   User             @relation(fields: [reviewerId], references: [id])
+  note       String
+  createdAt  DateTime         @default(now()) @map("created_at")
 
   @@map("reviewer_notes")
 }

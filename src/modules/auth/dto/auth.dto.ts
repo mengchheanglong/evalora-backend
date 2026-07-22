@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsString, MaxLength } from "class-validator";
+import { IsBoolean, IsEmail, IsNotEmpty, IsOptional, IsString, MaxLength } from "class-validator";
 
 // Edge validation for the auth endpoints. The global ValidationPipe
 // (whitelist + forbidNonWhitelisted) strips unknown fields and rejects extras —
@@ -42,6 +42,10 @@ export class LoginDto {
   @IsNotEmpty()
   @MaxLength(PASSWORD_MAX)
   password!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  remember?: boolean;
 }
 
 export class GoogleAuthDto {
@@ -59,6 +63,23 @@ export class GoogleAuthDto {
   @IsString()
   @MaxLength(NAME_MAX)
   organizationName?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  remember?: boolean;
+}
+
+export class VerifyEmailDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(TOKEN_MAX)
+  token!: string;
+}
+
+export class ResendEmailVerificationDto {
+  @IsEmail()
+  @MaxLength(EMAIL_MAX)
+  email!: string;
 }
 
 export class ForgotPasswordDto {

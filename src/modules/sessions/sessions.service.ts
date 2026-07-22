@@ -502,6 +502,7 @@ export class SessionsService {
       data: {
         name,
         email,
+        emailVerified: true,
         passwordHash,
         role: "CANDIDATE",
         organizationId,

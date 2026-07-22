@@ -37,9 +37,17 @@ export interface PasswordResetEmailInput {
   expiresInLabel: string;
 }
 
+export interface EmailVerificationInput {
+  to: string;
+  userName: string;
+  verificationUrl: string;
+  expiresInLabel: string;
+}
+
 export interface EmailSender {
   sendWorkspaceInvite(input: WorkspaceInviteEmailInput): Promise<EmailDeliveryResult>;
   sendCandidateAssessmentInvite(input: CandidateAssessmentEmailInput): Promise<EmailDeliveryResult>;
+  sendEmailVerification(input: EmailVerificationInput): Promise<EmailDeliveryResult>;
   sendPasswordReset(input: PasswordResetEmailInput): Promise<EmailDeliveryResult>;
 }
 
@@ -95,6 +103,10 @@ export class EmailService implements EmailSender {
 
   buildPasswordResetUrl(token: string): string {
     return `${this.appUrl}/reset-password?token=${encodeURIComponent(token)}`;
+  }
+
+  buildEmailVerificationUrl(token: string): string {
+    return `${this.appUrl}/verify-email?token=${encodeURIComponent(token)}`;
   }
 
   async sendWorkspaceInvite(input: WorkspaceInviteEmailInput): Promise<EmailDeliveryResult> {
@@ -179,6 +191,43 @@ export class EmailService implements EmailSender {
     ]
       .filter(Boolean)
       .join("\n");
+
+    return this.send({ to: input.to, subject, html, text });
+  }
+
+  async sendEmailVerification(input: EmailVerificationInput): Promise<EmailDeliveryResult> {
+    if (!this.config) {
+      return {
+        status: "skipped",
+        provider: "none",
+        reason: "Email is not configured. Set Gmail SMTP or Resend credentials, then resend the verification email.",
+      };
+    }
+
+    const name = input.userName?.trim() || "there";
+    const expires = input.expiresInLabel?.trim() || "15 minutes";
+    const subject = "Verify your Evalora email";
+    const html = `
+      <div style="font-family:Segoe UI,Arial,sans-serif;line-height:1.5;color:#171b24;max-width:560px">
+        <h2 style="margin:0 0 12px">Verify your email</h2>
+        <p style="margin:0 0 12px">Hi ${escapeHtml(name)},</p>
+        <p style="margin:0 0 16px">Confirm this email address to activate your Evalora workspace account.</p>
+        <p style="margin:0 0 20px">
+          <a href="${escapeHtml(input.verificationUrl)}" style="display:inline-block;background:#0b7ea4;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:600">
+            Verify email
+          </a>
+        </p>
+        <p style="margin:0 0 8px;font-size:13px;color:#5b6472">Or copy this link:</p>
+        <p style="margin:0 0 16px;font-size:13px;word-break:break-all"><a href="${escapeHtml(input.verificationUrl)}">${escapeHtml(input.verificationUrl)}</a></p>
+        <p style="margin:0;font-size:12px;color:#5b6472">This link expires in ${escapeHtml(expires)}. If you did not create this account, you can ignore this email.</p>
+      </div>
+    `;
+    const text = [
+      `Hi ${name},`,
+      `Verify your Evalora email: ${input.verificationUrl}`,
+      `This link expires in ${expires}.`,
+      "If you did not create this account, ignore this email.",
+    ].join("\n");
 
     return this.send({ to: input.to, subject, html, text });
   }

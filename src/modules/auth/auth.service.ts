@@ -12,6 +12,7 @@ export interface AuthUserRecord {
   id: string;
   name: string;
   email: string;
+  emailVerified: boolean;
   passwordHash: string;
   role: UserRole;
   organizationId?: string;
@@ -27,6 +28,7 @@ export interface AuthUserRepository {
   ): Promise<AuthUserRecord>;
   ensureUserWorkspace?(user: AuthUserRecord, workspaceName: string): Promise<AuthUserRecord>;
   updatePasswordHash?(userId: string, passwordHash: string): Promise<AuthUserRecord>;
+  markEmailVerified?(userId: string): Promise<AuthUserRecord>;
 }
 
 export interface RegisterInput {
@@ -41,6 +43,7 @@ export interface RegisterInput {
 export interface LoginInput {
   email?: string;
   password?: string;
+  remember?: boolean;
 }
 
 export interface GoogleAuthInput {
@@ -49,11 +52,32 @@ export interface GoogleAuthInput {
   idToken?: string;
   /** Optional workspace name when creating a new owner account. */
   organizationName?: string;
+  /** Keep the workspace session available after the browser closes. */
+  remember?: boolean;
 }
 
 export interface AuthResult {
   token: string;
   user: Omit<AuthUserRecord, "passwordHash">;
+}
+
+export interface RegistrationResult {
+  message: string;
+  email: string;
+  requiresEmailVerification: true;
+  emailDelivery: {
+    status: "sent" | "skipped" | "failed" | "queued";
+    reason?: string;
+  };
+  /** Development fallback when no email provider could deliver the link. */
+  verificationUrl?: string;
+}
+
+export interface ResendEmailVerificationResult {
+  message: string;
+  emailDelivery: RegistrationResult["emailDelivery"];
+  /** Development fallback when no email provider could deliver the link. */
+  verificationUrl?: string;
 }
 
 export interface GoogleTokenVerifier {
@@ -64,6 +88,7 @@ interface PrismaUserRow {
   id: string;
   name: string;
   email: string;
+  emailVerified: boolean;
   passwordHash: string;
   role: PrismaRole;
   organizationId?: string | null;
@@ -77,6 +102,7 @@ interface PrismaUserClient {
         | {
             name: string;
             email: string;
+            emailVerified: boolean;
             passwordHash: string;
             role: PrismaRole;
             organizationId?: string;
@@ -85,6 +111,7 @@ interface PrismaUserClient {
         | {
             name: string;
             email: string;
+            emailVerified: boolean;
             passwordHash: string;
             role: PrismaRole;
             organizationId?: never;
@@ -94,7 +121,7 @@ interface PrismaUserClient {
     }): Promise<PrismaUserRow>;
     update(args: {
       where: { id: string };
-      data: { organizationId?: string; passwordHash?: string };
+      data: { organizationId?: string; passwordHash?: string; name?: string; emailVerified?: boolean };
       select: Record<keyof PrismaUserRow, true>;
     }): Promise<PrismaUserRow>;
   };
@@ -120,14 +147,19 @@ export interface PasswordResetConfirmResult {
 
 const PASSWORD_RESET_PURPOSE = "password_reset";
 const PASSWORD_RESET_TTL = "1h";
+const EMAIL_VERIFICATION_PURPOSE = "email_verification";
+const EMAIL_VERIFICATION_TTL = "15m";
+const EMAIL_VERIFICATION_RESEND_MESSAGE = "If this email still needs verification, a new link has been sent.";
 const PASSWORD_RESET_GENERIC_MESSAGE =
   "If an account exists for that email, password reset instructions have been sent.";
 const EMAIL_NOT_CONFIGURED_REASON = "Email is not configured. Share the reset link manually.";
+const VERIFICATION_EMAIL_NOT_CONFIGURED_REASON = "Email is not configured. Configure Gmail SMTP or Resend, then try again.";
 
 const USER_SELECT: Record<keyof PrismaUserRow, true> = {
   id: true,
   name: true,
   email: true,
+  emailVerified: true,
   passwordHash: true,
   role: true,
   organizationId: true,
@@ -161,6 +193,7 @@ export class PrismaAuthRepository implements AuthUserRepository {
       data: {
         name: data.name.trim(),
         email: normalizeEmail(data.email),
+        emailVerified: data.emailVerified,
         passwordHash: data.passwordHash,
         role: toPrismaRole(data.role),
         organizationId: data.organizationId,
@@ -179,6 +212,7 @@ export class PrismaAuthRepository implements AuthUserRepository {
       data: {
         name: data.name.trim(),
         email: normalizeEmail(data.email),
+        emailVerified: data.emailVerified,
         passwordHash: data.passwordHash,
         role: toPrismaRole(data.role),
         organization: { create: { name: workspaceName } },
@@ -213,11 +247,27 @@ export class PrismaAuthRepository implements AuthUserRepository {
     });
     return toAuthUserRecord(user);
   }
+
+  async markEmailVerified(userId: string): Promise<AuthUserRecord> {
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { emailVerified: true },
+      select: USER_SELECT,
+    });
+    return toAuthUserRecord(user);
+  }
 }
 
-export interface PasswordResetEmailSender {
+export interface AuthEmailSender {
   isConfigured: boolean;
   buildPasswordResetUrl(token: string): string;
+  buildEmailVerificationUrl?(token: string): string;
+  sendEmailVerification?(input: {
+    to: string;
+    userName: string;
+    verificationUrl: string;
+    expiresInLabel: string;
+  }): Promise<{ status: "sent" | "skipped" | "failed" | "queued"; reason?: string; provider?: string }>;
   sendPasswordReset(input: {
     to: string;
     userName: string;
@@ -232,10 +282,10 @@ export class AuthService {
     private readonly users: AuthUserRepository,
     private readonly jwtSecret = resolveJwtSecret(),
     private readonly googleVerifier: GoogleTokenVerifier | null = createGoogleTokenVerifierFromEnv(),
-    private readonly emailService: PasswordResetEmailSender | null = null,
+    private readonly emailService: AuthEmailSender | null = null,
   ) {}
 
-  async register(input: RegisterInput): Promise<AuthResult> {
+  async register(input: RegisterInput): Promise<RegistrationResult> {
     const name = requireNonEmpty(input.name, "Name is required.", NAME_MAX_LENGTH);
     const email = requireEmail(input.email);
     const password = requirePassword(input.password);
@@ -245,16 +295,76 @@ export class AuthService {
     }
 
     const existingUser = await this.users.findByEmail(email);
-    if (existingUser) {
+    if (existingUser?.emailVerified || existingUser?.role === "candidate") {
       throw new Error("Unable to complete registration. Please try again.");
     }
 
-    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-    const userData = { name, email, passwordHash, role };
-    const user = this.users.createUserWithWorkspace
-      ? await this.users.createUserWithWorkspace(userData, workspaceName(input.organizationName, name))
-      : await this.users.createUser(userData);
-    return this.toAuthResult(user);
+    let user: AuthUserRecord;
+    if (existingUser) {
+      // Never let a repeated registration mutate a pending account's credentials.
+      // The recipient can use the fresh email link or the password-reset flow.
+      user = existingUser;
+    } else {
+      const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+      const userData = { name, email, emailVerified: false, passwordHash, role };
+      user = this.users.createUserWithWorkspace
+        ? await this.users.createUserWithWorkspace(userData, workspaceName(input.organizationName, name))
+        : await this.users.createUser(userData);
+    }
+
+    return this.sendEmailVerification(user, "Registration successful. Check your email to activate your workspace.");
+  }
+
+  async verifyEmail(input: { token?: string }): Promise<AuthResult> {
+    const token = requireNonEmpty(input.token, "Verification token is required.");
+    let payload: jwt.JwtPayload;
+    try {
+      const decoded = jwt.verify(token, this.jwtSecret, { algorithms: ["HS256"] });
+      if (typeof decoded === "string") throw new Error("Invalid token payload.");
+      payload = decoded;
+    } catch {
+      throw new Error("This verification link is invalid or has expired.");
+    }
+
+    if (payload.purpose !== EMAIL_VERIFICATION_PURPOSE || typeof payload.sub !== "string" || typeof payload.email !== "string") {
+      throw new Error("This verification link is invalid or has expired.");
+    }
+    if (!this.users.findById || !this.users.markEmailVerified) throw new Error("Email verification is unavailable.");
+
+    const user = await this.users.findById(payload.sub);
+    if (
+      !user ||
+      user.role === "candidate" ||
+      user.emailVerified ||
+      normalizeEmail(user.email) !== normalizeEmail(payload.email) ||
+      payload.ph !== passwordResetFingerprint(user.passwordHash)
+    ) {
+      throw new Error("This verification link is invalid or has expired.");
+    }
+
+    const verifiedUser = await this.users.markEmailVerified(user.id);
+    return this.toAuthResult(verifiedUser);
+  }
+
+  async resendEmailVerification(input: { email?: string }): Promise<ResendEmailVerificationResult> {
+    const email = requireEmail(input.email);
+    const user = await this.users.findByEmail(email);
+    if (!user || user.emailVerified || user.role === "candidate") {
+      return {
+        message: EMAIL_VERIFICATION_RESEND_MESSAGE,
+        emailDelivery: {
+          status: this.emailService?.isConfigured ? "sent" : "skipped",
+          reason: this.emailService?.isConfigured ? undefined : VERIFICATION_EMAIL_NOT_CONFIGURED_REASON,
+        },
+      };
+    }
+
+    const result = await this.sendEmailVerification(user, EMAIL_VERIFICATION_RESEND_MESSAGE);
+    return {
+      message: EMAIL_VERIFICATION_RESEND_MESSAGE,
+      emailDelivery: result.emailDelivery,
+      verificationUrl: result.verificationUrl,
+    };
   }
 
   async getCurrentUser(id: string): Promise<Omit<AuthUserRecord, "passwordHash">> {
@@ -278,12 +388,15 @@ export class AuthService {
     if (user.role === "candidate") {
       throw new Error("Candidates access assessments through an invitation link or access code.");
     }
+    if (!user.emailVerified) {
+      throw new EmailVerificationRequiredError();
+    }
 
     if (!user.organizationId && user.role !== "admin" && this.users.ensureUserWorkspace) {
       user = await this.users.ensureUserWorkspace(user, workspaceName(undefined, user.name));
     }
 
-    return this.toAuthResult(user);
+    return this.toAuthResult(user, input.remember === true);
   }
 
   /**
@@ -309,13 +422,17 @@ export class AuthService {
       if (user.role === "candidate") {
         throw new Error("This email is registered as a candidate invitation. Use a different Google account for workspace access.");
       }
+      if (!user.emailVerified) {
+        if (!this.users.markEmailVerified) throw new Error("Email verification is unavailable.");
+        user = await this.users.markEmailVerified(user.id);
+      }
       if (user.role === "admin") {
-        return this.toAuthResult(user);
+        return this.toAuthResult(user, input.remember === true);
       }
       if (!user.organizationId && this.users.ensureUserWorkspace) {
         user = await this.users.ensureUserWorkspace(user, workspaceName(input.organizationName, user.name));
       }
-      return this.toAuthResult(user);
+      return this.toAuthResult(user, input.remember === true);
     }
 
     // New Google user → workspace owner (same as public register).
@@ -323,6 +440,7 @@ export class AuthService {
     const userData = {
       name,
       email,
+      emailVerified: true,
       passwordHash,
       role: "organization" as UserRole,
     };
@@ -330,7 +448,7 @@ export class AuthService {
       ? await this.users.createUserWithWorkspace(userData, workspaceName(input.organizationName, name))
       : await this.users.createUser(userData);
 
-    return this.toAuthResult(user);
+    return this.toAuthResult(user, input.remember === true);
   }
 
   /**
@@ -341,7 +459,7 @@ export class AuthService {
   async requestPasswordReset(input: { email?: string }): Promise<PasswordResetRequestResult> {
     const email = requireEmail(input.email);
     const user = await this.users.findByEmail(email);
-    const eligibleUser = user && user.role !== "candidate" ? user : null;
+    const eligibleUser = user && user.role !== "candidate" && user.emailVerified ? user : null;
 
     let delivery: { status: "sent" | "skipped" | "failed" | "queued"; reason?: string; provider?: string };
     let resetUrl: string | undefined;
@@ -422,6 +540,45 @@ export class AuthService {
     return { message: "Password updated. You can sign in with your new password." };
   }
 
+  private async sendEmailVerification(user: AuthUserRecord, message: string): Promise<RegistrationResult> {
+    const token = this.signEmailVerificationToken(user);
+    const verificationUrl = this.emailService?.buildEmailVerificationUrl?.(token) ?? defaultEmailVerificationUrl(token);
+    const delivery = this.emailService?.sendEmailVerification
+      ? await this.emailService.sendEmailVerification({
+          to: user.email,
+          userName: user.name,
+          verificationUrl,
+          expiresInLabel: "15 minutes",
+        })
+      : { status: "skipped" as const, reason: VERIFICATION_EMAIL_NOT_CONFIGURED_REASON };
+
+    return {
+      message,
+      email: user.email,
+      requiresEmailVerification: true,
+      emailDelivery: {
+        status: delivery.status,
+        reason: delivery.status === "sent" || delivery.status === "queued" ? undefined : delivery.reason,
+      },
+      ...(process.env.NODE_ENV !== "production" && delivery.status !== "sent" && delivery.status !== "queued"
+        ? { verificationUrl }
+        : {}),
+    };
+  }
+
+  private signEmailVerificationToken(user: AuthUserRecord): string {
+    return jwt.sign(
+      {
+        sub: user.id,
+        email: user.email,
+        purpose: EMAIL_VERIFICATION_PURPOSE,
+        ph: passwordResetFingerprint(user.passwordHash),
+      },
+      this.jwtSecret,
+      { expiresIn: EMAIL_VERIFICATION_TTL },
+    );
+  }
+
   private signPasswordResetToken(user: AuthUserRecord): string {
     return jwt.sign(
       {
@@ -436,7 +593,7 @@ export class AuthService {
     );
   }
 
-  private toAuthResult(user: AuthUserRecord): AuthResult {
+  private toAuthResult(user: AuthUserRecord, remember = false): AuthResult {
     const safeUser = stripPasswordHash(user);
     return {
       token: jwt.sign(
@@ -447,10 +604,17 @@ export class AuthService {
           organizationId: user.organizationId,
         },
         this.jwtSecret,
-        { expiresIn: "1d" },
+        { expiresIn: remember ? "30d" : "1d" },
       ),
       user: safeUser,
     };
+  }
+}
+
+export class EmailVerificationRequiredError extends Error {
+  constructor() {
+    super("Verify your email before signing in.");
+    this.name = "EmailVerificationRequiredError";
   }
 }
 
@@ -460,11 +624,19 @@ function passwordResetFingerprint(passwordHash: string): string {
 }
 
 function defaultPasswordResetUrl(token: string): string {
+  return `${defaultAppUrl()}/reset-password?token=${encodeURIComponent(token)}`;
+}
+
+function defaultEmailVerificationUrl(token: string): string {
+  return `${defaultAppUrl()}/verify-email?token=${encodeURIComponent(token)}`;
+}
+
+function defaultAppUrl(): string {
   const base = (process.env.APP_URL ?? process.env.FRONTEND_URL ?? "http://localhost:3010")
     .split(",")[0]
     ?.trim()
     .replace(/\/$/, "");
-  return `${base || "http://localhost:3010"}/reset-password?token=${encodeURIComponent(token)}`;
+  return base || "http://localhost:3010";
 }
 
 const NAME_MAX_LENGTH = 200;
@@ -524,6 +696,7 @@ function stripPasswordHash(user: AuthUserRecord): Omit<AuthUserRecord, "password
     id: user.id,
     name: user.name,
     email: user.email,
+    emailVerified: user.emailVerified,
     role: user.role,
     organizationId: user.organizationId,
   };
@@ -551,6 +724,7 @@ function toAuthUserRecord(user: PrismaUserRow): AuthUserRecord {
     id: user.id,
     name: user.name,
     email: user.email,
+    emailVerified: user.emailVerified,
     passwordHash: user.passwordHash,
     role: fromPrismaRole(user.role),
     organizationId: user.organizationId ?? undefined,

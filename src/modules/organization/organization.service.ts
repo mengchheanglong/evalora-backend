@@ -582,6 +582,7 @@ export class OrganizationService {
         data: {
           name,
           email: invite.email,
+          emailVerified: true,
           passwordHash,
           role: "INTERVIEWER",
           organizationId: invite.organizationId,

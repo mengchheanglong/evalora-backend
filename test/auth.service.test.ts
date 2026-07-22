@@ -2,7 +2,7 @@ import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import * as bcrypt from "bcryptjs";
 import * as jwt from "jsonwebtoken";
-import { AuthService, type AuthUserRecord, type AuthUserRepository } from "../src/modules/auth/auth.service";
+import { AuthService, type AuthUserRecord, type AuthUserRepository, type RegisterInput } from "../src/modules/auth/auth.service";
 
 function createRepo(): AuthUserRepository & { users: AuthUserRecord[] } {
   const users: AuthUserRecord[] = [];
@@ -40,10 +40,23 @@ function createRepo(): AuthUserRepository & { users: AuthUserRecord[] } {
       user.passwordHash = passwordHash;
       return user;
     },
+    async markEmailVerified(userId) {
+      const user = users.find((row) => row.id === userId);
+      if (!user) throw new Error("User not found.");
+      user.emailVerified = true;
+      return user;
+    },
   };
 }
 
-test("public register creates a workspace owner account and signs JWT with role claims", async () => {
+async function registerAndVerify(service: AuthService, input: RegisterInput) {
+  const registration = await service.register(input);
+  const token = new URL(registration.verificationUrl ?? "").searchParams.get("token");
+  assert.ok(token, "test registration should expose a local verification URL");
+  return service.verifyEmail({ token });
+}
+
+test("public register creates an unverified owner and verification signs JWT with role claims", async () => {
   const repo = createRepo();
   const service = new AuthService(repo, "test-jwt-secret");
 
@@ -53,13 +66,17 @@ test("public register creates a workspace owner account and signs JWT with role 
     password: "SecurePass1",
   });
 
-  assert.equal(result.user.email, "long@example.com");
-  assert.equal(result.user.role, "organization");
-  assert.equal("passwordHash" in result.user, false);
+  assert.equal(result.email, "long@example.com");
+  assert.equal(result.requiresEmailVerification, true);
+  assert.equal(repo.users[0].emailVerified, false);
   assert.notEqual(repo.users[0].passwordHash, "SecurePass1");
   assert.equal(await bcrypt.compare("SecurePass1", repo.users[0].passwordHash), true);
 
-  const decoded = jwt.verify(result.token, "test-jwt-secret") as { sub: string; email: string; role: string };
+  const token = new URL(result.verificationUrl ?? "").searchParams.get("token");
+  assert.ok(token);
+  const verified = await service.verifyEmail({ token });
+  assert.equal(verified.user.emailVerified, true);
+  const decoded = jwt.verify(verified.token, "test-jwt-secret") as { sub: string; email: string; role: string };
   assert.equal(decoded.sub, "user-1");
   assert.equal(decoded.email, "long@example.com");
   assert.equal(decoded.role, "organization");
@@ -100,13 +117,78 @@ test("public register cannot join an existing organization by supplying its id",
 test("login verifies hashed password before issuing token", async () => {
   const repo = createRepo();
   const service = new AuthService(repo, "test-jwt-secret");
-  await service.register({ name: "Demo User", email: "demo@example.com", password: "CorrectPass1", role: "interviewer" });
+  await registerAndVerify(service, { name: "Demo User", email: "demo@example.com", password: "CorrectPass1", role: "interviewer" });
 
   await assert.rejects(() => service.login({ email: "demo@example.com", password: "WrongPass1" }), /invalid email or password/i);
 
   const result = await service.login({ email: "demo@example.com", password: "CorrectPass1" });
   assert.equal(result.user.role, "organization");
   assert.equal(typeof result.token, "string");
+});
+
+test("repeated registration resends verification without replacing pending credentials", async () => {
+  const repo = createRepo();
+  const service = new AuthService(repo, "test-jwt-secret");
+
+  await service.register({ name: "Original Owner", email: "pending@example.com", password: "OriginalPass1" });
+  const originalHash = repo.users[0].passwordHash;
+
+  const repeated = await service.register({ name: "Different Name", email: "pending@example.com", password: "DifferentPass2" });
+
+  assert.equal(repeated.requiresEmailVerification, true);
+  assert.equal(repo.users.length, 1);
+  assert.equal(repo.users[0].name, "Original Owner");
+  assert.equal(repo.users[0].passwordHash, originalHash);
+  assert.equal(await bcrypt.compare("OriginalPass1", repo.users[0].passwordHash), true);
+  assert.equal(await bcrypt.compare("DifferentPass2", repo.users[0].passwordHash), false);
+});
+
+test("login is blocked until email verification and resend issues a fresh link", async () => {
+  const repo = createRepo();
+  const sentUrls: string[] = [];
+  const emailService = {
+    isConfigured: true,
+    buildPasswordResetUrl: (token: string) => `https://app.example.com/reset-password?token=${token}`,
+    buildEmailVerificationUrl: (token: string) => `https://app.example.com/verify-email?token=${token}`,
+    async sendEmailVerification(input: { verificationUrl: string }) {
+      sentUrls.push(input.verificationUrl);
+      return { status: "sent" as const, provider: "test-mail" };
+    },
+    async sendPasswordReset() {
+      return { status: "sent" as const, provider: "test-mail" };
+    },
+  };
+  const service = new AuthService(repo, "test-jwt-secret", undefined, emailService);
+
+  const registration = await service.register({ name: "Owner", email: "owner@example.com", password: "SecurePass1" });
+  assert.equal(registration.emailDelivery.status, "sent");
+  await assert.rejects(
+    () => service.login({ email: "owner@example.com", password: "SecurePass1" }),
+    /verify your email/i,
+  );
+
+  const resend = await service.resendEmailVerification({ email: "owner@example.com" });
+  assert.equal(resend.emailDelivery.status, "sent");
+  assert.equal(sentUrls.length, 2);
+
+  const token = new URL(sentUrls[1]).searchParams.get("token");
+  assert.ok(token);
+  const verified = await service.verifyEmail({ token });
+  assert.equal(verified.user.emailVerified, true);
+});
+
+test("remembered login issues a 30-day token while regular login stays at one day", async () => {
+  const repo = createRepo();
+  const service = new AuthService(repo, "test-jwt-secret");
+  await registerAndVerify(service, { name: "Demo User", email: "demo@example.com", password: "CorrectPass1" });
+
+  const regular = await service.login({ email: "demo@example.com", password: "CorrectPass1" });
+  const remembered = await service.login({ email: "demo@example.com", password: "CorrectPass1", remember: true });
+  const regularClaims = jwt.verify(regular.token, "test-jwt-secret") as jwt.JwtPayload;
+  const rememberedClaims = jwt.verify(remembered.token, "test-jwt-secret") as jwt.JwtPayload;
+
+  assert.equal((regularClaims.exp ?? 0) - (regularClaims.iat ?? 0), 60 * 60 * 24);
+  assert.equal((rememberedClaims.exp ?? 0) - (rememberedClaims.iat ?? 0), 60 * 60 * 24 * 30);
 });
 
 test("register rejects passwords missing uppercase, lowercase, or a number", async () => {
@@ -139,6 +221,7 @@ test("login blocks invite-only candidate records even with a valid password", as
     id: "candidate-1",
     name: "Invite Candidate",
     email: "candidate@example.com",
+    emailVerified: true,
     passwordHash,
     role: "candidate",
   });
@@ -165,12 +248,13 @@ test("Google sign-in creates a workspace owner for a new verified email", async 
   assert.equal(typeof result.token, "string");
 });
 
-test("Google sign-in logs in an existing workspace user", async () => {
+test("Google sign-in verifies and logs in an existing workspace user", async () => {
   const repo = createRepo();
   repo.users.push({
     id: "owner-1",
     name: "Existing Owner",
     email: "owner@example.com",
+    emailVerified: false,
     passwordHash: await bcrypt.hash("secure-password", 4),
     role: "organization",
     organizationId: "org-1",
@@ -181,10 +265,13 @@ test("Google sign-in logs in an existing workspace user", async () => {
     },
   });
 
-  const result = await service.loginWithGoogle({ credential: "fake-token" });
+  const result = await service.loginWithGoogle({ credential: "fake-token", remember: true });
   assert.equal(result.user.id, "owner-1");
+  assert.equal(result.user.emailVerified, true);
   assert.equal(result.user.organizationId, "org-1");
   assert.equal(repo.users.length, 1);
+  const claims = jwt.verify(result.token, "test-jwt-secret") as jwt.JwtPayload;
+  assert.equal((claims.exp ?? 0) - (claims.iat ?? 0), 60 * 60 * 24 * 30);
 });
 
 test("Google sign-in rejects candidate emails and unverified accounts", async () => {
@@ -193,6 +280,7 @@ test("Google sign-in rejects candidate emails and unverified accounts", async ()
     id: "cand-1",
     name: "Candidate",
     email: "candidate-google@example.com",
+    emailVerified: true,
     passwordHash: "hash",
     role: "candidate",
   });
@@ -218,7 +306,7 @@ test("Google sign-in rejects candidate emails and unverified accounts", async ()
 test("forgot password returns generic message and reset link when email is skipped", async () => {
   const repo = createRepo();
   const service = new AuthService(repo, "test-jwt-secret");
-  await service.register({ name: "Owner", email: "owner@example.com", password: "OldPassword1" });
+  await registerAndVerify(service, { name: "Owner", email: "owner@example.com", password: "OldPassword1" });
 
   const unknown = await service.requestPasswordReset({ email: "missing@example.com" });
   assert.match(unknown.message, /if an account exists/i);
@@ -242,7 +330,7 @@ test("forgot password does not reveal whether an account exists when email deliv
     },
   };
   const service = new AuthService(repo, "test-jwt-secret", undefined, emailService);
-  await service.register({ name: "Owner", email: "owner@example.com", password: "OldPassword1" });
+  await registerAndVerify(service, { name: "Owner", email: "owner@example.com", password: "OldPassword1" });
 
   const known = await service.requestPasswordReset({ email: "owner@example.com" });
   const unknown = await service.requestPasswordReset({ email: "missing@example.com" });
@@ -265,7 +353,7 @@ test("forgot password does not reveal whether an account exists when email deliv
 test("reset password updates hash and invalidates the previous token", async () => {
   const repo = createRepo();
   const service = new AuthService(repo, "test-jwt-secret");
-  await service.register({ name: "Owner", email: "owner@example.com", password: "OldPassword1" });
+  await registerAndVerify(service, { name: "Owner", email: "owner@example.com", password: "OldPassword1" });
 
   const request = await service.requestPasswordReset({ email: "owner@example.com" });
   const token = new URL(request.resetUrl ?? "").searchParams.get("token");
@@ -284,7 +372,7 @@ test("reset password updates hash and invalidates the previous token", async () 
 test("reset password rejects weak replacement passwords", async () => {
   const repo = createRepo();
   const service = new AuthService(repo, "test-jwt-secret");
-  await service.register({ name: "Owner", email: "owner@example.com", password: "OldPassword1" });
+  await registerAndVerify(service, { name: "Owner", email: "owner@example.com", password: "OldPassword1" });
   const request = await service.requestPasswordReset({ email: "owner@example.com" });
   const token = new URL(request.resetUrl ?? "").searchParams.get("token");
   assert.ok(token);
@@ -327,7 +415,7 @@ test("register rejects an over-long name and email", async () => {
 test("login returns the same generic error for a missing account and a wrong password", async () => {
   const repo = createRepo();
   const service = new AuthService(repo, "test-jwt-secret");
-  await service.register({ name: "Real User", email: "real@example.com", password: "SecurePass1" });
+  await registerAndVerify(service, { name: "Real User", email: "real@example.com", password: "SecurePass1" });
 
   await assert.rejects(
     () => service.login({ email: "real@example.com", password: "WrongPass1" }),

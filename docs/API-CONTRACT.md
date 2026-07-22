@@ -21,9 +21,11 @@ The frontend reads `NEXT_PUBLIC_API_URL` and proxies browser requests through `/
 
 | Method | Endpoint | Access | Description |
 | --- | --- | --- | --- |
-| POST | `/auth/register` | Public | Create a **workspace owner** (`organization` role) and a new organization. |
-| POST | `/auth/login` | Public | Return a signed JWT and safe user object. |
-| POST | `/auth/google` | Public | Verify a Google Identity Services ID token, then login or create a workspace owner. |
+| POST | `/auth/register` | Public | Create an unverified **workspace owner** and organization, then send a verification email. |
+| POST | `/auth/verify-email` | Public | Verify a registration token, then return a signed JWT and safe user object. |
+| POST | `/auth/resend-email-verification` | Public | Send a new verification link. Always returns a generic response. |
+| POST | `/auth/login` | Public | Return a signed JWT and safe user object. Accepts optional `remember`; `true` extends the JWT to 30 days. |
+| POST | `/auth/google` | Public | Verify a Google Identity Services ID token, then login or create a workspace owner. Accepts the same optional `remember` flag. |
 | POST | `/auth/forgot-password` | Public | Start password reset for a workspace account. Always returns a generic success message. |
 | POST | `/auth/reset-password` | Public | Set a new password using a one-time reset token from email (or demo `resetUrl`). |
 | POST | `/auth/logout` | Public | Acknowledge logout; the frontend proxy clears its cookie. |
@@ -40,7 +42,19 @@ Registration request:
 }
 ```
 
-Public registration always creates the workspace **owner** (`role: "organization"`). Interviewers join only through invitations. Public `admin`/`candidate` registration and public `organizationId` assignment are rejected. Successful login/register responses contain `{ "token": "...", "user": { ... } }`; the frontend proxy removes `token` before returning JSON to client components.
+Public registration always creates the workspace **owner** (`role: "organization"`). Interviewers join only through invitations. Public `admin`/`candidate` registration and public `organizationId` assignment are rejected. Registration returns `{ "email": "...", "requiresEmailVerification": true, "emailDelivery": { ... } }` and does not create a session. The signed verification link expires after 15 minutes and is invalidated when the account password changes. Successful verification, login, and Google responses contain `{ "token": "...", "user": { ... } }`; the frontend proxy removes `token` and stores it in the HttpOnly cookie.
+
+Email verification requests:
+
+```json
+{ "token": "verification-token-from-email" }
+```
+
+```json
+{ "email": "owner@example.com" }
+```
+
+Unverified password accounts receive `401` from login until verification succeeds. Resend responses are deliberately generic to avoid revealing whether an account exists. In non-production environments only, registration/resend may include `verificationUrl` when email delivery is unavailable.
 
 Google sign-in request:
 

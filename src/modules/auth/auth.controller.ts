@@ -1,8 +1,16 @@
 import { BadRequestException, Body, Controller, Get, Inject, Post, Req, UnauthorizedException, UseGuards } from "@nestjs/common";
 import { AuthRateLimitGuard } from "./auth-rate-limit.guard";
 import { type AuthenticatedRequest, tryExtractAuthUserFromHeader } from "./auth.guard";
-import { AuthService } from "./auth.service";
-import { ForgotPasswordDto, GoogleAuthDto, LoginDto, RegisterDto, ResetPasswordDto } from "./dto/auth.dto";
+import { AuthService, EmailVerificationRequiredError } from "./auth.service";
+import {
+  ForgotPasswordDto,
+  GoogleAuthDto,
+  LoginDto,
+  RegisterDto,
+  ResendEmailVerificationDto,
+  ResetPasswordDto,
+  VerifyEmailDto,
+} from "./dto/auth.dto";
 
 // Rate limiting is applied per sensitive endpoint (not the whole controller) so
 // the frequent, harmless GET /auth/me session probe is never throttled.
@@ -27,8 +35,32 @@ export class AuthController {
     try {
       const result = await this.authService.login(body);
       return { ...result, message: "Login successful." };
-    } catch {
+    } catch (error) {
+      if (error instanceof EmailVerificationRequiredError) {
+        throw new UnauthorizedException(error.message);
+      }
       throw new UnauthorizedException("Invalid email or password.");
+    }
+  }
+
+  @UseGuards(AuthRateLimitGuard)
+  @Post("verify-email")
+  async verifyEmail(@Body() body: VerifyEmailDto) {
+    try {
+      const result = await this.authService.verifyEmail(body);
+      return { ...result, message: "Email verified successfully." };
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : "Email verification failed.");
+    }
+  }
+
+  @UseGuards(AuthRateLimitGuard)
+  @Post("resend-email-verification")
+  async resendEmailVerification(@Body() body: ResendEmailVerificationDto) {
+    try {
+      return await this.authService.resendEmailVerification(body);
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : "Unable to resend verification email.");
     }
   }
 

@@ -16,6 +16,39 @@ test("EmailService skips delivery when no provider is configured", async () => {
   assert.match(result.reason ?? "", /not configured/i);
 });
 
+test("EmailService builds and renders verification emails", async () => {
+  const originalFetch = globalThis.fetch;
+  let calledBody: any;
+  globalThis.fetch = (async (_url: any, init?: any) => {
+    calledBody = JSON.parse(String(init?.body ?? "{}"));
+    return { ok: true, json: async () => ({ id: "verify_123" }) } as Response;
+  }) as typeof fetch;
+
+  try {
+    const service = new EmailService({
+      provider: "resend",
+      apiKey: "re_test",
+      from: "Evalora <onboarding@resend.dev>",
+      appUrl: "http://localhost:3010",
+    });
+    const verificationUrl = service.buildEmailVerificationUrl("signed-token");
+    const result = await service.sendEmailVerification({
+      to: "owner@example.com",
+      userName: "Owner",
+      verificationUrl,
+      expiresInLabel: "15 minutes",
+    });
+
+    assert.equal(result.status, "sent");
+    assert.match(verificationUrl, /verify-email\?token=signed-token/);
+    assert.match(calledBody.subject, /verify/i);
+    assert.match(calledBody.html, /Verify email/);
+    assert.match(calledBody.html, /signed-token/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("EmailService posts to Resend when configured", async () => {
   const originalFetch = globalThis.fetch;
   let calledUrl = "";

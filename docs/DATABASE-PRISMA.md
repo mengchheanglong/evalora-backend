@@ -24,6 +24,8 @@ pnpm seed:prebuilt
 
 `pnpm seed:prebuilt` upserts editable researched assessment banks for HR Generalist, Software Engineer, and Team Leader roles into Neon. It creates a seed organization/owner only when needed and does not print secrets.
 
+`User.emailVerified` defaults to `false` for new password registrations. When adding the column to a database that already contains users, backfill existing rows to `true` before setting the database default to `false`; otherwise existing workspace accounts will be unable to sign in.
+
 When database access is ready, add migration scripts such as:
 
 ```bash

@@ -5,15 +5,21 @@
 Endpoints:
 
 - `POST /api/auth/register`
+- `POST /api/auth/verify-email`
+- `POST /api/auth/resend-email-verification`
 - `POST /api/auth/login`
+- `POST /api/auth/google`
+- `POST /api/auth/forgot-password`
+- `POST /api/auth/reset-password`
 - `POST /api/auth/logout`
 - `GET /api/auth/me`
 
 Implemented auth persistence slice:
 
 - Logic adapted from the Coorad backend auth flow: normalize email, hash password, verify password with bcrypt, sign JWT with role claims, and never return password hashes.
-- `src/modules/auth/auth.service.ts` exposes `register` and `login` over a repository boundary.
-- Public registration defaults to the interviewer role, rejects caller-supplied organization IDs, and atomically creates a new organization workspace. It rejects public `admin` and `candidate` registration because admins are private/seeded and candidates use invitation links.
+- `src/modules/auth/auth.service.ts` exposes registration, verification, login, Google identity, and password-reset flows over a repository boundary.
+- Public registration creates an organization owner and workspace atomically. The account remains unverified until the signed email link is confirmed; resend is enumeration-safe and login blocks unverified password accounts.
+- Public `admin`, `interviewer`, and `candidate` registration is rejected. Interviewers join through owner invitations and candidates use assessment invitation links.
 - `login` blocks candidate records so invite-only candidate rows cannot become platform accounts.
 - Login repairs legacy interviewer records that do not yet have an organization workspace.
 - `PrismaAuthRepository` writes/reads `User` records through Prisma using Evalora's `passwordHash` and role enum fields.
@@ -21,7 +27,7 @@ Implemented auth persistence slice:
 - `src/modules/auth/access-control.ts` derives reusable ownership scopes from authenticated `{ userId, role, organizationId }` context.
 - `GET /api/auth/me` is protected by `JwtAuthGuard`.
 
-Next auth task:
+Possible future auth extension:
 
 - Add refresh-token/logout persistence if the project needs server-side session invalidation.
 
