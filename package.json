@@ -4,6 +4,7 @@
   "private": true,
   "description": "NestJS API for Evalora",
   "scripts": {
+    "postinstall": "prisma generate",
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
     "build": "tsc -p tsconfig.build.json",
