@@ -2,7 +2,6 @@ import { ForbiddenException, Injectable } from "@nestjs/common";
 import type { CandidateResponseDto, JsonValue } from "../../domain/evalora.types";
 import { DEFAULT_LIST_LIMIT } from "../../common/query.constants";
 import { buildSessionOwnershipWhere, forbiddenResourceError, mergeWhere, type AccessContext } from "../auth/access-control";
-import { selectCandidateQuestions } from "../sessions/candidate-assignment";
 
 interface ResponseRow {
   id: string;
@@ -154,7 +153,7 @@ export class ResponsesService {
     });
     if (!session) throw forbiddenResourceError("Session");
     const assignedIds = (session.template?.modules ?? []).flatMap((module: any) =>
-      selectCandidateQuestions(module.questions ?? [], session.accessCode, module.id, module.moduleType === "CODING" ? 0 : (module.questions?.length ?? 0)).map((question) => question.id),
+      (module.questions ?? []).map((question: { id: string }) => question.id),
     );
     if (!assignedIds.includes(questionId)) throw forbiddenResourceError("Question");
   }

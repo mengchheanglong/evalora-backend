@@ -117,11 +117,6 @@ const REPORT_EVALUATION_SESSION_INCLUDE = {
     select: {
       title: true,
       modules: {
-        // CODING + AI_INTERVIEW modules are needed here because their candidate
-        // work is not linked through Response.question: coding lives in
-        // codeSubmissions, and adaptive AI answers are stored without a
-        // questionId. Both are folded into their module in evaluateSessionResponses.
-        where: { moduleType: { in: ["CODING", "AI_INTERVIEW"] } },
         select: { id: true, title: true, moduleType: true, weight: true },
       },
     },
@@ -344,8 +339,25 @@ export class ReportsService {
   private async evaluateSessionResponses(session: EvaluationSessionRow): Promise<EvaluationResultDto[]> {
     const groups = groupResponsesByModule(session.responses ?? []);
     const inputs: EvaluateResponseInput[] = [];
+    const templateModules = session.template?.modules ?? [];
 
-    for (const group of Array.from(groups.values())) {
+    for (const module of templateModules) {
+      const moduleId = optionalString(module.id);
+      const group = moduleId ? groups.get(moduleId) : undefined;
+      inputs.push({
+        moduleId,
+        moduleTitle: optionalString(module.title),
+        moduleType: fromPrismaModuleType(module.moduleType),
+        responseText: group ? buildModuleResponseText(group.entries) : "",
+        rubric: group ? unique(group.entries.flatMap((entry) => stringArray(entry.question.rubric))) : [],
+        weight: numberValue(module.weight, 1),
+      });
+    }
+
+    // Keep reports compatible with older/mocked rows where modules were loaded
+    // only through Response.question.module.
+    for (const [key, group] of groups) {
+      if (inputs.some((input) => input.moduleId === key)) continue;
       inputs.push({
         moduleId: optionalString(group.module.id),
         moduleTitle: optionalString(group.module.title),
@@ -368,7 +380,7 @@ export class ReportsService {
       );
       if (aiModule) {
         const aiModuleId = optionalString(aiModule.id);
-        const existing = aiModuleId ? inputs.find((input) => input.moduleId === aiModuleId) : undefined;
+        const existing = findModuleInput(inputs, aiModule);
         if (existing) {
           existing.responseText = [existing.responseText, adaptiveText].filter(Boolean).join("\n\n");
         } else {
@@ -388,21 +400,30 @@ export class ReportsService {
       (module) => fromPrismaModuleType(module.moduleType) === "coding",
     );
     if (codingModule && session.codeSubmissions?.length) {
-      inputs.push({
-        moduleId: optionalString(codingModule.id),
-        moduleTitle: optionalString(codingModule.title) ?? "Coding Assessment",
-        moduleType: "coding",
-        responseText: buildCodeSubmissionText(session.codeSubmissions),
-        rubric: ["correctness", "execution evidence", "code clarity", "validation", "problem solving"],
-        weight: numberValue(codingModule.weight, 1),
-      });
+      const codeText = buildCodeSubmissionText(session.codeSubmissions);
+      const objectiveScore = objectiveCodeScore(session.codeSubmissions);
+      const existing = findModuleInput(inputs, codingModule);
+      if (existing) {
+        existing.responseText = [existing.responseText, codeText].filter(Boolean).join("\n\n");
+        existing.objectiveScore = objectiveScore;
+      } else {
+        inputs.push({
+          moduleId: optionalString(codingModule.id),
+          moduleTitle: optionalString(codingModule.title) ?? "Coding Assessment",
+          moduleType: "coding",
+          responseText: codeText,
+          rubric: ["correctness", "execution evidence", "code clarity", "validation", "problem solving"],
+          weight: numberValue(codingModule.weight, 1),
+          objectiveScore,
+        });
+      }
     }
 
     return Promise.all(inputs.map((input) => this.evaluateModuleResponse(input)));
   }
 
   private async evaluateModuleResponse(input: EvaluateResponseInput): Promise<EvaluationResultDto> {
-    if (!this.aiService) return evaluateResponse(input);
+    if (!input.responseText.trim() || !this.aiService) return evaluateResponse(input);
 
     try {
       return await this.aiService.evaluateResponse(input);
@@ -473,6 +494,13 @@ function groupResponsesByModule(responses: EvaluationResponseRow[]): Map<string,
   return groups;
 }
 
+function findModuleInput(inputs: EvaluateResponseInput[], module: EvaluationModuleRow): EvaluateResponseInput | undefined {
+  const moduleId = optionalString(module.id);
+  if (moduleId) return inputs.find((input) => input.moduleId === moduleId);
+  const moduleTitle = optionalString(module.title);
+  return inputs.find((input) => input.moduleTitle === moduleTitle && input.moduleType === fromPrismaModuleType(module.moduleType));
+}
+
 /** Concatenates the candidate's adaptive AI-interview answers (responses stored
  *  without a linked question, tagged `responseJson.adaptive: true`). The stored
  *  responseText already embeds the AI-generated question and the answer. */
@@ -523,6 +551,17 @@ function buildCodeSubmissionText(submissions: EvaluationCodeSubmissionRow[]): st
         .join("\n");
     })
     .join("\n\n");
+}
+
+function objectiveCodeScore(submissions: EvaluationCodeSubmissionRow[]): number {
+  const latestByQuestion = new Map<string, EvaluationCodeSubmissionRow>();
+  for (const submission of submissions) {
+    latestByQuestion.set(stringValue(submission.questionId, "coding-question"), submission);
+  }
+  if (!latestByQuestion.size) return 0;
+  const averagePercent = Array.from(latestByQuestion.values())
+    .reduce((sum, submission) => sum + numberValue(submission.score, 0), 0) / latestByQuestion.size;
+  return Math.round((averagePercent / 20) * 100) / 100;
 }
 
 function mapReviewerNote(row: ReviewerNoteRow) {

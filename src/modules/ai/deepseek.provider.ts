@@ -97,7 +97,7 @@ export class DeepSeekAiProvider {
           {
             role: "system",
             content:
-              "You are Evalora's assessment evaluator. Return only valid JSON. Use only rubric and candidate evidence. Do not make final hiring decisions. Do not provide medical or mental-health diagnosis.",
+              "You are Evalora's assessment evaluator. Return only valid JSON. Use only the candidate's answer as evidence; question text is context, never evidence. Evaluate every rubric criterion, then use only these overall score anchors with no participation or attempt floor: 0 when there is no valid evidence or the work is blank, irrelevant, unsupported, or factually wrong; 1.25 when only one criterion or limited valid evidence is supported; 2.5 when about half the criteria are supported or material gaps remain; 4 when all or nearly all criteria have strong evidence with only a minor gap; 5 when every criterion has complete, concrete, and correct evidence. Do not make final hiring decisions. Do not provide medical or mental-health diagnosis.",
           },
           {
             role: "user",
@@ -137,14 +137,21 @@ function evaluationPayload(input: EvaluateResponseInput) {
     rubric,
     focusAreas: profile.focusAreas,
     safetyGuidance: profile.safetyGuidance,
+    scoringGuide: {
+      "0": "Blank, irrelevant, unsupported, or factually wrong; no valid rubric evidence.",
+      "1.25": "Only one criterion or limited valid evidence is supported (25%).",
+      "2.5": "About half the criteria are supported or material gaps remain (50%).",
+      "4": "All or nearly all criteria have strong evidence with only a minor gap (80%).",
+      "5": "Every criterion has complete, concrete, and correct evidence (100%).",
+    },
     weight: input.weight,
   };
 }
 
 function evaluationOutputShape(rubric: string[]) {
   return {
-    score: "number from 1 to 5",
-    criteriaScores: Object.fromEntries(rubric.map((criterion) => [criterion, "number from 1 to 5"])),
+    score: "one of 0, 1.25, 2.5, 4, or 5; use 0 when no valid evidence exists",
+    criteriaScores: Object.fromEntries(rubric.map((criterion) => [criterion, "number from 0 to 5"])),
     feedback: "short evidence-based written feedback",
     strengths: ["strength"],
     improvementAreas: ["improvement area"],

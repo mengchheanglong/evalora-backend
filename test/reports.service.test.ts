@@ -244,7 +244,6 @@ test("generateAndPersistReport evaluates saved responses by module and persists 
           select: {
             title: true,
             modules: {
-              where: { moduleType: { in: ["CODING", "AI_INTERVIEW"] } },
               select: { id: true, title: true, moduleType: true, weight: true },
             },
           },
@@ -297,7 +296,6 @@ test("generateAndPersistReport folds adaptive AI-interview answers (no linked qu
         candidate: { name: "Adaptive Candidate" },
         template: {
           title: "AI Interview Assessment",
-          // Query fetches CODING + AI_INTERVIEW modules; here only the AI module exists.
           modules: [{ id: "module-ai", title: "AI Interview", moduleType: "AI_INTERVIEW", weight: 1.5 }],
         },
         // Only adaptive answers were saved — each has NO questionId (question === null)
@@ -365,6 +363,57 @@ test("generateAndPersistReport folds adaptive AI-interview answers (no linked qu
   // ...and the report is actually persisted (previously skipped: "no candidate responses").
   assert.equal(result.persistence.status, "persisted");
   assert.equal(result.persistence.evaluationCount, 1);
+});
+
+test("report evaluation includes unanswered template modules at zero", async () => {
+  const service = new ReportsService();
+  const evaluations = await (service as any).evaluateSessionResponses({
+    template: {
+      title: "Complete Template",
+      modules: [
+        { id: "module-answered", title: "Answered", moduleType: "BEHAVIORAL", weight: 1 },
+        { id: "module-missing", title: "Missing", moduleType: "COMMUNICATION", weight: 1 },
+      ],
+    },
+    responses: [
+      {
+        responseText: "I clarify the situation with the team and explain the result.",
+        question: {
+          id: "question-1",
+          questionText: "What did you do?",
+          rubric: ["clarity"],
+          module: { id: "module-answered", title: "Answered", moduleType: "BEHAVIORAL", weight: 1 },
+        },
+      },
+    ],
+    codeSubmissions: [],
+  });
+
+  assert.equal(evaluations.length, 2);
+  assert.equal(evaluations.find((evaluation: EvaluationResultDto) => evaluation.moduleId === "module-missing")?.score, 0);
+});
+
+test("coding report keeps exact objective 0, 25, 50, 80, and 100 percent scores", async () => {
+  const service = new ReportsService();
+  for (const percent of [0, 25, 50, 80, 100]) {
+    const [evaluation] = await (service as any).evaluateSessionResponses({
+      template: {
+        title: "Coding Template",
+        modules: [{ id: "module-code", title: "Coding", moduleType: "CODING", weight: 1 }],
+      },
+      responses: [],
+      codeSubmissions: [{
+        questionId: "challenge-1",
+        language: "javascript",
+        sourceCode: "console.log('candidate submission')",
+        status: percent === 100 ? "Accepted" : "Wrong Answer",
+        score: percent,
+      }],
+    });
+
+    assert.equal(evaluation.score, percent / 20);
+    assert.equal(Math.round(evaluation.score * 20), percent);
+  }
 });
 
 test("generateAndPersistDemoReport checks organization ownership before writing report data", async () => {

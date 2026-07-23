@@ -40,6 +40,42 @@ test("evaluateResponse gives no score or fabricated strengths for an empty/trivi
   });
   assert.ok(trivial.score < 1, `a one-word answer should score below 1/5, got ${trivial.score}`);
   assert.deepEqual(trivial.strengths, []);
+
+  const wrong = evaluateResponse({
+    moduleType: "behavioral",
+    moduleTitle: "Behavioral",
+    responseText: "Purple tables drift beside winter windows while seven unrelated sentences repeat without answering the assessment question.",
+    rubric: ["clarity", "ownership"],
+  });
+  assert.equal(wrong.score, 0, "an unrelated answer must not earn length or attempt credit");
+  assert.deepEqual(wrong.strengths, []);
+});
+
+test("evaluateResponse uses exact 0, 25, 50, 80, and 100 percent score anchors", () => {
+  const rubric = ["clarity", "testing", "impact", "reflection"];
+  const cases = [
+    { expected: 0, responseText: "" },
+    { expected: 1.25, responseText: "I explain the request clearly to the team before starting work." },
+    { expected: 2.5, responseText: "I clarify the request with the team, test one example, and explain the result." },
+    { expected: 4, responseText: "I clarify the request with the team, explain the trade-off, test the change, measure impact, and share the result because the customer needs a reliable outcome." },
+    { expected: 5, responseText: "I provide clarity by explaining the trade-off to the team. I test several examples and edge cases, measure impact with a percent metric, and reflect on the result because the customer outcome matters. I clarify assumptions, listen to feedback, document evidence, explain the deadline risk, and validate the final result with another test. The measurable outcome and reflection guide the next iteration, and the team uses that evidence to improve the customer impact." },
+  ];
+
+  for (const item of cases) {
+    const result = evaluateResponse({ moduleType: "problem_solving", responseText: item.responseText, rubric });
+    assert.equal(result.score, item.expected);
+    assert.equal(Math.round(result.score * 20), item.expected * 20);
+  }
+});
+
+test("evaluateResponse scores candidate answers rather than question text", () => {
+  const result = evaluateResponse({
+    moduleType: "problem_solving",
+    responseText: "Question: Explain your testing, impact measurement, and trade-off reasoning.\nAnswer: unrelated purple winter window words provide no valid response here",
+    rubric: ["testing", "impact measurement", "trade-off reasoning"],
+  });
+
+  assert.equal(result.score, 0);
 });
 
 test("generateCandidateReport reports no assessable work when nothing scored", () => {
@@ -94,7 +130,7 @@ test("generateCandidateReport computes weighted overall score and aggregates evi
   });
 
   assert.equal(report.sessionId, "session-1");
-  assert.equal(report.overallScore, 4.7);
+  assert.equal(report.overallScore, 4.67);
   assert.deepEqual(report.moduleScores, {
     "AI Interview": 4,
     "Coding Assessment": 5,

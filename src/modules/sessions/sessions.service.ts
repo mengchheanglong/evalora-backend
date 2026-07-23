@@ -5,7 +5,6 @@ import { DEFAULT_LIST_LIMIT } from "../../common/query.constants";
 import type { AssessmentTemplateDto, InterviewSessionDto, JsonValue, ModuleType, QuestionType, SessionStatus } from "../../domain/evalora.types";
 import { buildSessionOwnershipWhere, buildTemplateOwnershipWhere, forbiddenResourceError, mergeWhere, requireOrganizationId, type AccessContext } from "../auth/access-control";
 import type { EmailDeliveryResult, EmailService } from "../email/email.service";
-import { selectCandidateQuestions } from "./candidate-assignment";
 
 type PrismaSessionStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "EXPIRED";
 type PrismaRole = "ADMIN" | "ORGANIZATION" | "INTERVIEWER" | "CANDIDATE";
@@ -196,7 +195,7 @@ export const CANDIDATE_SESSION_INCLUDE = {
       createdById: true,
       organizationId: true,
       modules: {
-        include: { questions: true },
+        include: { questions: { orderBy: { createdAt: "asc" } } },
         orderBy: { orderIndex: "asc" },
       },
     },
@@ -713,11 +712,11 @@ function toCandidateAccessSessionDto(session: CandidateSessionRow): CandidateAcc
   const sessionDto = toSessionDto({ ...session, template: session.template ? { title: session.template.title } : null });
   return {
     ...sessionDto,
-    template: toCandidateTemplateDto(session.template, session.accessCode),
+    template: toCandidateTemplateDto(session.template),
   };
 }
 
-function toCandidateTemplateDto(template: CandidateTemplateRow | null | undefined, accessCode: string): AssessmentTemplateDto {
+function toCandidateTemplateDto(template: CandidateTemplateRow | null | undefined): AssessmentTemplateDto {
   if (!template) {
     return {
       id: "",
@@ -745,7 +744,7 @@ function toCandidateTemplateDto(template: CandidateTemplateRow | null | undefine
       weight: module.weight,
       orderIndex: module.orderIndex,
       settings: module.settings ?? undefined,
-      questions: selectCandidateQuestions(module.questions ?? [], accessCode, module.id, module.moduleType === "CODING" ? 0 : (module.questions?.length ?? 0)).map((question) => ({
+      questions: (module.questions ?? []).map((question) => ({
         id: question.id,
         questionText: question.questionText,
         questionType: fromPrismaQuestionType(question.questionType),

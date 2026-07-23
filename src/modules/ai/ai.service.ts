@@ -94,11 +94,12 @@ export class AiService {
   async evaluateResponse(input: EvaluateResponseInput): Promise<EvaluationResultDto> {
     const normalizedInput = withModuleDefaults(input);
     const fallback = deterministicEvaluateResponse(normalizedInput);
+    if (!normalizedInput.responseText.trim()) return fallback;
     if (!this.provider) return fallback;
 
     try {
       const providerResult = await this.provider.evaluateResponse(normalizedInput);
-      return mergeEvaluation(fallback, providerResult);
+      return mergeEvaluation(fallback, providerResult, normalizedInput.objectiveScore);
     } catch {
       return {
         ...fallback,
@@ -127,7 +128,7 @@ export class AiService {
     if (!this.provider?.evaluateCodeSubmission) return this.evaluateResponse(fallbackInput);
 
     try {
-      return mergeEvaluation(fallback, await this.provider.evaluateCodeSubmission(input));
+      return mergeEvaluation(fallback, await this.provider.evaluateCodeSubmission(input), fallbackInput.objectiveScore);
     } catch {
       return {
         ...fallback,
@@ -150,10 +151,10 @@ function withModuleDefaults(input: EvaluateResponseInput): EvaluateResponseInput
   };
 }
 
-function mergeEvaluation(fallback: EvaluationResultDto, providerResult: Partial<EvaluationResultDto>): EvaluationResultDto {
+function mergeEvaluation(fallback: EvaluationResultDto, providerResult: Partial<EvaluationResultDto>, objectiveScore?: number): EvaluationResultDto {
   return {
     ...fallback,
-    score: normalizeScore(providerResult.score, fallback.score),
+    score: objectiveScore === undefined ? normalizeScore(providerResult.score, fallback.score) : normalizeScore(objectiveScore, fallback.score),
     criteriaScores: normalizeCriteriaScores(providerResult.criteriaScores, fallback.criteriaScores),
     feedback: nonEmpty(providerResult.feedback, fallback.feedback),
     strengths: nonEmptyArray(providerResult.strengths, fallback.strengths),
@@ -183,7 +184,7 @@ function normalizeScore(score: number | undefined, fallback: number): number {
   if (typeof score !== "number" || Number.isNaN(score)) return fallback;
   // Floor is 0, not 1 — an empty / non-answer must be able to score 0 (0%) rather
   // than being clamped up to a passing-looking 1/5 (20%).
-  return Math.round(Math.min(5, Math.max(0, score)) * 10) / 10;
+  return Math.round(Math.min(5, Math.max(0, score)) * 100) / 100;
 }
 
 function normalizeCriteriaScores(scores: Record<string, number> | undefined, fallback: Record<string, number>): Record<string, number> {

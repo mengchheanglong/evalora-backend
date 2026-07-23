@@ -55,6 +55,25 @@ test("AiService uses provider output while preserving the evaluation DTO contrac
   assert.doesNotMatch(result.advisoryNotice, /hire|reject|diagnosis/i);
 });
 
+test("AiService preserves exact score anchors and never sends a blank answer to the provider", async () => {
+  let providerCalls = 0;
+  const provider: AiProviderClient = {
+    async evaluateResponse() {
+      providerCalls += 1;
+      return { score: 1.25 };
+    },
+  };
+  const service = new AiService(provider);
+
+  const blank = await service.evaluateResponse({ moduleType: "behavioral", responseText: "" });
+  const limited = await service.evaluateResponse({ ...fallbackInput, responseText: "I clarify the goal with the team and explain my first step." });
+
+  assert.equal(blank.score, 0);
+  assert.equal(limited.score, 1.25);
+  assert.equal(Math.round(limited.score * 20), 25);
+  assert.equal(providerCalls, 1);
+});
+
 test("AiService falls back to deterministic rubric evaluation when provider evaluation fails", async () => {
   const service = new AiService(new ProviderStub(new Error("provider unavailable")));
 
@@ -117,6 +136,9 @@ test("DeepSeekAiProvider posts OpenAI-compatible chat completions and parses JSO
   assert.equal(requests[0].init.method, "POST");
   assert.equal((requests[0].init.headers as Record<string, string>).Authorization, "Bearer test-key");
   assert.match(String(requests[0].init.body), /deepseek-v4-flash/);
+  assert.match(String(requests[0].init.body), /number from 0 to 5/);
+  assert.match(String(requests[0].init.body), /factually wrong/);
+  assert.match(String(requests[0].init.body), /1\.25/);
   assert.equal(result.score, 4.4);
   assert.deepEqual(result.evidence, ["explain the trade-off"]);
 });

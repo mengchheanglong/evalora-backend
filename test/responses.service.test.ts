@@ -191,6 +191,24 @@ test("saveResponseByAccessCode autosaves by invite code without candidate login"
   ]);
 });
 
+test("saveResponseByAccessCode accepts authored coding-module questions", async () => {
+  const service = new ResponsesService({
+    interviewSession: { findFirst: async () => assignedSessionRow("CODING") },
+    response: {
+      findFirst: async () => null,
+      create: async (args: any) => ({ ...responseRow, questionId: args.data.questionId, responseText: args.data.responseText }),
+    },
+  } as any);
+
+  const result = await service.saveResponseByAccessCode("EV-123456", {
+    questionId: "question-1",
+    responseText: "Candidate coding explanation",
+  });
+
+  assert.equal(result.questionId, "question-1");
+  assert.equal(result.responseText, "Candidate coding explanation");
+});
+
 test("candidate invite access cannot save after session completion", async () => {
   const service = new ResponsesService({
     interviewSession: {
@@ -261,10 +279,10 @@ test("saveResponse reconciles a concurrent insert race (P2002) by updating the e
   assert.equal(result.responseText, "raced");
 });
 
-function assignedSessionRow() {
+function assignedSessionRow(moduleType = "AI_INTERVIEW") {
   return {
     ...accessSessionRow,
-    template: { modules: [{ id: "module-1", moduleType: "AI_INTERVIEW", questions: [{ id: "question-1" }] }] },
+    template: { modules: [{ id: "module-1", moduleType, questions: [{ id: "question-1" }] }] },
   };
 }
 

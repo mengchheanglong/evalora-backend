@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { SessionsService } from "../src/modules/sessions/sessions.service";
+import { PREBUILT_ASSESSMENT_TEMPLATES, buildPrebuiltTemplateCreateData } from "../src/modules/templates/prebuilt-templates";
 
 const expiresAt = new Date("2026-08-01T00:00:00.000Z");
 const now = new Date("2026-07-06T13:00:00.000Z");
@@ -274,6 +275,29 @@ test("candidate invite access code opens, starts, and completes only the assigne
   assert.equal(completed.status, "completed");
   assert.deepEqual(calls.map((call) => call.method), ["findFirst", "findFirst", "update", "findFirst", "update"]);
   assert.deepEqual(calls[0].args.where, { accessCode: "EV-123456" });
+});
+
+test("candidate access delivers every authored question from every prebuilt template", async () => {
+  for (const definition of PREBUILT_ASSESSMENT_TEMPLATES) {
+    const seeded = buildPrebuiltTemplateCreateData(definition, { createdById: "seed-user", organizationId: "org-1" });
+    const template = {
+      ...seeded,
+      modules: seeded.modules.create.map((module) => ({ ...module, questions: module.questions.create })),
+    };
+    const service = new SessionsService({
+      interviewSession: {
+        findFirst: async () => ({ ...sessionRow, template }),
+      },
+    } as any);
+
+    const opened = await service.getSessionByAccessCode(`access-${definition.id}`);
+    const expectedQuestionIds = definition.modules.flatMap((module) => module.questions.map((question) => question.id));
+    const deliveredQuestionIds = opened.template.modules.flatMap((module) => (module.questions ?? []).map((question) => question.id));
+
+    assert.deepEqual(opened.template.modules.map((module) => module.id), definition.modules.map((module) => module.id), `${definition.title} module order changed`);
+    assert.deepEqual(deliveredQuestionIds, expectedQuestionIds, `${definition.title} did not deliver its complete question bank`);
+    assert.ok(opened.template.modules.flatMap((module) => module.questions ?? []).every((question) => question.rubric === undefined), "candidate DTO must not expose private rubrics");
+  }
 });
 
 test("candidate invite access code is closed after completion", async () => {

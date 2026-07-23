@@ -1,7 +1,7 @@
 import { ConflictException, GoneException, NotFoundException } from "@nestjs/common";
 import { CodeExecutionService } from "../../src/modules/code/code-execution.service";
 import { CODE_QUESTIONS } from "../../src/modules/code/constants/code.constants";
-import { CodeService } from "../../src/modules/code/code.service";
+import { calculatePercentageScore, CodeService } from "../../src/modules/code/code.service";
 import { PrismaService } from "../../src/modules/code/prisma.service";
 
 describe("CodeService", () => {
@@ -23,6 +23,16 @@ describe("CodeService", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  it.each([
+    [0, 4, 0],
+    [1, 4, 25],
+    [2, 4, 50],
+    [4, 5, 80],
+    [5, 5, 100],
+  ])("calculates %i of %i passed tests as %i%%", (passed, total, expected) => {
+    expect(calculatePercentageScore(passed, total)).toBe(expected);
   });
 
   it("returns the available coding questions without leaking hidden test cases", () => {

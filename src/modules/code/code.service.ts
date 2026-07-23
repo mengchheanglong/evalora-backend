@@ -250,7 +250,7 @@ export class CodeService {
 
     const passedTestCases = testResults.filter(({ passed }) => passed).length;
     const totalTestCases = testResults.length;
-    const score = totalTestCases === 0 ? 0 : Math.round((passedTestCases / totalTestCases) * 100);
+    const score = calculatePercentageScore(passedTestCases, totalTestCases);
     const passed = totalTestCases > 0 && passedTestCases === totalTestCases;
     const overallStatus: CodeExecutionStatus = passed ? "Accepted" : (firstError ?? "Wrong Answer");
     const first = testResults[0];
@@ -396,6 +396,12 @@ function stableIndex(seed: string, length: number): number {
     hash = Math.imul(hash, 16_777_619);
   }
   return (hash >>> 0) % length;
+}
+
+export function calculatePercentageScore(passedTestCases: number, totalTestCases: number): number {
+  if (totalTestCases <= 0) return 0;
+  const boundedPassed = Math.max(0, Math.min(passedTestCases, totalTestCases));
+  return Math.round((boundedPassed / totalTestCases) * 100);
 }
 
 function normalizeAccessCode(accessCode: string): string {

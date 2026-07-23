@@ -77,6 +77,7 @@ export interface EvaluateResponseInput {
   responseText: string;
   rubric?: string[];
   weight?: number;
+  objectiveScore?: number;
 }
 
 export interface EvaluationResultDto {
@@ -121,8 +122,11 @@ export function getModuleEvaluationProfile(moduleType: ModuleType): ModuleEvalua
 export function evaluateResponse(input: EvaluateResponseInput): EvaluationResultDto {
   const moduleTitle = input.moduleTitle ?? titleForModule(input.moduleType);
   const response = input.responseText.trim();
+  const candidateResponse = candidateEvidenceText(response);
   const rubric = input.rubric?.length ? input.rubric : defaultRubricFor(input.moduleType);
-  const score = scoreResponse(response, rubric);
+  const score = input.objectiveScore === undefined
+    ? scoreResponse(candidateResponse, rubric)
+    : roundTwo(clamp(input.objectiveScore, 0, 5));
 
   return {
     moduleId: input.moduleId,
@@ -135,9 +139,9 @@ export function evaluateResponse(input: EvaluateResponseInput): EvaluationResult
       score > 0
         ? `${moduleTitle} scored ${score}/5 from the rubric signals in the candidate's response.`
         : `No assessable response was provided for ${moduleTitle}.`,
-    strengths: inferStrengths(response),
-    improvementAreas: inferImprovementAreas(response),
-    evidence: extractEvidence(response),
+    strengths: inferStrengths(candidateResponse),
+    improvementAreas: inferImprovementAreas(candidateResponse),
+    evidence: extractEvidence(candidateResponse),
     advisoryNotice: RESPONSE_ADVISORY_NOTICE,
   };
 }
@@ -164,9 +168,7 @@ export function generateCandidateReport(input: GenerateCandidateReportInput): Ge
   };
 }
 
-/** Below this word count a response is treated as a non-answer: it scores near
- *  zero and yields no inferred strengths (so an empty/blank attempt can't read as
- *  a passing 20% with fabricated positives). */
+/** Below this word count a response is treated as a non-answer. */
 const MIN_SUBSTANTIVE_WORDS = 6;
 
 function wordCountOf(response: string): number {
@@ -175,16 +177,42 @@ function wordCountOf(response: string): number {
 
 function scoreResponse(response: string, rubric: string[]): number {
   const wordCount = wordCountOf(response);
-  if (wordCount === 0) return 0;
+  if (wordCount < MIN_SUBSTANTIVE_WORDS || isExplicitNonAnswer(response)) return 0;
 
-  const criteriaHits = rubric.filter((criterion) => includesAny(response, criterion.split(/[\s-]+/))).length;
+  const criteriaHits = rubric.filter((criterion) => includesAny(response, meaningfulTerms(criterion))).length;
   const actionHits = countMatches(response, ["explain", "clarify", "listen", "test", "measure", "trade-off", "deadline", "client", "team", "evidence"]);
 
-  // Attempt credit ramps to 1 point over the first few words, so a one- or
-  // two-word answer scores a fraction (≈5–15%), not a flat passing 20%.
-  const attempt = Math.min(1, wordCount / MIN_SUBSTANTIVE_WORDS);
-  const rawScore = attempt + Math.min(2, wordCount / 25) + Math.min(1, criteriaHits / Math.max(1, rubric.length)) + Math.min(1, actionHits / 4);
-  return roundOne(clamp(rawScore, 0, 5));
+  // Length alone never earns credit; at least one rubric, action, or evidence
+  // signal is required before assigning an anchored score.
+  const evidenceHits = countMatches(response, ["because", "example", "result", "impact", "metric", "percent", "customer", "outcome"]);
+  if (criteriaHits + actionHits + evidenceHits === 0) return 0;
+  const quality =
+    (criteriaHits / Math.max(1, rubric.length)) * 0.45
+    + Math.min(1, actionHits / 4) * 0.25
+    + Math.min(1, evidenceHits / 3) * 0.2
+    + Math.min(1, wordCount / 80) * 0.1;
+  if (quality < 0.2) return 1.25;
+  if (quality < 0.45) return 2.5;
+  if (quality < 0.75) return 4;
+  return 5;
+}
+
+function candidateEvidenceText(response: string): string {
+  if (!/(^|\n)Question:\s*/m.test(response)) return response;
+  return response
+    .split(/\n\n(?=Question:\s*)/)
+    .map((block) => block.match(/(?:^|\n)Answer:\s*([\s\S]*?)(?=\nStructured response:|$)/)?.[1]?.trim() ?? "")
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function meaningfulTerms(criterion: string): string[] {
+  const terms = criterion.toLowerCase().split(/[^a-z0-9]+/).filter((term) => term.length >= 4);
+  return terms.length ? terms : [criterion];
+}
+
+function isExplicitNonAnswer(response: string): boolean {
+  return /^(?:i\s+do(?:n't| not)\s+know|idk|n\/?a|no\s+(?:answer|idea)|not\s+sure|none)[.!\s]*$/i.test(response.trim());
 }
 
 function inferStrengths(response: string): string[] {
@@ -220,7 +248,7 @@ function weightedAverage(evaluations: EvaluationResultDto[]): number {
   if (!evaluations.length) return 0;
   const totalWeight = evaluations.reduce((sum, evaluation) => sum + positiveWeight(evaluation.weight), 0);
   const weightedTotal = evaluations.reduce((sum, evaluation) => sum + evaluation.score * positiveWeight(evaluation.weight), 0);
-  return roundOne(weightedTotal / totalWeight);
+  return roundTwo(weightedTotal / totalWeight);
 }
 
 function defaultRubricFor(moduleType: ModuleType): string[] {
@@ -252,8 +280,8 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function roundOne(value: number): number {
-  return Math.round(value * 10) / 10;
+function roundTwo(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 function truncate(value: string, length: number): string {
