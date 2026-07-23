@@ -244,6 +244,7 @@ export class TemplatesService {
     const normalized = typeof options === "string" ? { organizationId: options } : options;
     const findMany = requireMethod(this.prisma.assessmentTemplate.findMany, "assessmentTemplate.findMany");
     const templates = await findMany({
+      relationLoadStrategy: "join",
       where: buildListTemplateWhere(normalized),
       include: TEMPLATE_LIST_INCLUDE,
       orderBy: { updatedAt: "desc" },
@@ -257,6 +258,7 @@ export class TemplatesService {
     if (access) {
       const findFirst = requireMethod(this.prisma.assessmentTemplate.findFirst, "assessmentTemplate.findFirst");
       const template = await findFirst({
+        relationLoadStrategy: "join",
         where: mergeWhere({ id }, buildTemplateOwnershipWhere(access)),
         include: TEMPLATE_INCLUDE,
       });
@@ -265,6 +267,7 @@ export class TemplatesService {
 
     const findUnique = requireMethod(this.prisma.assessmentTemplate.findUnique, "assessmentTemplate.findUnique");
     const template = await findUnique({
+      relationLoadStrategy: "join",
       where: { id },
       include: TEMPLATE_INCLUDE,
     });

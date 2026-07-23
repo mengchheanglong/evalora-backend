@@ -66,6 +66,7 @@ test("template reads are scoped to the authenticated organization", async () => 
     {
       method: "findMany",
       args: {
+        relationLoadStrategy: "join",
         where: { organizationId: "org-1" },
         include: { modules: { orderBy: { orderIndex: "asc" }, select: { id: true, moduleType: true, title: true, description: true, weight: true, orderIndex: true, settings: true, questions: { select: { id: true, questionText: true, questionType: true } } } } },
         orderBy: { updatedAt: "desc" },
@@ -75,6 +76,7 @@ test("template reads are scoped to the authenticated organization", async () => 
     {
       method: "findFirst",
       args: {
+        relationLoadStrategy: "join",
         where: { id: "template-1", organizationId: "org-1" },
         include: { modules: { include: { questions: true }, orderBy: { orderIndex: "asc" } } },
       },
@@ -111,6 +113,7 @@ test("organization session lists and candidate session reads are scoped by owner
     {
       method: "findMany",
       args: {
+        relationLoadStrategy: "join",
         where: { organizationId: "org-1" },
         include: sessionInclude,
         orderBy: { updatedAt: "desc" },
@@ -120,6 +123,7 @@ test("organization session lists and candidate session reads are scoped by owner
     {
       method: "findFirst",
       args: {
+        relationLoadStrategy: "join",
         where: { id: "session-1", candidateId: "candidate-1" },
         include: sessionInclude,
       },

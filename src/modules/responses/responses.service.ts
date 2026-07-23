@@ -65,6 +65,15 @@ export class ResponsesService {
       return toResponseDto(await this.createResponse(sessionId, undefined, responseText, input.responseJson));
     }
 
+    return this.persistQuestionResponse(sessionId, questionId, responseText, input.responseJson);
+  }
+
+  private async persistQuestionResponse(
+    sessionId: string,
+    questionId: string,
+    responseText: string,
+    responseJson: JsonValue | undefined,
+  ): Promise<CandidateResponseDto> {
     // Idempotent write keyed on the @@unique([sessionId, questionId]) index, so a
     // double-submit / autosave-plus-Save / network retry updates the same row
     // instead of inserting a duplicate. Replaces the old read-then-write (TOCTOU).
@@ -74,8 +83,8 @@ export class ResponsesService {
         return toResponseDto(
           await upsert({
             where: { sessionId_questionId: { sessionId, questionId } },
-            create: { sessionId, questionId, responseText, responseJson: input.responseJson },
-            update: { responseText, responseJson: input.responseJson },
+            create: { sessionId, questionId, responseText, responseJson },
+            update: { responseText, responseJson },
           }),
         );
       } catch (error) {
@@ -83,7 +92,7 @@ export class ResponsesService {
         // second insert (P2002). The row now exists — update it instead of erroring.
         if (isUniqueViolation(error)) {
           const existing = await this.findExistingResponse(sessionId, questionId);
-          if (existing) return toResponseDto(await this.updateResponse(existing.id, responseText, input.responseJson));
+          if (existing) return toResponseDto(await this.updateResponse(existing.id, responseText, responseJson));
         }
         throw error;
       }
@@ -93,8 +102,8 @@ export class ResponsesService {
     const existing = await this.findExistingResponse(sessionId, questionId);
     return toResponseDto(
       existing
-        ? await this.updateResponse(existing.id, responseText, input.responseJson)
-        : await this.createResponse(sessionId, questionId, responseText, input.responseJson),
+        ? await this.updateResponse(existing.id, responseText, responseJson)
+        : await this.createResponse(sessionId, questionId, responseText, responseJson),
     );
   }
 
@@ -110,19 +119,43 @@ export class ResponsesService {
   }
 
   async saveResponseByAccessCode(accessCode: string, input: Omit<SaveResponseInput, "sessionId">): Promise<CandidateResponseDto> {
-    const session = await this.findOpenSessionByAccessCode(accessCode);
-    requireNonEmpty(input.questionId, "Question id is required.");
-    return this.saveResponse({ ...input, sessionId: session.id });
+    const questionId = requireNonEmpty(input.questionId, "Question id is required.");
+    const session = await this.findOpenSessionByAccessCode(accessCode, questionId);
+    return this.persistQuestionResponse(session.id, questionId, input.responseText ?? "", input.responseJson);
   }
 
   async listResponsesByAccessCode(accessCode: string): Promise<CandidateResponseDto[]> {
-    const session = await this.findOpenSessionByAccessCode(accessCode);
-    return this.listResponsesBySession(session.id);
+    const findFirst = requireMethod(this.prisma.interviewSession?.findFirst, "interviewSession.findFirst");
+    const session = await findFirst({
+      relationLoadStrategy: "join",
+      where: { accessCode: normalizeAccessCode(accessCode) },
+      select: {
+        id: true,
+        accessCode: true,
+        status: true,
+        expiresAt: true,
+        responses: {
+          orderBy: { createdAt: "asc" },
+          take: DEFAULT_LIST_LIMIT,
+        },
+      },
+    });
+    if (!session) throw forbiddenResourceError("Session");
+    assertCandidateAccessOpen(session);
+    return (session.responses as ResponseRow[]).map(toResponseDto);
   }
 
-  private async findOpenSessionByAccessCode(accessCode: string): Promise<ResponseSessionAccessRow> {
+  private async findOpenSessionByAccessCode(accessCode: string, questionId?: string): Promise<ResponseSessionAccessRow> {
     const findFirst = requireMethod(this.prisma.interviewSession?.findFirst, "interviewSession.findFirst");
-    const session = await findFirst({ where: { accessCode: normalizeAccessCode(accessCode) } });
+    const session = await findFirst({
+      where: {
+        accessCode: normalizeAccessCode(accessCode),
+        ...(questionId
+          ? { template: { modules: { some: { questions: { some: { id: questionId } } } } } }
+          : {}),
+      },
+      select: { id: true, accessCode: true, status: true, expiresAt: true },
+    });
     if (!session) throw forbiddenResourceError("Session");
     assertCandidateAccessOpen(session);
     return session;

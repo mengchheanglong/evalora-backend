@@ -154,6 +154,7 @@ export class OrganizationService {
   async getWorkspace(access: AccessContext): Promise<WorkspaceProfileDto> {
     const organizationId = requireOrganizationId(access);
     const organization = await this.prisma.organization.findUnique({
+      relationLoadStrategy: "join",
       where: { id: organizationId },
       select: {
         id: true,
@@ -248,6 +249,7 @@ export class OrganizationService {
       this.getPrivacySummary(access),
       this.listMembers(access),
       this.prisma.assessmentTemplate.findMany({
+        relationLoadStrategy: "join",
         where: { organizationId },
         orderBy: { updatedAt: "desc" },
         select: {
@@ -267,6 +269,7 @@ export class OrganizationService {
         },
       }),
       this.prisma.interviewSession.findMany({
+        relationLoadStrategy: "join",
         where: { organizationId },
         orderBy: { createdAt: "desc" },
         select: {
@@ -424,6 +427,7 @@ export class OrganizationService {
     await this.expireStaleInvites(organizationId);
 
     const invites = await this.prisma.organizationInvite.findMany({
+      relationLoadStrategy: "join",
       where: { organizationId, status: { in: ["PENDING", "ACCEPTED", "CANCELLED", "EXPIRED"] } },
       orderBy: { createdAt: "desc" },
       take: 50,

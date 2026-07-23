@@ -7,7 +7,6 @@ import { CodeService } from "./code.service";
 import { CodeRateLimitGuard } from "./guards/rate-limit.guard";
 import { Judge0Service } from "./judge0.service";
 import { PistonService } from "./piston.service";
-import { PrismaService } from "./prisma.service";
 
 @Module({
   controllers: [CodeController, CandidateCodeAccessController],
@@ -16,12 +15,11 @@ import { PrismaService } from "./prisma.service";
     PistonService,
     CodeExecutionService,
     CodeService,
-    PrismaService,
     CodeRateLimitGuard,
     CandidateAccessRateLimitGuard,
     JwtAuthGuard,
     RolesGuard,
   ],
-  exports: [CodeService, PrismaService],
+  exports: [CodeService],
 })
 export class CodeModule {}

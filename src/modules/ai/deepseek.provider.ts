@@ -43,6 +43,8 @@ export class DeepSeekAiProvider {
   async generateInterviewQuestion(input: InterviewQuestionInput): Promise<Partial<GeneratedInterviewQuestion>> {
     return this.chatJson("Generate one interview question for Evalora.", {
       outputShape: { question: "string", rubric: ["criterion"] },
+      instructions:
+        "Use the complete conversation history to identify an important gap, unclear claim, or role-relevant area worth probing. Ask one concise question that is not already present in an 'Already asked' entry. Do not score the candidate or reveal evaluation criteria.",
       roleType: input.roleType,
       templateTitle: input.templateTitle,
       moduleTitle: input.moduleTitle,

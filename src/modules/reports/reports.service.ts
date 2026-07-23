@@ -301,6 +301,7 @@ export class ReportsService {
 
     try {
       const row = (await findUnique({
+        relationLoadStrategy: "join",
         where: { sessionId },
         include: {
           session: {
@@ -329,6 +330,7 @@ export class ReportsService {
   private async loadSessionForEvaluation(sessionId: string, access?: AccessContext): Promise<EvaluationSessionRow> {
     const findFirst = requireMethod(this.prisma?.interviewSession?.findFirst, "interviewSession.findFirst");
     const session = (await findFirst({
+      relationLoadStrategy: "join",
       where: mergeWhere({ id: sessionId }, buildSessionOwnershipWhere(access)),
       include: REPORT_EVALUATION_SESSION_INCLUDE,
     })) as EvaluationSessionRow | null;

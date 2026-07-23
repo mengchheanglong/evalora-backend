@@ -300,6 +300,7 @@ export class SessionsService {
   async listSessions(filter: ListSessionsFilter = {}, access?: AccessContext): Promise<InterviewSessionDto[]> {
     const findMany = requireMethod(this.prisma.interviewSession.findMany, "interviewSession.findMany");
     const sessions = await findMany({
+      relationLoadStrategy: "join",
       where: mergeWhere(buildSessionWhere(filter), buildSessionOwnershipWhere(access)),
       include: SESSION_INCLUDE,
       orderBy: { updatedAt: "desc" },
@@ -315,12 +316,13 @@ export class SessionsService {
     if (access) {
       const findFirst = requireMethod(this.prisma.interviewSession.findFirst, "interviewSession.findFirst");
       session = (await findFirst({
+        relationLoadStrategy: "join",
         where: mergeWhere({ id }, buildSessionOwnershipWhere(access)),
         include: SESSION_INCLUDE,
       })) as SessionRow | null;
     } else {
       const findUnique = requireMethod(this.prisma.interviewSession.findUnique, "interviewSession.findUnique");
-      session = (await findUnique({ where: { id }, include: SESSION_INCLUDE })) as SessionRow | null;
+      session = (await findUnique({ relationLoadStrategy: "join", where: { id }, include: SESSION_INCLUDE })) as SessionRow | null;
     }
 
     if (!session) return null;
@@ -514,6 +516,7 @@ export class SessionsService {
   private async findCandidateSessionByAccessCode(accessCode: string): Promise<CandidateSessionRow> {
     const findFirst = requireMethod(this.prisma.interviewSession.findFirst, "interviewSession.findFirst");
     const session = await findFirst({
+      relationLoadStrategy: "join",
       where: { accessCode: normalizeAccessCode(accessCode) },
       include: CANDIDATE_SESSION_INCLUDE,
     });

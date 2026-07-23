@@ -25,9 +25,10 @@ import { OrganizationController } from "./modules/organization/organization.cont
 import { OrganizationService } from "./modules/organization/organization.service";
 import { createEmailServiceFromEnv, EmailService } from "./modules/email/email.service";
 import { PrismaService } from "./prisma/prisma.service";
+import { PrismaModule } from "./prisma/prisma.module";
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), CodeModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, CodeModule],
   controllers: [
     AppController,
     AuthController,
@@ -43,7 +44,6 @@ import { PrismaService } from "./prisma/prisma.service";
     AnalyticsController,
   ],
   providers: [
-    PrismaService,
     AnalyticsService,
     AuthRateLimitGuard,
     CandidateAccessRateLimitGuard,

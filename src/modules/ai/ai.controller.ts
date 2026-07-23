@@ -90,6 +90,11 @@ export class CandidateAiController {
     return this.candidateAiService.adaptiveQuestions(accessCode, body.count ?? 3);
   }
 
+  @Get(":accessCode/adaptive-questions")
+  existingAdaptiveQuestions(@Param("accessCode") accessCode: string) {
+    return this.candidateAiService.existingAdaptiveQuestions(accessCode);
+  }
+
   @Post(":accessCode/adaptive-answer")
   saveAdaptiveAnswer(@Param("accessCode") accessCode: string, @Body(new ValidateDto(AdaptiveAnswerDto)) body: AdaptiveAnswerDto) {
     return this.candidateAiService.saveAdaptiveAnswer(accessCode, body);

@@ -12,7 +12,7 @@ import { DEFAULT_LIST_LIMIT } from "../../common/query.constants";
 import { CodeExecutionService } from "./code-execution.service";
 import { CODE_QUESTION_INDEX, CODE_QUESTIONS } from "./constants/code.constants";
 import type { CodeQuestion, SessionSnapshot } from "./interfaces/code.interfaces";
-import { PrismaService } from "./prisma.service";
+import { PrismaService } from "../../prisma/prisma.service";
 import type { GradeCodeDto } from "./dto/grade-code.dto";
 import type { RunCodeDto } from "./dto/run-code.dto";
 import type { CandidateSubmitCodeDto, SubmitCodeDto } from "./dto/submit-code.dto";

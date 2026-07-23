@@ -72,6 +72,7 @@ export class AdaptiveQuestionsDto {
 }
 
 export class AdaptiveAnswerDto {
+  @IsOptional() @IsString() @MaxLength(SHORT_MAX) questionId?: string;
   @IsOptional() @IsString() @MaxLength(TEXT_MAX) question?: string;
   @IsOptional() @IsString() @MaxLength(TEXT_MAX) answer?: string;
 }

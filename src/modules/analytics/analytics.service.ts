@@ -38,6 +38,7 @@ export class AnalyticsService {
         }),
         this.modulePerformance(access),
         this.prisma.interviewSession.findMany({
+          relationLoadStrategy: "join",
           where: { ...sessionWhere, status: "COMPLETED" },
           select: {
             id: true,
@@ -90,6 +91,7 @@ export class AnalyticsService {
 
   async activity(access: AccessContext) {
     const sessions = await this.prisma.interviewSession.findMany({
+      relationLoadStrategy: "join",
       where: sessionScope(access),
       select: {
         id: true,
@@ -123,6 +125,7 @@ export class AnalyticsService {
   async modulePerformance(access: AccessContext) {
     // Cap rows scanned for dashboard speed; averages stay representative for MVP volumes.
     const evaluations = await this.prisma.evaluation.findMany({
+      relationLoadStrategy: "join",
       where: { session: sessionScope(access) },
       select: {
         score: true,
@@ -187,6 +190,7 @@ export class AnalyticsService {
    */
   async trend(access: AccessContext): Promise<Array<{ date: string; score: number }>> {
     const reports = await this.prisma.candidateReport.findMany({
+      relationLoadStrategy: "join",
       where: { session: sessionScope(access) },
       select: { overallScore: true, createdAt: true, session: { select: { completedAt: true } } },
       orderBy: { createdAt: "asc" },

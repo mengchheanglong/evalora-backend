@@ -2,7 +2,7 @@ import { ConflictException, GoneException, NotFoundException } from "@nestjs/com
 import { CodeExecutionService } from "../../src/modules/code/code-execution.service";
 import { CODE_QUESTIONS } from "../../src/modules/code/constants/code.constants";
 import { calculatePercentageScore, CodeService } from "../../src/modules/code/code.service";
-import { PrismaService } from "../../src/modules/code/prisma.service";
+import { PrismaService } from "../../src/prisma/prisma.service";
 
 describe("CodeService", () => {
   const prismaMock = {

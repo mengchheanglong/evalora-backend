@@ -145,6 +145,33 @@ test("listResponsesBySession maps saved responses to API DTOs", async () => {
   assert.equal(responses[1].responseJson, undefined);
 });
 
+test("listResponsesByAccessCode loads the session and responses in one joined query", async () => {
+  const service = new ResponsesService({
+    interviewSession: {
+      findFirst: async (args: unknown) => {
+        assert.deepEqual(args, {
+          relationLoadStrategy: "join",
+          where: { accessCode: "EV-123456" },
+          select: {
+            id: true,
+            accessCode: true,
+            status: true,
+            expiresAt: true,
+            responses: { orderBy: { createdAt: "asc" }, take: 500 },
+          },
+        });
+        return { ...accessSessionRow, responses: [responseRow] };
+      },
+    },
+    response: {},
+  } as any);
+
+  const responses = await service.listResponsesByAccessCode(" ev-123456 ");
+
+  assert.equal(responses.length, 1);
+  assert.equal(responses[0].id, "response-1");
+});
+
 test("saveResponseByAccessCode autosaves by invite code without candidate login", async () => {
   const calls: Array<{ method: string; args: any }> = [];
   const service = new ResponsesService({
@@ -173,9 +200,24 @@ test("saveResponseByAccessCode autosaves by invite code without candidate login"
 
   assert.equal(result.sessionId, "session-1");
   assert.deepEqual(calls, [
-    { method: "session.findFirst", args: { where: { accessCode: "EV-123456" } } },
-    { method: "session.findFirst", args: { where: { id: "session-1" } } },
-    { method: "session.findFirst", args: assignmentLookupArgs() },
+    {
+      method: "session.findFirst",
+      args: {
+        where: {
+          accessCode: "EV-123456",
+          template: {
+            modules: {
+              some: {
+                questions: {
+                  some: { id: "question-1" },
+                },
+              },
+            },
+          },
+        },
+        select: { id: true, accessCode: true, status: true, expiresAt: true },
+      },
+    },
     { method: "response.findFirst", args: { where: { sessionId: "session-1", questionId: "question-1" }, orderBy: { createdAt: "desc" } } },
     {
       method: "response.create",

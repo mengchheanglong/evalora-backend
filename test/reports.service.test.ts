@@ -237,6 +237,7 @@ test("generateAndPersistReport evaluates saved responses by module and persists 
   assert.deepEqual(calls[0], {
     action: "interviewSession.findFirst",
     args: {
+      relationLoadStrategy: "join",
       where: { id: "session-1", organizationId: "org-1" },
       include: {
         candidate: { select: { name: true } },
