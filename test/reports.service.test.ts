@@ -134,6 +134,36 @@ test("getReport returns a persisted CandidateReport when one exists", async () =
   assert.match(report.advisoryNotice, /not a final hiring decision/i);
 });
 
+test("getReport hides stale strengths from a persisted zero-score report", async () => {
+  const fakePrisma = {
+    interviewSession: {
+      findFirst: async () => ({ id: "session-zero", organizationId: "org-1" }),
+    },
+    candidateReport: {
+      findUnique: async () => ({
+        sessionId: "session-zero",
+        overallScore: 0,
+        moduleScores: { "Coding Assessment": 0 },
+        summary: "No assessable work.",
+        strengths: ["Communicates reasoning clearly"],
+        improvementAreas: ["Submit a complete response"],
+        evidence: [],
+        session: {
+          candidate: { name: "No Evidence" },
+          template: { title: "Coding Assessment" },
+        },
+      }),
+    },
+  };
+  const service = new ReportsService(fakePrisma as unknown as ConstructorParameters<typeof ReportsService>[0]);
+
+  const report = await service.getReport("session-zero", organizationAccess);
+
+  assert.equal(report.overallScore, 0);
+  assert.deepEqual(report.strengths, []);
+  assert.deepEqual(report.improvementAreas, ["Submit a complete response"]);
+});
+
 test("generateAndPersistReport evaluates saved responses by module and persists a real candidate report", async () => {
   const calls: Array<{ action: string; args: unknown }> = [];
   const aiInputs: unknown[] = [];

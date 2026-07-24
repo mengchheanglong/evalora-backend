@@ -152,12 +152,13 @@ function withModuleDefaults(input: EvaluateResponseInput): EvaluateResponseInput
 }
 
 function mergeEvaluation(fallback: EvaluationResultDto, providerResult: Partial<EvaluationResultDto>, objectiveScore?: number): EvaluationResultDto {
+  const score = objectiveScore === undefined ? normalizeScore(providerResult.score, fallback.score) : normalizeScore(objectiveScore, fallback.score);
   return {
     ...fallback,
-    score: objectiveScore === undefined ? normalizeScore(providerResult.score, fallback.score) : normalizeScore(objectiveScore, fallback.score),
+    score,
     criteriaScores: normalizeCriteriaScores(providerResult.criteriaScores, fallback.criteriaScores),
     feedback: nonEmpty(providerResult.feedback, fallback.feedback),
-    strengths: nonEmptyArray(providerResult.strengths, fallback.strengths),
+    strengths: score > 0 ? nonEmptyArray(providerResult.strengths, fallback.strengths) : [],
     improvementAreas: nonEmptyArray(providerResult.improvementAreas, fallback.improvementAreas),
     evidence: nonEmptyArray(providerResult.evidence, fallback.evidence),
     advisoryNotice: RESPONSE_ADVISORY_NOTICE,

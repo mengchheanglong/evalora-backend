@@ -462,15 +462,16 @@ export class ReportsService {
 }
 
 function mapPersistedReport(row: PersistedCandidateReportRow): GeneratedCandidateReport {
+  const overallScore = numberValue(row.overallScore, 0);
   return {
     sessionId: stringValue(row.sessionId, ""),
     candidateName: stringValue(row.session?.candidate?.name, "Candidate"),
     assessmentName: stringValue(row.session?.template?.title, "Assessment"),
     completedAt: isoDateString(row.session?.completedAt),
-    overallScore: numberValue(row.overallScore, 0),
+    overallScore,
     moduleScores: numberRecord(row.moduleScores),
     summary: stringValue(row.summary, "Persisted candidate report."),
-    strengths: stringArray(row.strengths),
+    strengths: overallScore > 0 ? stringArray(row.strengths) : [],
     improvementAreas: stringArray(row.improvementAreas),
     evidence: stringArray(row.evidence),
     reviewerSummary: optionalString(row.reviewerSummary),

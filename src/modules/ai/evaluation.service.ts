@@ -139,7 +139,7 @@ export function evaluateResponse(input: EvaluateResponseInput): EvaluationResult
       score > 0
         ? `${moduleTitle} scored ${score}/5 from the rubric signals in the candidate's response.`
         : `No assessable response was provided for ${moduleTitle}.`,
-    strengths: inferStrengths(candidateResponse),
+    strengths: score > 0 ? inferStrengths(candidateResponse) : [],
     improvementAreas: inferImprovementAreas(candidateResponse),
     evidence: extractEvidence(candidateResponse),
     advisoryNotice: RESPONSE_ADVISORY_NOTICE,
@@ -160,7 +160,7 @@ export function generateCandidateReport(input: GenerateCandidateReportInput): Ge
     summary: hasAssessableWork
       ? `${input.candidateName} completed ${input.assessmentName} with an overall score of ${overallScore}/5, based on the candidate's saved responses. AI feedback is advisory and prepared for human reviewer judgment.`
       : `${input.candidateName} did not provide enough assessable responses in ${input.assessmentName} to produce a scored evaluation — no strengths or scores were inferred.`,
-    strengths: unique(input.evaluations.flatMap((evaluation) => evaluation.strengths)),
+    strengths: unique(input.evaluations.filter((evaluation) => evaluation.score > 0).flatMap((evaluation) => evaluation.strengths)),
     improvementAreas: unique(input.evaluations.flatMap((evaluation) => evaluation.improvementAreas)),
     evidence: unique(input.evaluations.flatMap((evaluation) => evaluation.evidence)),
     reviewerSummary: input.reviewerNotes?.join(" "),

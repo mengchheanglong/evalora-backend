@@ -49,6 +49,15 @@ test("evaluateResponse gives no score or fabricated strengths for an empty/trivi
   });
   assert.equal(wrong.score, 0, "an unrelated answer must not earn length or attempt credit");
   assert.deepEqual(wrong.strengths, []);
+
+  const failedObjectiveWork = evaluateResponse({
+    moduleType: "coding",
+    moduleTitle: "Coding Assessment",
+    responseText: "I explain the approach, test edge cases, debug failures, and measure the result.",
+    objectiveScore: 0,
+  });
+  assert.equal(failedObjectiveWork.score, 0);
+  assert.deepEqual(failedObjectiveWork.strengths, [], "a failed objective assessment must not infer strengths from keywords");
 });
 
 test("evaluateResponse uses exact 0, 25, 50, 80, and 100 percent score anchors", () => {
@@ -90,6 +99,32 @@ test("generateCandidateReport reports no assessable work when nothing scored", (
   assert.equal(report.overallScore, 0);
   assert.deepEqual(report.strengths, []);
   assert.match(report.summary, /did not provide enough assessable responses/i);
+});
+
+test("generateCandidateReport discards stray strengths from zero-score evaluations", () => {
+  const report = generateCandidateReport({
+    sessionId: "s-zero",
+    candidateName: "No Evidence",
+    assessmentName: "Coding Assessment",
+    evaluations: [
+      {
+        moduleId: "coding",
+        moduleTitle: "Coding Assessment",
+        moduleType: "coding",
+        weight: 1,
+        score: 0,
+        criteriaScores: { correctness: 0 },
+        feedback: "No assessable response.",
+        strengths: ["Uses practical evidence and problem-solving steps"],
+        improvementAreas: ["Submit a working solution"],
+        evidence: ["No passing tests"],
+        advisoryNotice: "AI feedback is advisory.",
+      },
+    ],
+  });
+
+  assert.deepEqual(report.strengths, []);
+  assert.match(report.summary, /no strengths or scores were inferred/i);
 });
 
 test("generateCandidateReport computes weighted overall score and aggregates evidence", () => {

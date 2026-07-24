@@ -74,6 +74,22 @@ test("AiService preserves exact score anchors and never sends a blank answer to 
   assert.equal(providerCalls, 1);
 });
 
+test("AiService removes provider strengths when the final score is zero", async () => {
+  const service = new AiService(
+    new ProviderStub({
+      score: 0,
+      strengths: ["Communicates reasoning clearly"],
+      improvementAreas: ["Provide valid evidence"],
+    }),
+  );
+
+  const result = await service.evaluateResponse(fallbackInput);
+
+  assert.equal(result.score, 0);
+  assert.deepEqual(result.strengths, []);
+  assert.deepEqual(result.improvementAreas, ["Provide valid evidence"]);
+});
+
 test("AiService falls back to deterministic rubric evaluation when provider evaluation fails", async () => {
   const service = new AiService(new ProviderStub(new Error("provider unavailable")));
 
