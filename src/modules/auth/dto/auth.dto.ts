@@ -99,3 +99,10 @@ export class ResetPasswordDto {
   @MaxLength(PASSWORD_MAX)
   password!: string;
 }
+
+export class UpdateProfileDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(NAME_MAX)
+  name!: string;
+}

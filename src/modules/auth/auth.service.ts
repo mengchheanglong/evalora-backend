@@ -28,6 +28,7 @@ export interface AuthUserRepository {
   ): Promise<AuthUserRecord>;
   ensureUserWorkspace?(user: AuthUserRecord, workspaceName: string): Promise<AuthUserRecord>;
   updatePasswordHash?(userId: string, passwordHash: string): Promise<AuthUserRecord>;
+  updateName?(userId: string, name: string): Promise<AuthUserRecord>;
   markEmailVerified?(userId: string): Promise<AuthUserRecord>;
 }
 
@@ -248,6 +249,15 @@ export class PrismaAuthRepository implements AuthUserRepository {
     return toAuthUserRecord(user);
   }
 
+  async updateName(userId: string, name: string): Promise<AuthUserRecord> {
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { name },
+      select: USER_SELECT,
+    });
+    return toAuthUserRecord(user);
+  }
+
   async markEmailVerified(userId: string): Promise<AuthUserRecord> {
     const user = await this.prisma.user.update({
       where: { id: userId },
@@ -371,6 +381,14 @@ export class AuthService {
     if (!this.users.findById) throw new Error("User lookup is unavailable.");
     const user = await this.users.findById(id);
     if (!user || user.role === "candidate") throw new Error("User account is unavailable.");
+    return stripPasswordHash(user);
+  }
+
+  async updateCurrentUser(id: string, input: { name?: string }): Promise<Omit<AuthUserRecord, "passwordHash">> {
+    if (!this.users.updateName) throw new Error("Profile updates are unavailable.");
+    const name = requireNonEmpty(input.name, "Name is required.", NAME_MAX_LENGTH);
+    const user = await this.users.updateName(id, name);
+    if (user.role === "candidate") throw new Error("User account is unavailable.");
     return stripPasswordHash(user);
   }
 

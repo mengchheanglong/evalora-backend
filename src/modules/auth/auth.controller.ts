@@ -1,6 +1,6 @@
-import { BadRequestException, Body, Controller, Get, Inject, Post, Req, UnauthorizedException, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Inject, Post, Put, Req, UnauthorizedException, UseGuards } from "@nestjs/common";
 import { AuthRateLimitGuard } from "./auth-rate-limit.guard";
-import { type AuthenticatedRequest, tryExtractAuthUserFromHeader } from "./auth.guard";
+import { JwtAuthGuard, Roles, RolesGuard, type AuthenticatedRequest, tryExtractAuthUserFromHeader } from "./auth.guard";
 import { AuthService, EmailVerificationRequiredError } from "./auth.service";
 import {
   ForgotPasswordDto,
@@ -9,6 +9,7 @@ import {
   RegisterDto,
   ResendEmailVerificationDto,
   ResetPasswordDto,
+  UpdateProfileDto,
   VerifyEmailDto,
 } from "./dto/auth.dto";
 
@@ -115,6 +116,19 @@ export class AuthController {
       return await this.authService.getCurrentUser(authUser.id);
     } catch {
       return null;
+    }
+  }
+
+  @Put("me")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("organization", "interviewer", "admin")
+  async updateProfile(@Req() request: AuthenticatedRequest, @Body() body: UpdateProfileDto) {
+    try {
+      if (!request.user) throw new UnauthorizedException("Authentication required.");
+      return await this.authService.updateCurrentUser(request.user.id, body);
+    } catch (error) {
+      if (error instanceof UnauthorizedException) throw error;
+      throw new BadRequestException(error instanceof Error ? error.message : "Unable to update profile.");
     }
   }
 }

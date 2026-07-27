@@ -40,6 +40,12 @@ function createRepo(): AuthUserRepository & { users: AuthUserRecord[] } {
       user.passwordHash = passwordHash;
       return user;
     },
+    async updateName(userId, name) {
+      const user = users.find((row) => row.id === userId);
+      if (!user) throw new Error("User not found.");
+      user.name = name;
+      return user;
+    },
     async markEmailVerified(userId) {
       const user = users.find((row) => row.id === userId);
       if (!user) throw new Error("User not found.");
@@ -124,6 +130,28 @@ test("login verifies hashed password before issuing token", async () => {
   const result = await service.login({ email: "demo@example.com", password: "CorrectPass1" });
   assert.equal(result.user.role, "organization");
   assert.equal(typeof result.token, "string");
+});
+
+test("an interviewer can update only their own display name", async () => {
+  const repo = createRepo();
+  const passwordHash = await bcrypt.hash("SecurePass1", 4);
+  repo.users.push({
+    id: "interviewer-1",
+    name: "Original Name",
+    email: "interviewer@example.com",
+    emailVerified: true,
+    passwordHash,
+    role: "interviewer",
+    organizationId: "org-1",
+  });
+  const service = new AuthService(repo, "test-jwt-secret");
+
+  const updated = await service.updateCurrentUser("interviewer-1", { name: "Updated Interviewer" });
+
+  assert.equal(updated.name, "Updated Interviewer");
+  assert.equal(repo.users[0].name, "Updated Interviewer");
+  assert.equal(updated.organizationId, "org-1");
+  assert.equal(updated.role, "interviewer");
 });
 
 test("repeated registration resends verification without replacing pending credentials", async () => {
