@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Controller, Get, Inject, Query, Req, UseGuards } from "@nestjs/common";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { AnalyticsService } from "./analytics.service";
@@ -20,16 +20,34 @@ export class AnalyticsController {
     return this.analyticsService.activity(toAccessContext(request.user));
   }
 
+  @Get("ready-reports")
+  @Roles("admin", "organization", "interviewer")
+  readyReports(@Req() request: AuthenticatedRequest) {
+    return this.analyticsService.readyReports(toAccessContext(request.user));
+  }
+
   @Get("module-performance")
   @Roles("admin", "organization", "interviewer")
-  modulePerformance(@Req() request: AuthenticatedRequest) {
-    return this.analyticsService.modulePerformance(toAccessContext(request.user));
+  modulePerformance(@Req() request: AuthenticatedRequest, @Query("templateId") templateId?: unknown) {
+    return this.analyticsService.modulePerformance(toAccessContext(request.user), requireTemplateId(templateId));
   }
 
   @Get("score-distribution")
   @Roles("admin", "organization", "interviewer")
-  scoreDistribution(@Req() request: AuthenticatedRequest) {
-    return this.analyticsService.scoreDistribution(toAccessContext(request.user));
+  scoreDistribution(@Req() request: AuthenticatedRequest, @Query("templateId") templateId?: unknown) {
+    return this.analyticsService.scoreDistribution(toAccessContext(request.user), requireTemplateId(templateId));
+  }
+
+  @Get("completion-duration")
+  @Roles("admin", "organization", "interviewer")
+  completionDuration(@Req() request: AuthenticatedRequest, @Query("templateId") templateId?: unknown) {
+    return this.analyticsService.completionDuration(toAccessContext(request.user), requireTemplateId(templateId));
+  }
+
+  @Get("template-usage")
+  @Roles("admin", "organization", "interviewer")
+  templateUsage(@Req() request: AuthenticatedRequest) {
+    return this.analyticsService.templateUsage(toAccessContext(request.user));
   }
 
   @Get("trend")
@@ -38,9 +56,21 @@ export class AnalyticsController {
     return this.analyticsService.trend(toAccessContext(request.user));
   }
 
+  @Get("upcoming")
+  @Roles("admin", "organization", "interviewer")
+  upcoming(@Req() request: AuthenticatedRequest) {
+    return this.analyticsService.upcoming(toAccessContext(request.user));
+  }
+
   @Get("themes")
   @Roles("admin", "organization", "interviewer")
   themes(@Req() request: AuthenticatedRequest) {
     return this.analyticsService.themes(toAccessContext(request.user));
   }
+}
+
+function requireTemplateId(templateId?: unknown) {
+  const value = typeof templateId === "string" ? templateId.trim() : "";
+  if (!value) throw new BadRequestException("templateId is required for comparable analytics");
+  return value;
 }

@@ -149,8 +149,13 @@ Endpoints:
 
 - `GET /api/analytics/summary`
 - `GET /api/analytics/activity`
-- `GET /api/analytics/module-performance`
-- `GET /api/analytics/score-distribution`
+- `GET /api/analytics/ready-reports`
+- `GET /api/analytics/upcoming`
+- `GET /api/analytics/template-usage`
+- `GET /api/analytics/module-performance?templateId=:id`
+- `GET /api/analytics/score-distribution?templateId=:id`
+- `GET /api/analytics/completion-duration?templateId=:id`
+- `GET /api/analytics/trend`
 - `GET /api/analytics/themes`
 
-Analytics are computed from organization-scoped sessions, evaluations, reports, and report evidence. No static demo values are returned.
+Analytics are computed from persisted sessions, evaluations, reports, and report evidence. Workspace roles are organization-scoped; admins receive platform scope. Summary/activity reads first reconcile past-due, not-started invitations to `EXPIRED`. Summary responses expose all-time scope/freshness metadata, active/closed pipeline counts, report readiness and coverage, and nullable denominator-based rates. Quality analytics use completed sessions for one required template ID, preserve assessed zero scores, aggregate module performance by module type, and report sample sizes. Historical template revisions are not yet versioned and are disclosed as a comparison caveat. No static demo values are returned.

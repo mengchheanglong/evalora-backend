@@ -284,16 +284,29 @@ Report generation evaluates modules concurrently, persists fresh `Evaluation` ro
 
 ## Analytics
 
-All analytics are computed from organization-scoped persisted data.
+Workspace analytics are computed from persisted data visible to the authenticated staff user. Owners and interviewers share one metric catalog; authorization only changes which records are visible. Candidate users have no staff analytics access. Overview values are all-time snapshots and include an `asOf` timestamp; rates are `null`, not zero, when no valid denominator exists.
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| GET | `/analytics/summary` | Candidate/session counts, completion rate, average score, recent completions, module performance. |
-| GET | `/analytics/activity` | Recent invitation/progress/completion activity. |
-| GET | `/analytics/module-performance` | Average persisted evaluation score by module. |
-| GET | `/analytics/score-distribution` | Persisted report score buckets. |
-| GET | `/analytics/themes` | Common evidence-backed strengths and deeper-review themes. |
-| GET | `/analytics/trend` | Chronological performance points for the dashboard chart: `{ date, score }[]` with score 0–100. |
+| GET | `/analytics/summary` | All-time population, pipeline, closed-session completion, and report-coverage counts/rates. |
+| GET | `/analytics/activity` | Recent invitation/progress/completion/report-ready session updates for Overview. |
+| GET | `/analytics/ready-reports` | Recently created or regenerated persisted reports, ordered by report update time. |
+| GET | `/analytics/upcoming` | Next not-started or in-progress assessments for Overview. |
+| GET | `/analytics/template-usage` | Authorized assignment and completion counts by template. |
+| GET | `/analytics/module-performance?templateId=:id` | Persisted evaluation averages by module type for one exact template. `templateId` is required. |
+| GET | `/analytics/score-distribution?templateId=:id` | Persisted report score buckets for one exact template. `templateId` is required. |
+| GET | `/analytics/completion-duration?templateId=:id` | Median minutes and duration buckets for completed sessions using one exact template. `templateId` is required. |
+
+`GET /analytics/summary` returns:
+
+- scope metadata: `asOf`, `dataWindow: "all_time"`, and `scope: "organization" | "platform"`;
+- population: `totalCandidates`, `totalTemplates`, and `totalSessions`;
+- pipeline: completed, in-progress, pending/not-started, expired, active, and closed counts;
+- report readiness: `reportReadyAssessments`, `reportsPending`, and `reportCoverageRate`;
+- outcome rate: `closedCompletionRate` (`completed / (completed + expired)`); active sessions are excluded from this denominator;
+- current status breakdown. Candidate identity and mixed-template evidence are excluded from this aggregate payload.
+
+Score, module, and duration endpoints use completed sessions for exactly one required, nonblank `templateId`, so different template IDs are never combined in a comparison. Historical template revisions are not yet versioned; evidence for an edited template must therefore be interpreted cautiously. Distribution includes a distinct `No assessable evidence` bucket for exact zero scores. Duration excludes missing, invalid, or negative timestamp pairs and reports its sample size. Template usage is assignment context, not candidate performance. Activity is a current-state session update feed, not an immutable event log.
 
 ## Alignment checklist
 

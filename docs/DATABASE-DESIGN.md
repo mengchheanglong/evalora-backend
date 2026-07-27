@@ -49,5 +49,6 @@ InterviewSession 1---N ReviewerNote
 - Store AI evidence as JSON so reports can quote response-backed justification.
 - Store code execution results separately from final report for auditability.
 - Reports are private and should only be queryable by authorized users.
+- Dashboard queries use organization/status/completion/update indexes on sessions, an organization index on templates, and a session/time index on evaluations. These indexes keep scoped overview queries efficient without weakening RBAC filters.
 
 See `backend/prisma/schema.prisma` for the first Prisma schema draft.
