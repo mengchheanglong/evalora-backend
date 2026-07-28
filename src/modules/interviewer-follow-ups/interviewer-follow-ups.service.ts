@@ -218,16 +218,6 @@ export class InterviewerFollowUpsService {
 
   // ------------------------------------------------------------------- shared
 
-  /**
-   * Required, still-unanswered questions block session completion. Cancelled and
-   * optional questions never block.
-   */
-  async countPendingRequired(sessionId: string): Promise<number> {
-    return this.prisma.interviewerFollowUp.count({
-      where: { sessionId, required: true, status: "SENT" },
-    });
-  }
-
   private async maxSequence(sessionId: string): Promise<number> {
     const aggregate = this.prisma.interviewerFollowUp.aggregate;
     if (aggregate) {

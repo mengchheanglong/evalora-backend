@@ -158,3 +158,68 @@ test("DeepSeekAiProvider posts OpenAI-compatible chat completions and parses JSO
   assert.equal(result.score, 4.4);
   assert.deepEqual(result.evidence, ["explain the trade-off"]);
 });
+
+test("DeepSeekAiProvider sends question wording as context the model must not score or quote", async () => {
+  const requests: Array<{ url: string; init: RequestInit }> = [];
+  const fetchImpl: DeepSeekFetch = async (url, init) => {
+    requests.push({ url, init });
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return { choices: [{ message: { content: JSON.stringify({ score: 2.5 }) } }] };
+      },
+    };
+  };
+
+  const provider = new DeepSeekAiProvider({ baseUrl: "https://api.deepseek.com/v1", model: "deepseek-v4-flash", apiKey: "test-key" }, fetchImpl);
+  await provider.evaluateResponse({
+    ...fallbackInput,
+    questionContext: ["Interviewer follow-up by Dana: Would you have used a consistent-hash ring here?"],
+  });
+
+  const payload = JSON.parse((JSON.parse(String(requests[0].init.body)) as { messages: Array<{ content: string }> }).messages[1].content) as {
+    payload: { responseText: string; questionContext: string[]; questionContextInstruction: string };
+  };
+
+  assert.deepEqual(payload.payload.questionContext, ["Interviewer follow-up by Dana: Would you have used a consistent-hash ring here?"]);
+  assert.equal(payload.payload.responseText, fallbackInput.responseText);
+  assert.doesNotMatch(payload.payload.responseText, /consistent-hash/, "question wording is never merged into the scored response text");
+  assert.match(payload.payload.questionContextInstruction, /never score it/i);
+  assert.match(payload.payload.questionContextInstruction, /never quote it in evidence/i);
+  // The existing scoring anchors must survive alongside the new instruction.
+  assert.match(String(requests[0].init.body), /factually wrong/);
+  assert.match(String(requests[0].init.body), /question text is context, never evidence/);
+});
+
+test("AiService forwards question context to the provider without merging it into the answer", async () => {
+  const provider = new CapturingProviderStub();
+  const service = new AiService(provider);
+
+  await service.evaluateResponse({
+    ...fallbackInput,
+    questionContext: ["Question: Would you have used a consistent-hash ring here?"],
+  });
+
+  assert.deepEqual(provider.captured?.questionContext, ["Question: Would you have used a consistent-hash ring here?"]);
+  assert.equal(provider.captured?.responseText, fallbackInput.responseText);
+});
+
+test("evaluateCodeSubmission keeps the problem statement out of the scored submission text", async () => {
+  const provider = new CapturingProviderStub();
+  const service = new AiService(provider);
+
+  await service.evaluateCodeSubmission({
+    moduleTitle: "Coding Assessment",
+    problem: "Implement a consistent-hash ring with clear edge-case handling and measured complexity.",
+    language: "typescript",
+    sourceCode: "export const solve = (input: number[]) => input.sort((a, b) => a - b);",
+    executionResult: "All tests passed",
+  });
+
+  assert.deepEqual(provider.captured?.questionContext, [
+    "Problem: Implement a consistent-hash ring with clear edge-case handling and measured complexity.",
+  ]);
+  assert.doesNotMatch(String(provider.captured?.responseText), /consistent-hash/);
+  assert.match(String(provider.captured?.responseText), /All tests passed/);
+});

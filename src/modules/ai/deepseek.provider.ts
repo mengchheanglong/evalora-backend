@@ -83,6 +83,10 @@ const MAX_STREAMED_CHARACTERS = 4_000;
 // A sentinel, not a string: any literal marker could collide with a real token.
 const STREAM_DONE = Symbol("deepseek-stream-done");
 const STREAM_TIMED_OUT = Symbol("deepseek-stream-timed-out");
+// Sent with every evaluation payload so the model cannot treat the wording of a
+// leading question as something the candidate said, or quote it back as evidence.
+const QUESTION_CONTEXT_INSTRUCTION =
+  "questionContext holds the question, interviewer follow-up, or problem wording the candidate was replying to. It is background only: never score it, never credit the candidate for words that appear only there, and never quote it in evidence. Score and quote responseText only.";
 const STREAM_SYSTEM_PROMPT =
   "You are Evalora's interview assistant. Reply with plain text only: one concise question, with no JSON, no markdown, no quotes, and no preamble. Use only the candidate's answer as evidence. Do not score the candidate, reveal evaluation criteria, or make hiring decisions.";
 
@@ -193,7 +197,8 @@ export class DeepSeekAiProvider {
       outputShape: evaluationOutputShape(rubric),
       moduleType: "coding",
       moduleTitle: input.moduleTitle ?? codingProfile.title,
-      problem: input.problem,
+      questionContext: [`Problem: ${input.problem}`],
+      questionContextInstruction: QUESTION_CONTEXT_INSTRUCTION,
       language: input.language,
       sourceCode: input.sourceCode,
       executionResult: input.executionResult ?? "not provided",
@@ -256,6 +261,8 @@ function evaluationPayload(input: EvaluateResponseInput) {
     moduleTitle: input.moduleTitle ?? profile.title,
     moduleType: input.moduleType,
     responseText: input.responseText,
+    questionContext: input.questionContext ?? [],
+    questionContextInstruction: QUESTION_CONTEXT_INSTRUCTION,
     rubric,
     focusAreas: profile.focusAreas,
     safetyGuidance: profile.safetyGuidance,
@@ -277,7 +284,7 @@ function evaluationOutputShape(rubric: string[]) {
     feedback: "short evidence-based written feedback",
     strengths: ["strength"],
     improvementAreas: ["improvement area"],
-    evidence: ["short quote or evidence from response"],
+    evidence: ["short quote taken from responseText only, never from questionContext"],
   };
 }
 

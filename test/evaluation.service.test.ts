@@ -80,11 +80,32 @@ test("evaluateResponse uses exact 0, 25, 50, 80, and 100 percent score anchors",
 test("evaluateResponse scores candidate answers rather than question text", () => {
   const result = evaluateResponse({
     moduleType: "problem_solving",
-    responseText: "Question: Explain your testing, impact measurement, and trade-off reasoning.\nAnswer: unrelated purple winter window words provide no valid response here",
+    questionContext: ["Question: Explain your testing, impact measurement, and trade-off reasoning."],
+    responseText: "unrelated purple winter window words provide no valid response here",
     rubric: ["testing", "impact measurement", "trade-off reasoning"],
   });
 
   assert.equal(result.score, 0);
+});
+
+test("questionContext never changes the score, the criteria, or the evidence quotes", () => {
+  const candidateAnswer = "I rolled back the deployment and explained the failure to the team.";
+  const rubric = ["ownership"];
+  const plain = evaluateResponse({ moduleType: "behavioral", responseText: candidateAnswer, rubric });
+  const withLeadingQuestion = evaluateResponse({
+    moduleType: "behavioral",
+    responseText: candidateAnswer,
+    questionContext: [
+      "Interviewer follow-up by Dana: Would you say you took full ownership, measured the impact with a percent metric, tested the result, and explained the trade-off to the client because the customer outcome mattered?",
+    ],
+    rubric,
+  });
+
+  assert.equal(withLeadingQuestion.score, plain.score);
+  assert.deepEqual(withLeadingQuestion.criteriaScores, plain.criteriaScores);
+  assert.deepEqual(withLeadingQuestion.evidence, plain.evidence);
+  assert.deepEqual(withLeadingQuestion.strengths, plain.strengths);
+  assert.deepEqual(withLeadingQuestion.improvementAreas, plain.improvementAreas);
 });
 
 test("generateCandidateReport reports no assessable work when nothing scored", () => {

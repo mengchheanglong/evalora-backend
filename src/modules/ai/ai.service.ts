@@ -99,7 +99,7 @@ export class AiService {
 
     try {
       const providerResult = await this.provider.evaluateResponse(normalizedInput);
-      return mergeEvaluation(fallback, providerResult, normalizedInput.objectiveScore);
+      return mergeEvaluation(fallback, providerResult, normalizedInput.objectiveScore, normalizedInput.responseText);
     } catch {
       return {
         ...fallback,
@@ -114,12 +114,14 @@ export class AiService {
       moduleId: input.moduleId,
       moduleTitle: input.moduleTitle ?? codingProfile.title,
       moduleType: "coding",
+      // The problem statement is the challenge author's wording, so it stays out of
+      // the scored text; only the submission and its execution result are candidate work.
       responseText: [
-        `Problem: ${input.problem}`,
         `Language: ${input.language}`,
         `Source code: ${input.sourceCode}`,
         input.executionResult ? `Execution result: ${input.executionResult}` : "Execution result: not provided",
       ].join("\n\n"),
+      questionContext: [`Problem: ${input.problem}`],
       rubric: input.rubric?.length ? input.rubric : codingProfile.rubric,
       weight: input.weight,
     };
@@ -128,7 +130,12 @@ export class AiService {
     if (!this.provider?.evaluateCodeSubmission) return this.evaluateResponse(fallbackInput);
 
     try {
-      return mergeEvaluation(fallback, await this.provider.evaluateCodeSubmission(input), fallbackInput.objectiveScore);
+      return mergeEvaluation(
+        fallback,
+        await this.provider.evaluateCodeSubmission(input),
+        fallbackInput.objectiveScore,
+        fallbackInput.responseText,
+      );
     } catch {
       return {
         ...fallback,
@@ -151,8 +158,32 @@ function withModuleDefaults(input: EvaluateResponseInput): EvaluateResponseInput
   };
 }
 
-function mergeEvaluation(fallback: EvaluationResultDto, providerResult: Partial<EvaluationResultDto>, objectiveScore?: number): EvaluationResultDto {
+/**
+ * The provider is told never to quote questionContext as evidence, but a prompt is
+ * a request, not a guarantee. An evidence quote is shown to a reviewer as the
+ * candidate's own words, so anything that is not actually in the candidate's text
+ * is dropped here rather than trusted. Whitespace is normalised because a model
+ * reflows what it quotes; matching is otherwise strict.
+ */
+function quotesFromCandidateText(quotes: string[], responseText: string): string[] {
+  const haystack = responseText.replace(/\s+/g, " ").toLowerCase();
+  if (!haystack) return [];
+  return quotes.filter((quote) => {
+    const needle = quote.replace(/\s+/g, " ").trim().toLowerCase();
+    return needle.length > 0 && haystack.includes(needle);
+  });
+}
+
+function mergeEvaluation(
+  fallback: EvaluationResultDto,
+  providerResult: Partial<EvaluationResultDto>,
+  objectiveScore?: number,
+  candidateText?: string,
+): EvaluationResultDto {
   const score = objectiveScore === undefined ? normalizeScore(providerResult.score, fallback.score) : normalizeScore(objectiveScore, fallback.score);
+  const providerEvidence = candidateText === undefined
+    ? providerResult.evidence
+    : quotesFromCandidateText(providerResult.evidence ?? [], candidateText);
   return {
     ...fallback,
     score,
@@ -160,7 +191,7 @@ function mergeEvaluation(fallback: EvaluationResultDto, providerResult: Partial<
     feedback: nonEmpty(providerResult.feedback, fallback.feedback),
     strengths: score > 0 ? nonEmptyArray(providerResult.strengths, fallback.strengths) : [],
     improvementAreas: nonEmptyArray(providerResult.improvementAreas, fallback.improvementAreas),
-    evidence: nonEmptyArray(providerResult.evidence, fallback.evidence),
+    evidence: nonEmptyArray(providerEvidence, fallback.evidence),
     advisoryNotice: RESPONSE_ADVISORY_NOTICE,
   };
 }

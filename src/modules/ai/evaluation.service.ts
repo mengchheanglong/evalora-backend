@@ -74,7 +74,14 @@ export interface EvaluateResponseInput {
   moduleId?: string;
   moduleTitle?: string;
   moduleType: ModuleType;
+  /** ONLY the candidate's own words. Question, interviewer, and problem wording
+   *  must never be concatenated in here — a leading question would otherwise be
+   *  scored as if the candidate had said it. Put that wording in questionContext. */
   responseText: string;
+  /** The question / interviewer / problem wording the candidate was replying to.
+   *  Carried alongside the answer so a reader (human or model) keeps the context,
+   *  but it is never scored and never quoted back as candidate evidence. */
+  questionContext?: string[];
   rubric?: string[];
   weight?: number;
   objectiveScore?: number;
@@ -121,8 +128,9 @@ export function getModuleEvaluationProfile(moduleType: ModuleType): ModuleEvalua
 
 export function evaluateResponse(input: EvaluateResponseInput): EvaluationResultDto {
   const moduleTitle = input.moduleTitle ?? titleForModule(input.moduleType);
-  const response = input.responseText.trim();
-  const candidateResponse = candidateEvidenceText(response);
+  // questionContext is deliberately never read here: scoring, strengths, gaps, and
+  // evidence quotes must all come from the candidate's own words only.
+  const candidateResponse = input.responseText.trim();
   const rubric = input.rubric?.length ? input.rubric : defaultRubricFor(input.moduleType);
   const score = input.objectiveScore === undefined
     ? scoreResponse(candidateResponse, rubric)
@@ -195,15 +203,6 @@ function scoreResponse(response: string, rubric: string[]): number {
   if (quality < 0.45) return 2.5;
   if (quality < 0.75) return 4;
   return 5;
-}
-
-function candidateEvidenceText(response: string): string {
-  if (!/(^|\n)Question:\s*/m.test(response)) return response;
-  return response
-    .split(/\n\n(?=Question:\s*)/)
-    .map((block) => block.match(/(?:^|\n)Answer:\s*([\s\S]*?)(?=\nStructured response:|$)/)?.[1]?.trim() ?? "")
-    .filter(Boolean)
-    .join("\n\n");
 }
 
 function meaningfulTerms(criterion: string): string[] {

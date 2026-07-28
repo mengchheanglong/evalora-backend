@@ -10,7 +10,7 @@ import {
 } from "@nestjs/websockets";
 import type { Server, Socket } from "socket.io";
 import { PrismaService } from "../../prisma/prisma.service";
-import { tryExtractAuthUserFromHeader } from "../auth/auth.guard";
+import { TOKEN_PURPOSES, tryExtractAuthUserFromToken } from "../auth/auth.guard";
 import {
   INTERVIEW_EVENTS,
   type InterviewParticipant,
@@ -39,6 +39,55 @@ function roomName(sessionId: string) {
   return `session:${sessionId}`;
 }
 
+/** Loopback and RFC1918 ranges — the addresses a LAN demo is served from. */
+const PRIVATE_HOSTNAME_PATTERN =
+  /^(?:localhost|\[?::1\]?|127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})$/i;
+
+function configuredOrigins(): string[] {
+  return (process.env.FRONTEND_URL ?? "")
+    .split(",")
+    .map((value) => value.trim().replace(/\/$/, "").toLowerCase())
+    .filter(Boolean);
+}
+
+function isPrivateNetworkOrigin(origin: string): boolean {
+  try {
+    return PRIVATE_HOSTNAME_PATTERN.test(new URL(origin).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Decides per handshake which browser origins may open a socket.
+ *
+ * Exported so it can be unit tested, and called at connection time rather than
+ * read into the decorator: decorator arguments are evaluated when this module is
+ * imported, which is before ConfigModule has loaded .env — FRONTEND_URL was
+ * always empty there, so the allow-list silently degraded to "any origin".
+ */
+export function isAllowedRealtimeOrigin(requestOrigin: string | undefined, allowList = configuredOrigins()): boolean {
+  // Non-browser clients (mobile shell, CLI, server-to-server) send no Origin
+  // header. There is no ambient cookie for them to abuse, and the handshake
+  // credential still has to check out.
+  if (!requestOrigin) return true;
+
+  // Nothing configured: keep the same explicit fallback main.ts documents —
+  // accept any origin, but never with credentials (see `credentials: false`
+  // below), so a misconfigured deployment cannot leak an authenticated response.
+  if (!allowList.length) return true;
+
+  const normalized = requestOrigin.trim().replace(/\/$/, "").toLowerCase();
+  if (allowList.includes(normalized)) return true;
+
+  // The product is demoed over the LAN: the candidate opens the app on a phone
+  // at http://<host-lan-ip>:3010, an origin that can never appear in
+  // FRONTEND_URL. Private-network origins stay allowed so that making the
+  // allow-list effective does not break the demo it was written for; public
+  // origins are now genuinely rejected, which is the point of the list.
+  return isPrivateNetworkOrigin(normalized);
+}
+
 /**
  * Real-time interview transport.
  *
@@ -53,10 +102,30 @@ function roomName(sessionId: string) {
 @WebSocketGateway({
   namespace: "/interview",
   cors: {
-    origin: (process.env.FRONTEND_URL ?? "").split(",").map((value) => value.trim()).filter(Boolean).length
-      ? (process.env.FRONTEND_URL ?? "").split(",").map((value) => value.trim()).filter(Boolean)
-      : true,
+    origin: (requestOrigin: string | undefined, callback: (error: Error | null, allowed?: boolean) => void) =>
+      callback(null, isAllowedRealtimeOrigin(requestOrigin)),
     credentials: false,
+  },
+  /**
+   * `cors` only writes response headers, and a browser never applies CORS to a
+   * WebSocket upgrade — so the allow-list above governs polling alone and a page
+   * on any origin could still open a socket. allowRequest runs on the handshake
+   * itself, for both transports, and is the only place an origin can actually be
+   * refused. This is defence in depth: the credential (ticket or access code)
+   * remains the real gate, because a non-browser client sends any Origin it likes.
+   */
+  allowRequest: (
+    request: { headers?: Record<string, string | string[] | undefined> },
+    callback: (message: string | null, allowed: boolean) => void,
+  ) => {
+    const header = request.headers?.origin;
+    const requestOrigin = Array.isArray(header) ? header[0] : header;
+    // Same-origin and non-browser clients send no Origin at all. The credential
+    // check still applies to them, so refusing here would only break scripts.
+    if (!requestOrigin) return callback(null, true);
+    return isAllowedRealtimeOrigin(requestOrigin)
+      ? callback(null, true)
+      : callback("origin_not_allowed", false);
   },
 })
 export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -95,10 +164,22 @@ export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnec
 
       // Workspace user (interviewer/owner/admin). Browsers keep the session JWT
       // in an httpOnly cookie, so they present a short-lived `ticket` from
-      // POST /auth/realtime-ticket instead; `token` supports non-browser clients.
-      const credential = auth.ticket ?? auth.token;
+      // POST /auth/realtime-ticket instead; `token` supports non-browser clients
+      // that hold the session JWT directly (scripts, integration tests).
+      //
+      // Each credential is verified against the purpose it was issued for. A
+      // ticket is accepted only here, never by REST — that asymmetry is the
+      // whole point, since the ticket is readable by page scripts. `token` keeps
+      // accepting a session JWT: a caller that already holds the session can do
+      // strictly more over REST than over this socket, so refusing it would cost
+      // non-browser clients an entry point while removing no privilege.
+      const credential = auth.ticket
+        ? { value: auth.ticket, purpose: TOKEN_PURPOSES.realtimeTicket }
+        : auth.token
+          ? { value: auth.token, purpose: TOKEN_PURPOSES.session }
+          : null;
       if (credential) {
-        const user = tryExtractAuthUserFromHeader(`Bearer ${credential}`);
+        const user = tryExtractAuthUserFromToken(credential.value, credential.purpose);
         if (!user) return this.reject(client, "Your session expired. Sign in again.");
         sockets.set(client, { role: "interviewer", userId: user.id, name: auth.name?.slice(0, 80) || user.email, rooms: new Set() });
         return;

@@ -631,6 +631,206 @@ test("listSessions and getSession map Prisma rows to API DTOs", async () => {
   assert.equal(session?.templateTitle, "Backend Engineer Assessment");
 });
 
+// The wire name is asserted as a literal on purpose: it is a published contract
+// the frontend listens for, so renaming the backend constant must fail here.
+const SESSION_UPDATED = "session.updated";
+
+/**
+ * Fake live channel. `order` interleaves writes and emissions so a test can prove
+ * the broadcast happened AFTER the row was committed, never before.
+ */
+function createEventRecorder() {
+  const events: Array<{ sessionId: string; event: string; payload: any }> = [];
+  const order: string[] = [];
+  return {
+    events,
+    order,
+    publisher: {
+      emitToSession(sessionId: string, event: string, payload: unknown) {
+        order.push("emit");
+        events.push({ sessionId, event, payload: payload as any });
+      },
+    },
+  };
+}
+
+test("staff start and complete broadcast session.updated once each, after the write", async () => {
+  const recorder = createEventRecorder();
+  const service = new SessionsService(
+    {
+      interviewSession: {
+        update: async (args: any) => {
+          recorder.order.push("write");
+          return {
+            ...sessionRow,
+            status: args.data.status,
+            startedAt: now,
+            completedAt: args.data.completedAt ?? null,
+          };
+        },
+      },
+    } as any,
+    { generateAccessCode: () => "EV-123456", now: () => now, events: recorder.publisher },
+  );
+
+  await service.startSession("session-1");
+  await service.completeSession("session-1");
+
+  assert.deepEqual(recorder.order, ["write", "emit", "write", "emit"], "every broadcast follows its committed write");
+  assert.deepEqual(recorder.events, [
+    {
+      sessionId: "session-1",
+      event: SESSION_UPDATED,
+      payload: { sessionId: "session-1", status: "IN_PROGRESS", startedAt: now.toISOString(), completedAt: undefined },
+    },
+    {
+      sessionId: "session-1",
+      event: SESSION_UPDATED,
+      payload: { sessionId: "session-1", status: "COMPLETED", startedAt: now.toISOString(), completedAt: now.toISOString() },
+    },
+  ]);
+});
+
+test("candidate start, submit, and timeout each broadcast session.updated", async () => {
+  const recorder = createEventRecorder();
+  const startedAt = new Date(now.getTime() - 60 * 60_000); // 60 min ago; 30 min limit elapsed
+  let currentStatus = "NOT_STARTED";
+  const service = new SessionsService(
+    {
+      interviewSession: {
+        findFirst: async () => ({ ...sessionRow, status: currentStatus, startedAt, template: timedTemplate }),
+        update: async (args: any) => {
+          recorder.order.push("write");
+          currentStatus = args.data.status;
+          return {
+            ...sessionRow,
+            status: currentStatus,
+            startedAt,
+            completedAt: args.data.completedAt ?? null,
+            template: timedTemplate,
+          };
+        },
+      },
+    } as any,
+    { generateAccessCode: () => "EV-123456", now: () => now, events: recorder.publisher },
+  );
+
+  await service.startSessionByAccessCode("EV-123456");
+  await service.completeSessionByAccessCode("EV-123456");
+  currentStatus = "IN_PROGRESS"; // the candidate's countdown fires on a session still open
+  await service.expireSessionByAccessCode("EV-123456");
+
+  assert.deepEqual(recorder.order, ["write", "emit", "write", "emit", "write", "emit"]);
+  assert.deepEqual(
+    recorder.events.map((entry) => [entry.event, entry.payload.status]),
+    [
+      [SESSION_UPDATED, "IN_PROGRESS"],
+      [SESSION_UPDATED, "COMPLETED"],
+      [SESSION_UPDATED, "EXPIRED"],
+    ],
+  );
+  assert.equal(recorder.events[2].payload.sessionId, "session-1");
+  assert.equal(recorder.events[1].payload.completedAt, now.toISOString());
+});
+
+test("lazy auto-expiry broadcasts session.updated only for the sessions it flipped", async () => {
+  const recorder = createEventRecorder();
+  const startedAt = new Date(now.getTime() - 60 * 60_000);
+  const service = new SessionsService(
+    {
+      interviewSession: {
+        findMany: async () => [
+          { ...sessionRow, id: "timed-out", status: "IN_PROGRESS", startedAt, template: { title: "T", roleType: "R", timeLimitMin: 30 } },
+          { ...sessionRow, id: "still-going", status: "IN_PROGRESS", startedAt: now, template: { title: "T", roleType: "R", timeLimitMin: 30 } },
+        ],
+        updateMany: async () => {
+          recorder.order.push("write");
+          return { count: 1 };
+        },
+      },
+    } as any,
+    { generateAccessCode: () => "EV-123456", now: () => now, events: recorder.publisher },
+  );
+
+  await service.listSessions();
+
+  assert.deepEqual(recorder.order, ["write", "emit"]);
+  assert.equal(recorder.events.length, 1, "a session still within its limit is not announced as expired");
+  assert.deepEqual(recorder.events[0], {
+    sessionId: "timed-out",
+    event: SESSION_UPDATED,
+    payload: { sessionId: "timed-out", status: "EXPIRED", startedAt: startedAt.toISOString(), completedAt: undefined },
+  });
+});
+
+test("lazy auto-expiry stays silent when the guarded write flipped nothing", async () => {
+  const recorder = createEventRecorder();
+  const service = new SessionsService(
+    {
+      interviewSession: {
+        findMany: async () => [
+          { ...sessionRow, id: "timed-out", status: "IN_PROGRESS", startedAt: new Date(now.getTime() - 60 * 60_000), template: { title: "T", roleType: "R", timeLimitMin: 30 } },
+        ],
+        // A concurrent completion already took the row out of IN_PROGRESS.
+        updateMany: async () => ({ count: 0 }),
+      },
+    } as any,
+    { generateAccessCode: () => "EV-123456", now: () => now, events: recorder.publisher },
+  );
+
+  await service.listSessions();
+
+  assert.equal(recorder.events.length, 0);
+});
+
+test("a no-op transition writes nothing and broadcasts nothing", async () => {
+  const recorder = createEventRecorder();
+  const service = new SessionsService(
+    {
+      interviewSession: {
+        findFirst: async () => ({ ...sessionRow, status: "COMPLETED", startedAt: now, completedAt: now }),
+        update: async () => {
+          throw new Error("an already-completed session must not be written again");
+        },
+      },
+    } as any,
+    { generateAccessCode: () => "EV-123456", now: () => now, events: recorder.publisher },
+  );
+
+  const completed = await service.completeSession("session-1", interviewerAccess);
+
+  assert.equal(completed.status, "completed");
+  assert.equal(recorder.events.length, 0, "no write means nothing to announce");
+});
+
+test("a failing live channel never fails a committed session write", async () => {
+  let written = false;
+  const service = new SessionsService(
+    {
+      interviewSession: {
+        update: async (args: any) => {
+          written = true;
+          return { ...sessionRow, status: args.data.status, startedAt: now, completedAt: now };
+        },
+      },
+    } as any,
+    {
+      generateAccessCode: () => "EV-123456",
+      now: () => now,
+      events: {
+        emitToSession() {
+          throw new Error("the socket server is down");
+        },
+      },
+    },
+  );
+
+  const completed = await service.completeSession("session-1");
+
+  assert.equal(written, true);
+  assert.equal(completed.status, "completed", "the candidate's submission still succeeds");
+});
+
 test("session creation rejects a template outside the authenticated organization", async () => {
   let created = false;
   const service = new SessionsService({

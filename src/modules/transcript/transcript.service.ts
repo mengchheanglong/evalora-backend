@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { splitEmbeddedFollowUp } from "../../common/embedded-follow-up";
 import { DEFAULT_LIST_LIMIT } from "../../common/query.constants";
 import { buildSessionOwnershipWhere, forbiddenResourceError, mergeWhere, type AccessContext } from "../auth/access-control";
 import {
@@ -267,6 +268,9 @@ function buildAdaptiveEntries(
   // one per question yields the answer they actually left behind; replaying the
   // superseded drafts would repeat the same question at a reviewer several times.
   const unpairedByQuestion = new Map<string, TranscriptAiMessageRow>();
+  // An answer naming no question cannot be collapsed with any other, and is held
+  // apart rather than given a synthetic key a real question could collide with.
+  const unlabelledAnswers: TranscriptAiMessageRow[] = [];
   for (const message of messages) {
     if (message.role === "assistant") continue;
     const questionText = metadataString(message.metadata, "question");
@@ -277,12 +281,10 @@ function buildAdaptiveEntries(
     // The answer names a template question, so the template entry already carries
     // it. Anything else is kept rather than dropped: losing a candidate's words is
     // worse than showing one under a vague heading.
-    if (!questionText || !savedTemplateQuestions.has(questionText)) {
-      // An answer with no question named cannot be collapsed with any other.
-      unpairedByQuestion.set(questionText ?? ` unlabelled:${message.id}`, message);
-    }
+    if (!questionText) unlabelledAnswers.push(message);
+    else if (!savedTemplateQuestions.has(questionText)) unpairedByQuestion.set(questionText, message);
   }
-  const unpairedAnswers = [...unpairedByQuestion.values()];
+  const unpairedAnswers = [...unpairedByQuestion.values(), ...unlabelledAnswers];
 
   const embeddedByQuestion = new Map<string, EmbeddedFollowUp>();
   for (const followUp of embeddedFollowUps) {
@@ -389,6 +391,8 @@ function buildAdaptiveEntries(
   // replaying the snapshots would show a reviewer the same question many times
   // with visibly half-typed answers.
   const latestAdaptiveByQuestion = new Map<string, TranscriptResponseRow>();
+  // Held apart rather than keyed by a synthetic string a real question could equal.
+  const unlabelledAdaptive: TranscriptResponseRow[] = [];
   for (const response of adaptiveResponses) {
     if (consumedResponseIds.has(response.id)) continue;
     const questionText = metadataString(response.responseJson, "question");
@@ -396,12 +400,16 @@ function buildAdaptiveEntries(
     // Only one of that question's several saved rows is reachable as the "scored"
     // row, so the rest arrive here and would each repeat an answer already shown.
     if (questionText && pairedQuestions.has(questionText)) continue;
-    // A row naming no question cannot be collapsed with any other.
-    latestAdaptiveByQuestion.set(questionText ?? ` unlabelled:${response.id}`, response);
+    if (!questionText) unlabelledAdaptive.push(response);
+    else latestAdaptiveByQuestion.set(questionText, response);
   }
 
-  for (const [key, response] of latestAdaptiveByQuestion) {
-    const questionText = key.startsWith(" unlabelled:") ? undefined : key;
+  const adaptiveLeftovers: Array<[string | undefined, TranscriptResponseRow]> = [
+    ...latestAdaptiveByQuestion.entries(),
+    ...unlabelledAdaptive.map((response) => [undefined, response] as [undefined, TranscriptResponseRow]),
+  ];
+
+  for (const [questionText, response] of adaptiveLeftovers) {
     drafts.push({
       ...moduleFields(context.aiModule),
       id: response.id,
@@ -579,10 +587,6 @@ function toModuleRef(module: { id: string; title: string; moduleType: string }):
   return { id: module.id, title: module.title, moduleType: module.moduleType.toLowerCase() };
 }
 
-/** The candidate app appends the AI follow-up to the template answer's own column. */
-const AI_FOLLOW_UP_MARKER = "\n\nAI follow-up: ";
-const FOLLOW_UP_ANSWER_MARKER = "\nFollow-up response: ";
-
 /** An AI follow-up recovered from the parent response it was stored inside. */
 interface EmbeddedFollowUp {
   responseId: string;
@@ -613,38 +617,9 @@ function collectEmbeddedFollowUps(responses: TranscriptResponseRow[]): EmbeddedF
   return followUps;
 }
 
-/**
- * Separates a stored answer from the AI follow-up glued onto it. A reviewer must
- * never read an AI-authored question as something the candidate wrote, and this
- * is the only place that can prevent it: rewriting the stored column would move
- * every existing report's score. The markers can be absent, repeated, or typed by
- * the candidate, so only the exact shape the app writes is split; anything else
- * is ambiguous and stays with the answer, where no text can be lost.
- */
-function splitEmbeddedFollowUp(responseText: string): {
-  answerText?: string;
-  followUp?: { questionText: string; answerText?: string };
-} {
-  const start = responseText.indexOf(AI_FOLLOW_UP_MARKER);
-  // A second marker cannot be told apart from a candidate quoting the first.
-  if (start === -1 || responseText.includes(AI_FOLLOW_UP_MARKER, start + 1)) {
-    return { answerText: optionalString(responseText) };
-  }
+// splitEmbeddedFollowUp now lives in common/embedded-follow-up so the report
+// scorer and this transcript read the stored format through one parser.
 
-  const remainder = responseText.slice(start + AI_FOLLOW_UP_MARKER.length);
-  const split = remainder.indexOf(FOLLOW_UP_ANSWER_MARKER);
-  if (split === -1) return { answerText: optionalString(responseText) };
-
-  const questionText = optionalString(remainder.slice(0, split));
-  const answerText = optionalString(remainder.slice(split + FOLLOW_UP_ANSWER_MARKER.length));
-  // An unanswered follow-up still has to come out: the candidate app writes the
-  // marker block as soon as the question appears, so leaving it in place would
-  // render an AI-authored question as the candidate's own words — the exact
-  // confusion this split exists to prevent. Only a missing question is ambiguous.
-  if (!questionText) return { answerText: optionalString(responseText) };
-
-  return { answerText: optionalString(responseText.slice(0, start)), followUp: { questionText, answerText } };
-}
 
 /** Adaptive answers are stored as `AI interview - <question>\n\nResponse: <answer>`. */
 function adaptiveAnswerText(responseText: string): string | undefined {

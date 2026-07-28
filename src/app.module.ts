@@ -95,8 +95,9 @@ import { PrismaModule } from "./prisma/prisma.module";
     },
     {
       provide: SessionsService,
-      useFactory: (prisma: PrismaService, email: EmailService) => new SessionsService(prisma, { emailService: email }),
-      inject: [PrismaService, EmailService],
+      useFactory: (prisma: PrismaService, email: EmailService, gateway: InterviewGateway) =>
+        new SessionsService(prisma, { emailService: email, events: gateway }),
+      inject: [PrismaService, EmailService, InterviewGateway],
     },
     {
       provide: ResponsesService,

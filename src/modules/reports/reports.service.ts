@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
+import { splitEmbeddedFollowUp } from "../../common/embedded-follow-up";
 import type { JsonValue, ModuleType } from "../../domain/evalora.types";
 import type { AiService } from "../ai/ai.service";
 import { evaluateResponse, generateCandidateReport, type EvaluateResponseInput, type EvaluationResultDto, type GeneratedCandidateReport } from "../ai/evaluation.service";
@@ -106,6 +107,16 @@ interface GroupedResponseEntry {
 interface GroupedModuleResponses {
   module: EvaluationModuleRow;
   entries: GroupedResponseEntry[];
+}
+
+/**
+ * The two halves of a module's material, kept apart all the way to the scorer:
+ * `responseText` is only what the candidate wrote, `questionContext` is the
+ * question / interviewer / challenge wording they were replying to.
+ */
+interface ModuleEvidence {
+  responseText: string;
+  questionContext: string[];
 }
 
 export type ReportPersistenceResult =
@@ -369,11 +380,13 @@ export class ReportsService {
     for (const module of templateModules) {
       const moduleId = optionalString(module.id);
       const group = moduleId ? groups.get(moduleId) : undefined;
+      const evidence = group ? buildModuleEvidence(group.entries) : emptyEvidence();
       inputs.push({
         moduleId,
         moduleTitle: optionalString(module.title),
         moduleType: fromPrismaModuleType(module.moduleType),
-        responseText: group ? buildModuleResponseText(group.entries) : "",
+        responseText: evidence.responseText,
+        questionContext: evidence.questionContext,
         rubric: group ? unique(group.entries.flatMap((entry) => stringArray(entry.question.rubric))) : [],
         weight: numberValue(module.weight, 1),
       });
@@ -383,11 +396,13 @@ export class ReportsService {
     // only through Response.question.module.
     for (const [key, group] of groups) {
       if (inputs.some((input) => input.moduleId === key)) continue;
+      const evidence = buildModuleEvidence(group.entries);
       inputs.push({
         moduleId: optionalString(group.module.id),
         moduleTitle: optionalString(group.module.title),
         moduleType: fromPrismaModuleType(group.module.moduleType),
-        responseText: buildModuleResponseText(group.entries),
+        responseText: evidence.responseText,
+        questionContext: evidence.questionContext,
         rubric: unique(group.entries.flatMap((entry) => stringArray(entry.question.rubric))),
         weight: numberValue(group.module.weight, 1),
       });
@@ -398,8 +413,8 @@ export class ReportsService {
     // so groupResponsesByModule skips them. Fold them into the AI_INTERVIEW
     // module — mirroring the coding-submission handling below — so the interview
     // the candidate actually completed contributes to its score and evidence.
-    const adaptiveText = buildAdaptiveInterviewText(session.responses ?? []);
-    if (adaptiveText) {
+    const adaptiveEvidence = buildAdaptiveInterviewEvidence(session.responses ?? []);
+    if (adaptiveEvidence.responseText) {
       const aiModule = session.template?.modules?.find(
         (module) => fromPrismaModuleType(module.moduleType) === "ai_interview",
       );
@@ -407,13 +422,14 @@ export class ReportsService {
         const aiModuleId = optionalString(aiModule.id);
         const existing = findModuleInput(inputs, aiModule);
         if (existing) {
-          existing.responseText = [existing.responseText, adaptiveText].filter(Boolean).join("\n\n");
+          mergeEvidence(existing, adaptiveEvidence);
         } else {
           inputs.push({
             moduleId: aiModuleId,
             moduleTitle: optionalString(aiModule.title) ?? "AI Interview",
             moduleType: "ai_interview",
-            responseText: adaptiveText,
+            responseText: adaptiveEvidence.responseText,
+            questionContext: adaptiveEvidence.questionContext,
             rubric: [],
             weight: numberValue(aiModule.weight, 1),
           });
@@ -426,18 +442,21 @@ export class ReportsService {
     // score formula is unchanged; only that module's evidence grows.
     const followUpsByModule = groupFollowUpsByModule(session.interviewerFollowUps ?? [], session.responses ?? []);
     for (const [moduleId, followUps] of followUpsByModule) {
-      const text = buildInterviewerFollowUpText(followUps);
-      if (!text) continue;
+      const evidence = buildInterviewerFollowUpEvidence(followUps);
+      // An interviewer question with no candidate answer contributes nothing at
+      // all — not even context — so asking questions can never move a score.
+      if (!evidence.responseText) continue;
       const module = templateModules.find((candidate) => optionalString(candidate.id) === moduleId);
       const existing = inputs.find((input) => input.moduleId === moduleId);
       if (existing) {
-        existing.responseText = [existing.responseText, text].filter(Boolean).join("\n\n");
+        mergeEvidence(existing, evidence);
       } else if (module) {
         inputs.push({
           moduleId,
           moduleTitle: optionalString(module.title),
           moduleType: fromPrismaModuleType(module.moduleType),
-          responseText: text,
+          responseText: evidence.responseText,
+          questionContext: evidence.questionContext,
           rubric: [],
           weight: numberValue(module.weight, 1),
         });
@@ -448,18 +467,19 @@ export class ReportsService {
       (module) => fromPrismaModuleType(module.moduleType) === "coding",
     );
     if (codingModule && session.codeSubmissions?.length) {
-      const codeText = buildCodeSubmissionText(session.codeSubmissions);
+      const codeEvidence = buildCodeSubmissionEvidence(session.codeSubmissions);
       const objectiveScore = objectiveCodeScore(session.codeSubmissions);
       const existing = findModuleInput(inputs, codingModule);
       if (existing) {
-        existing.responseText = [existing.responseText, codeText].filter(Boolean).join("\n\n");
+        mergeEvidence(existing, codeEvidence);
         existing.objectiveScore = objectiveScore;
       } else {
         inputs.push({
           moduleId: optionalString(codingModule.id),
           moduleTitle: optionalString(codingModule.title) ?? "Coding Assessment",
           moduleType: "coding",
-          responseText: codeText,
+          responseText: codeEvidence.responseText,
+          questionContext: codeEvidence.questionContext,
           rubric: ["correctness", "execution evidence", "code clarity", "validation", "problem solving"],
           weight: numberValue(codingModule.weight, 1),
           objectiveScore,
@@ -550,15 +570,55 @@ function findModuleInput(inputs: EvaluateResponseInput[], module: EvaluationModu
   return inputs.find((input) => input.moduleTitle === moduleTitle && input.moduleType === fromPrismaModuleType(module.moduleType));
 }
 
-/** Concatenates the candidate's adaptive AI-interview answers (responses stored
- *  without a linked question, tagged `responseJson.adaptive: true`). The stored
- *  responseText already embeds the AI-generated question and the answer. */
-function buildAdaptiveInterviewText(responses: EvaluationResponseRow[]): string {
-  return responses
-    .filter((response) => !response.question && isAdaptiveResponse(response))
-    .map((response) => optionalString(response.responseText))
-    .filter((text): text is string => Boolean(text))
-    .join("\n\n");
+function emptyEvidence(): ModuleEvidence {
+  return { responseText: "", questionContext: [] };
+}
+
+/** Folds extra material into a module input while keeping the candidate's words
+ *  and the question wording in their own fields. */
+function mergeEvidence(target: EvaluateResponseInput, evidence: ModuleEvidence): void {
+  target.responseText = [target.responseText, evidence.responseText].filter(Boolean).join("\n\n");
+  target.questionContext = [...(target.questionContext ?? []), ...evidence.questionContext];
+}
+
+/**
+ * Collects the candidate's adaptive AI-interview answers (responses stored without
+ * a linked question, tagged `responseJson.adaptive: true`). The stored responseText
+ * embeds the AI-generated question above the answer, so the question is split back
+ * out here — it is context and must never reach the scored text.
+ */
+function buildAdaptiveInterviewEvidence(responses: EvaluationResponseRow[]): ModuleEvidence {
+  const answers: string[] = [];
+  const questionContext: string[] = [];
+
+  for (const response of responses) {
+    if (response.question || !isAdaptiveResponse(response)) continue;
+    const answer = adaptiveAnswerText(response);
+    if (!answer) continue;
+    answers.push(answer);
+    const question = adaptiveQuestionText(response);
+    if (question) questionContext.push(`AI interview question: ${question}`);
+  }
+
+  return { responseText: answers.join("\n\n"), questionContext };
+}
+
+/** The candidate's own words from an adaptive response, with the AI question stripped. */
+function adaptiveAnswerText(response: EvaluationResponseRow): string | undefined {
+  const stored = optionalString(response.responseText);
+  if (!stored) return undefined;
+  const answer = stored.match(/(?:^|\n)Response:\s*([\s\S]*)$/)?.[1];
+  if (answer?.trim()) return answer.trim();
+  // Rows saved before the question was split out lead with a single "AI interview - <question>"
+  // heading; dropping it is safer than scoring the question as the candidate's answer.
+  return optionalString(stored.replace(/^AI interview\s*[-–—][^\n]*\n+/, ""));
+}
+
+function adaptiveQuestionText(response: EvaluationResponseRow): string | undefined {
+  const json = response.responseJson;
+  const stored = typeof json === "object" && json !== null && !Array.isArray(json) ? optionalString((json as Record<string, unknown>).question) : undefined;
+  if (stored) return stored;
+  return optionalString(response.responseText)?.match(/^AI interview\s*[-–—]\s*([^\n]*)/)?.[1]?.trim();
 }
 
 function isAdaptiveResponse(response: EvaluationResponseRow): boolean {
@@ -595,48 +655,72 @@ function groupFollowUpsByModule(
 }
 
 /**
- * The interviewer's question is labelled as context; only the candidate's answer
- * is presented as evidence, so a follow-up existing can never by itself earn points.
+ * A leading follow-up ("Would you have used a consistent-hash ring here?") puts the
+ * interviewer's vocabulary in play, so the question is carried as context only and
+ * the candidate's answer alone becomes the scored text.
  */
-function buildInterviewerFollowUpText(followUps: EvaluationInterviewerFollowUpRow[]): string {
-  return followUps
-    .map((followUp) => {
-      const answer = optionalString(followUp.answerText);
-      if (!answer) return "";
-      const asker = optionalString(followUp.askedBy?.name);
-      const question = stringValue(followUp.questionText, "Interviewer follow-up");
-      return [
-        `Interviewer follow-up (context, not candidate evidence)${asker ? ` by ${asker}` : ""}: ${question}`,
-        `Candidate follow-up answer: ${answer}`,
-      ].join("\n");
-    })
-    .filter(Boolean)
-    .join("\n\n");
+function buildInterviewerFollowUpEvidence(followUps: EvaluationInterviewerFollowUpRow[]): ModuleEvidence {
+  const answers: string[] = [];
+  const questionContext: string[] = [];
+
+  for (const followUp of followUps) {
+    const answer = optionalString(followUp.answerText);
+    if (!answer) continue;
+    const asker = optionalString(followUp.askedBy?.name);
+    const question = stringValue(followUp.questionText, "Interviewer follow-up");
+    answers.push(answer);
+    questionContext.push(`Interviewer follow-up${asker ? ` by ${asker}` : ""}: ${question}`);
+  }
+
+  return { responseText: answers.join("\n\n"), questionContext };
 }
 
-function buildModuleResponseText(entries: GroupedResponseEntry[]): string {
-  return entries
-    .map((entry) => {
-      const lines = [`Question: ${stringValue(entry.question.questionText, "Untitled question")}`, `Answer: ${stringValue(entry.response.responseText, "")}`];
-      const structuredResponse = formatJson(entry.response.responseJson);
-      if (structuredResponse) lines.push(`Structured response: ${structuredResponse}`);
-      return lines.join("\n");
-    })
-    .join("\n\n");
+function buildModuleEvidence(entries: GroupedResponseEntry[]): ModuleEvidence {
+  const answers: string[] = [];
+  const questionContext: string[] = [];
+
+  for (const entry of entries) {
+    const questionText = stringValue(entry.question.questionText, "Untitled question");
+    // The stored column can carry an AI follow-up exchange appended to the
+    // candidate's answer. Its QUESTION is model-authored, so it belongs in the
+    // context alongside the template question, never in the scored text.
+    const { answerText, followUp } = splitEmbeddedFollowUp(stringValue(entry.response.responseText, ""));
+
+    const lines = [answerText ?? ""];
+    // The candidate's reply to the follow-up is still their own words.
+    if (followUp?.answerText) lines.push(followUp.answerText);
+    const structuredResponse = formatJson(entry.response.responseJson);
+    if (structuredResponse) lines.push(`Structured response: ${structuredResponse}`);
+
+    const answer = lines.filter(Boolean).join("\n");
+    // Context is pushed only alongside a kept answer so the two arrays stay in
+    // step; a reviewer pairing entry N of each must not read a mismatched pair.
+    if (!answer) continue;
+    answers.push(answer);
+    questionContext.push(
+      followUp
+        ? `Question: ${questionText}\nAI follow-up: ${followUp.questionText}`
+        : `Question: ${questionText}`,
+    );
+  }
+
+  return { responseText: answers.join("\n\n"), questionContext };
 }
 
-function buildCodeSubmissionText(submissions: EvaluationCodeSubmissionRow[]): string {
+function buildCodeSubmissionEvidence(submissions: EvaluationCodeSubmissionRow[]): ModuleEvidence {
   const latestByQuestion = new Map<string, EvaluationCodeSubmissionRow>();
   for (const submission of submissions) {
     latestByQuestion.set(stringValue(submission.questionId, "coding-question"), submission);
   }
 
-  return Array.from(latestByQuestion.values())
+  const questionContext: string[] = [];
+  const responseText = Array.from(latestByQuestion.values())
     .map((submission, index) => {
+      // The challenge identifier belongs to the assessment author, not the candidate.
+      questionContext.push(`Coding challenge ${index + 1}: ${stringValue(submission.questionId, "unknown")}`);
       const sourceCode = stringValue(submission.sourceCode, "").slice(0, 6_000);
       const diagnostics = [optionalString(submission.compileOutput), optionalString(submission.stderr)].filter(Boolean).join("\n");
       return [
-        `Coding challenge ${index + 1}: ${stringValue(submission.questionId, "unknown")}`,
         `Language: ${stringValue(submission.language, "unknown")}`,
         `Sandbox status: ${stringValue(submission.status, "unknown")}`,
         `Automated test score: ${numberValue(submission.score, 0)} out of 100`,
@@ -648,6 +732,8 @@ function buildCodeSubmissionText(submissions: EvaluationCodeSubmissionRow[]): st
         .join("\n");
     })
     .join("\n\n");
+
+  return { responseText, questionContext };
 }
 
 function objectiveCodeScore(submissions: EvaluationCodeSubmissionRow[]): number {

@@ -4,6 +4,7 @@ import { OAuth2Client } from "google-auth-library";
 import * as jwt from "jsonwebtoken";
 import { randomBytes } from "node:crypto";
 import type { UserRole } from "../../domain/evalora.types";
+import { TOKEN_PURPOSES } from "./auth.guard";
 import { assertPasswordPolicy, PASSWORD_MAX_LENGTH } from "./password-policy";
 
 type PrismaRole = "ADMIN" | "ORGANIZATION" | "INTERVIEWER" | "CANDIDATE";
@@ -146,11 +147,11 @@ export interface PasswordResetConfirmResult {
   message: string;
 }
 
-const PASSWORD_RESET_PURPOSE = "password_reset";
-export const REALTIME_TICKET_PURPOSE = "realtime";
+// Purposes live in auth.guard.ts because that is where they are enforced; a
+// token is only ever as safe as the check on the reading side.
+export const REALTIME_TICKET_PURPOSE = TOKEN_PURPOSES.realtimeTicket;
 const REALTIME_TICKET_TTL = "60s";
 const PASSWORD_RESET_TTL = "1h";
-const EMAIL_VERIFICATION_PURPOSE = "email_verification";
 const EMAIL_VERIFICATION_TTL = "15m";
 const EMAIL_VERIFICATION_RESEND_MESSAGE = "If this email still needs verification, a new link has been sent.";
 const PASSWORD_RESET_GENERIC_MESSAGE =
@@ -338,7 +339,7 @@ export class AuthService {
       throw new Error("This verification link is invalid or has expired.");
     }
 
-    if (payload.purpose !== EMAIL_VERIFICATION_PURPOSE || typeof payload.sub !== "string" || typeof payload.email !== "string") {
+    if (payload.purpose !== TOKEN_PURPOSES.emailVerification || typeof payload.sub !== "string" || typeof payload.email !== "string") {
       throw new Error("This verification link is invalid or has expired.");
     }
     if (!this.users.findById || !this.users.markEmailVerified) throw new Error("Email verification is unavailable.");
@@ -536,7 +537,7 @@ export class AuthService {
       throw new Error("This password reset link is invalid or has expired.");
     }
 
-    if (payload.purpose !== PASSWORD_RESET_PURPOSE || typeof payload.sub !== "string") {
+    if (payload.purpose !== TOKEN_PURPOSES.passwordReset || typeof payload.sub !== "string") {
       throw new Error("This password reset link is invalid or has expired.");
     }
 
@@ -591,7 +592,7 @@ export class AuthService {
       {
         sub: user.id,
         email: user.email,
-        purpose: EMAIL_VERIFICATION_PURPOSE,
+        purpose: TOKEN_PURPOSES.emailVerification,
         ph: passwordResetFingerprint(user.passwordHash),
       },
       this.jwtSecret,
@@ -602,7 +603,9 @@ export class AuthService {
   /**
    * Short-lived, purpose-scoped ticket for the WebSocket handshake. The session
    * JWT lives in an httpOnly cookie that browser JS cannot read, so the client
-   * exchanges its cookie for this ticket and presents it to the gateway.
+   * exchanges its cookie for this ticket and presents it to the gateway. The
+   * `purpose` claim is what keeps the exchange one-way: the REST guard refuses
+   * this ticket, so leaking it costs a socket connection, not the account.
    */
   issueRealtimeTicket(user: { id: string; email: string; role: string; organizationId?: string }): { ticket: string; expiresInSeconds: number } {
     const ticket = jwt.sign(
@@ -618,7 +621,7 @@ export class AuthService {
       {
         sub: user.id,
         email: user.email,
-        purpose: PASSWORD_RESET_PURPOSE,
+        purpose: TOKEN_PURPOSES.passwordReset,
         // Binds the token to the current password hash so it dies after a successful reset.
         ph: passwordResetFingerprint(user.passwordHash),
       },
@@ -636,6 +639,7 @@ export class AuthService {
           email: user.email,
           role: user.role,
           organizationId: user.organizationId,
+          purpose: TOKEN_PURPOSES.session,
         },
         this.jwtSecret,
         { expiresIn: remember ? "30d" : "1d" },

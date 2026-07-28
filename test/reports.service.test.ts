@@ -261,8 +261,15 @@ test("generateAndPersistReport evaluates saved responses by module and persists 
     aiInputs.map((input: any) => input.moduleId),
     ["module-ai", "module-debug"],
   );
-  assert.match((aiInputs[0] as any).responseText, /Question: How do you approach an unclear engineering task\?/);
-  assert.match((aiInputs[0] as any).responseText, /Question: How do you communicate a technical trade-off\?/);
+  // Question wording travels in questionContext; responseText is the candidate's words only.
+  assert.deepEqual((aiInputs[0] as any).questionContext, [
+    "Question: How do you approach an unclear engineering task?",
+    "Question: How do you communicate a technical trade-off?",
+  ]);
+  assert.match((aiInputs[0] as any).responseText, /I would clarify requirements, test edge cases, and measure impact\./);
+  assert.match((aiInputs[0] as any).responseText, /I would explain trade-offs and document the decision for the team\./);
+  assert.doesNotMatch((aiInputs[0] as any).responseText, /How do you approach an unclear engineering task/);
+  assert.doesNotMatch((aiInputs[0] as any).responseText, /How do you communicate a technical trade-off/);
   assert.deepEqual((aiInputs[0] as any).rubric, ["clarity", "testing", "professionalism"]);
   assert.deepEqual(calls[0], {
     action: "interviewSession.findFirst",
@@ -400,9 +407,16 @@ test("generateAndPersistReport folds adaptive AI-interview answers (no linked qu
   assert.equal(aiInputs[0].moduleId, "module-ai");
   assert.equal(aiInputs[0].moduleType, "ai_interview");
   assert.equal(aiInputs[0].weight, 1.5);
-  // ...carrying BOTH adaptive answers as evidence.
-  assert.match(aiInputs[0].responseText, /hard trade-off/i);
-  assert.match(aiInputs[0].responseText, /How did the team react/i);
+  // ...carrying BOTH adaptive answers as evidence, with the AI-generated questions
+  // split back out into context so they are never scored as the candidate's words.
+  assert.match(aiInputs[0].responseText, /I weighed latency vs cost and documented it\./);
+  assert.match(aiInputs[0].responseText, /I aligned them with a short RFC and a demo\./);
+  assert.doesNotMatch(aiInputs[0].responseText, /hard trade-off/i);
+  assert.doesNotMatch(aiInputs[0].responseText, /How did the team react/i);
+  assert.deepEqual(aiInputs[0].questionContext, [
+    "AI interview question: Tell me about a hard trade-off.",
+    "AI interview question: How did the team react?",
+  ]);
   // ...and the report is actually persisted (previously skipped: "no candidate responses").
   assert.equal(result.persistence.status, "persisted");
   assert.equal(result.persistence.evaluationCount, 1);
@@ -523,7 +537,124 @@ test("an answered interviewer follow-up becomes evidence in its parent module wi
   assert.match(behavioral.responseText, /I rolled back the release/, "original answer is still evidence");
   assert.match(behavioral.responseText, /p95 latency doubles/, "follow-up answer is added as evidence");
   assert.match(behavioral.responseText, /on-call engineer/, "follow-up without moduleId resolves via its parent question");
-  assert.match(behavioral.responseText, /context, not candidate evidence/, "the interviewer question is labelled as context");
+  assert.deepEqual(
+    behavioral.questionContext,
+    [
+      "Question: Describe a rollout that went wrong.",
+      "Interviewer follow-up by Dana Interviewer: What signal would make you stop the rollout?",
+      "Interviewer follow-up by Dana Interviewer: Who did you tell first?",
+    ],
+    "interviewer wording is carried as context, structurally apart from the scored answer",
+  );
+  assert.doesNotMatch(behavioral.responseText, /What signal would make you stop the rollout/, "the interviewer's question is never part of the scored text");
+  assert.doesNotMatch(behavioral.responseText, /Who did you tell first/);
+});
+
+test("a leading interviewer follow-up question cannot change the candidate's score", async () => {
+  // Same candidate answers in both runs; only the interviewer's question wording differs.
+  const buildSession = (followUpQuestion: string) => ({
+    id: "session-leading",
+    organizationId: "org-1",
+    template: {
+      title: "SE Assessment",
+      modules: [{ id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1 }],
+    },
+    responses: [
+      {
+        id: "response-1",
+        responseText: "I rolled back the deployment and explained the failure to the team.",
+        question: {
+          id: "question-1",
+          questionText: "Describe a rollout that went wrong.",
+          rubric: ["ownership"],
+          module: { id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1 },
+        },
+      },
+    ],
+    interviewerFollowUps: [
+      {
+        moduleId: "module-1",
+        parentQuestionId: "question-1",
+        questionText: followUpQuestion,
+        answerText: "I told the on-call engineer first and then we tested the fix.",
+        askedBy: { name: "Dana Interviewer" },
+      },
+    ],
+    codeSubmissions: [],
+  });
+
+  // No AI provider, so the deterministic rubric scorer runs and the comparison is exact.
+  const service = new ReportsService();
+  const [neutral] = await (service as any).evaluateSessionResponses(buildSession("And then what happened?"));
+  const [leading] = await (service as any).evaluateSessionResponses(
+    buildSession(
+      "Would you say you took full ownership, measured the impact with a percent metric, tested the result on a consistent-hash ring, and explained the trade-off to the client team because the customer outcome mattered?",
+    ),
+  );
+
+  assert.equal(
+    leading.score,
+    neutral.score,
+    "a keyword-stuffed interviewer question must not inflate the candidate's score",
+  );
+  assert.deepEqual(leading.criteriaScores, neutral.criteriaScores);
+  assert.deepEqual(leading.evidence, neutral.evidence);
+  assert.ok(
+    leading.evidence.every((quote: string) => !quote.includes("consistent-hash")),
+    "an evidence quote must never be able to return interviewer question wording",
+  );
+});
+
+test("an AI follow-up question embedded in the stored answer cannot change the candidate's score", async () => {
+  // The candidate app appends the AI exchange to the parent answer's own column:
+  //   <answer>\n\nAI follow-up: <model question>\nFollow-up response: <answer>
+  // That column is what gets scored, so the model's question wording reaches the
+  // scorer through a completely different path than the interviewer follow-up.
+  const buildSession = (aiQuestion: string) => ({
+    id: "session-embedded",
+    organizationId: "org-1",
+    template: {
+      title: "SE Assessment",
+      modules: [{ id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1 }],
+    },
+    responses: [
+      {
+        id: "response-1",
+        responseText:
+          "I rolled back the deployment and explained the failure to the team."
+          + `\n\nAI follow-up: ${aiQuestion}`
+          + "\nFollow-up response: I told the on-call engineer first and then we tested the fix.",
+        question: {
+          id: "question-1",
+          questionText: "Describe a rollout that went wrong.",
+          rubric: ["ownership"],
+          module: { id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1 },
+        },
+      },
+    ],
+    interviewerFollowUps: [],
+    codeSubmissions: [],
+  });
+
+  const service = new ReportsService();
+  const [neutral] = await (service as any).evaluateSessionResponses(buildSession("And then what happened?"));
+  const [leading] = await (service as any).evaluateSessionResponses(
+    buildSession(
+      "Would you say you took full ownership, measured the impact with a percent metric, tested the result on a consistent-hash ring, and explained the trade-off to the client team because the customer outcome mattered?",
+    ),
+  );
+
+  assert.equal(
+    leading.score,
+    neutral.score,
+    "a keyword-stuffed AI follow-up question must not inflate the candidate's score",
+  );
+  assert.deepEqual(leading.criteriaScores, neutral.criteriaScores);
+  assert.deepEqual(leading.evidence, neutral.evidence);
+  assert.ok(
+    leading.evidence.every((quote: string) => !quote.includes("consistent-hash")),
+    "an evidence quote must never be able to return AI-authored question wording",
+  );
 });
 
 test("generateAndPersistDemoReport checks organization ownership before writing report data", async () => {

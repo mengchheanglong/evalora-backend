@@ -2,6 +2,7 @@ import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import * as bcrypt from "bcryptjs";
 import * as jwt from "jsonwebtoken";
+import { extractAuthUserFromHeader, TOKEN_PURPOSES, tryExtractAuthUserFromToken } from "../src/modules/auth/auth.guard";
 import { AuthService, type AuthUserRecord, type AuthUserRepository, type RegisterInput } from "../src/modules/auth/auth.service";
 
 function createRepo(): AuthUserRepository & { users: AuthUserRecord[] } {
@@ -438,6 +439,23 @@ test("register rejects an over-long name and email", async () => {
     /longer than allowed/i,
   );
   assert.equal(repo.users.length, 0);
+});
+
+test("a realtime ticket opens the socket but is not a REST credential", async () => {
+  const repo = createRepo();
+  const service = new AuthService(repo, "test-jwt-secret");
+  await registerAndVerify(service, { name: "Owner", email: "owner@example.com", password: "SecurePass1" });
+  const session = await service.login({ email: "owner@example.com", password: "SecurePass1" });
+
+  const { ticket } = service.issueRealtimeTicket(session.user);
+
+  // The ticket is handed to browser JavaScript, so it must be useless anywhere
+  // except the handshake it was minted for.
+  assert.equal(tryExtractAuthUserFromToken(ticket, TOKEN_PURPOSES.realtimeTicket, "test-jwt-secret")?.id, session.user.id);
+  assert.throws(() => extractAuthUserFromHeader(`Bearer ${ticket}`, "test-jwt-secret"), /Authentication required/i);
+  // The session token keeps working over REST, and cannot stand in for a ticket.
+  assert.equal(extractAuthUserFromHeader(`Bearer ${session.token}`, "test-jwt-secret").id, session.user.id);
+  assert.equal(tryExtractAuthUserFromToken(session.token, TOKEN_PURPOSES.realtimeTicket, "test-jwt-secret"), null);
 });
 
 test("login returns the same generic error for a missing account and a wrong password", async () => {

@@ -5,6 +5,11 @@ import { DEFAULT_LIST_LIMIT } from "../../common/query.constants";
 import type { AssessmentTemplateDto, InterviewSessionDto, JsonValue, ModuleType, QuestionType, SessionStatus } from "../../domain/evalora.types";
 import { buildSessionOwnershipWhere, buildTemplateOwnershipWhere, forbiddenResourceError, mergeWhere, requireOrganizationId, type AccessContext } from "../auth/access-control";
 import type { EmailDeliveryResult, EmailService } from "../email/email.service";
+// Type-only import of the publisher contract already used by the follow-ups
+// service, so both services fan out through one shared shape instead of two
+// look-alike interfaces that can drift.
+import type { InterviewEventPublisher } from "../interviewer-follow-ups/interviewer-follow-ups.service";
+import { INTERVIEW_EVENTS } from "../realtime/realtime.types";
 
 type PrismaSessionStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "EXPIRED";
 type PrismaRole = "ADMIN" | "ORGANIZATION" | "INTERVIEWER" | "CANDIDATE";
@@ -176,6 +181,8 @@ interface SessionsServiceOptions {
   generateAccessCode?: () => string;
   now?: () => Date;
   emailService?: EmailService;
+  /** Real-time fan-out. Optional so the service stays unit-testable without a gateway. */
+  events?: InterviewEventPublisher;
 }
 
 export const SESSION_INCLUDE = {
@@ -233,6 +240,7 @@ export class SessionsService {
   private readonly generateAccessCode: () => string;
   private readonly now: () => Date;
   private readonly emailService?: EmailService;
+  private readonly events?: InterviewEventPublisher;
 
   constructor(
     private readonly prisma: SessionPrismaClient,
@@ -241,6 +249,31 @@ export class SessionsService {
     this.generateAccessCode = options.generateAccessCode ?? defaultAccessCode;
     this.now = options.now ?? (() => new Date());
     this.emailService = options.emailService;
+    this.events = options.events;
+  }
+
+  /**
+   * Announces a status transition to everyone watching the session, so an
+   * interviewer sees a submission or a timeout land without polling or
+   * re-joining.
+   *
+   * Fire-and-forget: the write is already committed, so a transport failure must
+   * never turn a successful submission into an error for the candidate. Clients
+   * that miss an event still recover via REST or the re-join snapshot.
+   */
+  private publishSessionUpdated(session: { id: string; status: PrismaSessionStatus; startedAt?: Date | null; completedAt?: Date | null }) {
+    try {
+      this.events?.emitToSession(session.id, INTERVIEW_EVENTS.sessionUpdated, {
+        sessionId: session.id,
+        // Same field names and raw status vocabulary as SessionSnapshot, so a
+        // live update and a re-join snapshot can never disagree.
+        status: session.status,
+        startedAt: toIso(session.startedAt),
+        completedAt: toIso(session.completedAt),
+      });
+    } catch {
+      // Swallowed on purpose — see above.
+    }
   }
 
   async createSession(input: CreateSessionInput, access?: AccessContext): Promise<InterviewSessionDto> {
@@ -365,13 +398,38 @@ export class SessionsService {
     if (timedOutIds.length === 0) return rows;
 
     const updateMany = requireMethod(this.prisma.interviewSession.updateMany, "interviewSession.updateMany");
-    await updateMany({
+    const result = await updateMany({
       where: { id: { in: timedOutIds }, status: "IN_PROGRESS" },
       data: { status: "EXPIRED" },
     });
 
-    const expired = new Set(timedOutIds);
+    const expired = await this.resolveExpiredIds(timedOutIds, result.count);
+    for (const row of rows) {
+      if (expired.has(row.id)) this.publishSessionUpdated({ ...row, status: "EXPIRED" });
+    }
     return rows.map((row) => (expired.has(row.id) ? { ...row, status: "EXPIRED" as PrismaSessionStatus } : row));
+  }
+
+  /**
+   * Which of the candidate rows the guarded write actually moved to EXPIRED.
+   * `updateMany` reports only a count, so a partial result cannot say WHICH rows
+   * landed — and announcing an expiry for a session a candidate had just submitted
+   * would overwrite its correct COMPLETED broadcast with a wrong one. The extra
+   * read only happens on that partial case, which needs a genuine race to occur.
+   */
+  private async resolveExpiredIds(ids: string[], flippedCount: number): Promise<Set<string>> {
+    if (flippedCount === 0) return new Set();
+    if (flippedCount === ids.length) return new Set(ids);
+
+    const findMany = this.prisma.interviewSession.findMany;
+    // Without findMany there is no way to ask; fall back to the count-based view
+    // rather than dropping a legitimate expiry.
+    if (!findMany) return new Set(ids);
+    const rows = (await findMany.call(this.prisma.interviewSession, {
+      where: { id: { in: ids }, status: "EXPIRED" },
+      select: { id: true },
+    })) as Array<{ id: string }>;
+    return new Set(rows.map((row) => row.id));
   }
 
   async getSessionByAccessCode(accessCode: string): Promise<CandidateAccessSessionDto> {
@@ -395,6 +453,7 @@ export class SessionsService {
       include: SESSION_INCLUDE,
     });
 
+    this.publishSessionUpdated(session as SessionRow);
     return toSessionDto(session as SessionRow);
   }
 
@@ -429,6 +488,7 @@ export class SessionsService {
       data: { status: "IN_PROGRESS", startedAt: this.now() },
       include: CANDIDATE_SESSION_INCLUDE,
     });
+    this.publishSessionUpdated(session as CandidateSessionRow);
     return toCandidateAccessSessionDto(session as CandidateSessionRow);
   }
 
@@ -461,6 +521,7 @@ export class SessionsService {
       include: SESSION_INCLUDE,
     });
 
+    this.publishSessionUpdated(session as SessionRow);
     return toSessionDto(session as SessionRow);
   }
 
@@ -475,6 +536,7 @@ export class SessionsService {
       data: { status: "COMPLETED", completedAt: this.now() },
       include: CANDIDATE_SESSION_INCLUDE,
     });
+    this.publishSessionUpdated(session as CandidateSessionRow);
     return toCandidateAccessSessionDto(session as CandidateSessionRow);
   }
 
@@ -513,6 +575,7 @@ export class SessionsService {
       data: { status: "EXPIRED" },
       include: CANDIDATE_SESSION_INCLUDE,
     });
+    this.publishSessionUpdated(session as CandidateSessionRow);
     return toCandidateAccessSessionDto(session as CandidateSessionRow);
   }
 

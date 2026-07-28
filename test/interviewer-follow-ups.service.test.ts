@@ -111,6 +111,16 @@ function createService(prisma: ReturnType<typeof createFakePrisma>) {
   return new InterviewerFollowUpsService(prisma as never);
 }
 
+/**
+ * Mirrors the completion gate enforced in sessions.service.ts
+ * (assertNoPendingRequiredFollowUps): only required, still-SENT questions block
+ * a submission. Asserted against stored rows rather than a service method so the
+ * gating rule keeps exactly one implementation.
+ */
+function pendingRequired(prisma: ReturnType<typeof createFakePrisma>): number {
+  return prisma.rows.filter((row) => row.required && row.status === "SENT").length;
+}
+
 const validQuestion = "What monitoring signal would make you stop the rollout?";
 
 test("owner and interviewer can send a follow-up to a session in their organization", async () => {
@@ -192,12 +202,12 @@ test("candidate autosave keeps the question pending; submitting marks it answere
   const draft = await service.answerByAccessCode("EV-123456", sent.id, { answerText: "partial thought", submit: false });
   assert.equal(draft.status, "sent", "an autosaved draft must not count as answered");
   assert.ok(draft.answerSavedAt);
-  assert.equal(await service.countPendingRequired("session-1"), 1);
+  assert.equal(pendingRequired(prisma), 1);
 
   const submitted = await service.answerByAccessCode("EV-123456", sent.id, { answerText: "Final answer.", submit: true });
   assert.equal(submitted.status, "answered");
   assert.ok(submitted.answeredAt);
-  assert.equal(await service.countPendingRequired("session-1"), 0);
+  assert.equal(pendingRequired(prisma), 0);
 });
 
 test("a blank final answer is rejected and cancelled questions cannot be answered", async () => {
@@ -215,7 +225,7 @@ test("a blank final answer is rejected and cancelled questions cannot be answere
     () => service.answerByAccessCode("EV-123456", sent.id, { answerText: "too late", submit: true }),
     /withdrawn by the interviewer/i,
   );
-  assert.equal(await service.countPendingRequired("session-1"), 0, "a cancelled question never blocks submission");
+  assert.equal(pendingRequired(prisma), 0, "a cancelled question never blocks submission");
 });
 
 test("an answered question cannot be cancelled", async () => {
@@ -227,12 +237,13 @@ test("an answered question cannot be cancelled", async () => {
 });
 
 test("optional questions never block completion; required pending ones do", async () => {
-  const service = createService(createFakePrisma());
+  const prisma = createFakePrisma();
+  const service = createService(prisma);
   await service.send("session-1", { questionText: "Optional extra question?", required: false }, ownerAccess);
-  assert.equal(await service.countPendingRequired("session-1"), 0);
+  assert.equal(pendingRequired(prisma), 0);
 
   await service.send("session-1", { questionText: validQuestion, required: true }, ownerAccess);
-  assert.equal(await service.countPendingRequired("session-1"), 1);
+  assert.equal(pendingRequired(prisma), 1);
 });
 
 test("the candidate projection hides interviewer identity beyond the display name", async () => {
