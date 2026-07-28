@@ -9,6 +9,7 @@ interface ResponseRow {
   questionId?: string | null;
   responseText: string;
   responseJson?: JsonValue | null;
+  questionSnapshot?: JsonValue | null;
   createdAt?: Date | null;
   updatedAt?: Date | null;
 }
@@ -31,6 +32,8 @@ interface ResponseSessionAccessRow {
  * report scorer can trust.
  */
 export interface QuestionSnapshot {
+  /** Present only on private snapshots created after rubric restoration. */
+  rubricVersion?: 1;
   questionText: string;
   rubric: string[];
   moduleTitle?: string;
@@ -112,7 +115,7 @@ export class ResponsesService {
     // upsert, so this never decides create-vs-update and never reintroduces the
     // old TOCTOU race.
     const existing = await this.findExistingResponse(sessionId, questionId);
-    const snapshotted = await this.withQuestionSnapshot(questionId, responseJson, existing);
+    const prepared = await this.prepareQuestionResponse(questionId, responseJson, existing);
 
     // Idempotent write keyed on the @@unique([sessionId, questionId]) index, so a
     // double-submit / autosave-plus-Save / network retry updates the same row
@@ -120,11 +123,24 @@ export class ResponsesService {
     const upsert = this.prisma.response.upsert;
     if (upsert) {
       try {
+        const privateContext = prepared.questionSnapshot
+          ? { questionSnapshot: prepared.questionSnapshot }
+          : {};
         return toResponseDto(
           await upsert({
             where: { sessionId_questionId: { sessionId, questionId } },
-            create: { sessionId, questionId, responseText, responseJson: snapshotted },
-            update: { responseText, responseJson: snapshotted },
+            create: {
+              sessionId,
+              questionId,
+              responseText,
+              responseJson: prepared.responseJson,
+              ...privateContext,
+            },
+            update: {
+              responseText,
+              responseJson: prepared.responseJson,
+              ...privateContext,
+            },
           }),
         );
       } catch (error) {
@@ -136,7 +152,11 @@ export class ResponsesService {
           // is the one that survives.
           if (raced) {
             return toResponseDto(
-              await this.updateResponse(raced.id, responseText, await this.withQuestionSnapshot(questionId, responseJson, raced)),
+              await this.updateResponse(
+                raced.id,
+                responseText,
+                await this.prepareQuestionResponse(questionId, responseJson, raced),
+              ),
             );
           }
         }
@@ -147,37 +167,42 @@ export class ResponsesService {
     // Fallback for clients/mocks without upsert (preserves the previous behavior).
     return toResponseDto(
       existing
-        ? await this.updateResponse(existing.id, responseText, snapshotted)
-        : await this.createResponse(sessionId, questionId, responseText, snapshotted),
+        ? await this.updateResponse(existing.id, responseText, prepared)
+        : await this.createResponse(
+          sessionId,
+          questionId,
+          responseText,
+          prepared.responseJson,
+          prepared.questionSnapshot,
+        ),
     );
   }
 
   /**
-   * Merges the question snapshot into the answer's JSON, without ever disturbing
-   * what is already stored there (structured answers, the adaptive AI fields).
+   * Keeps candidate-authored structured data separate from private scoring
+   * context. Legacy snapshots stored inside responseJson are migrated into the
+   * private column on the next save and removed from candidate-visible JSON.
    *
    * Captured once: a re-save keeps the snapshot the first save wrote, because the
    * record has to say what the candidate was asked when they answered — not what
    * the template says today.
    */
-  private async withQuestionSnapshot(
+  private async prepareQuestionResponse(
     questionId: string,
     responseJson: JsonValue | undefined,
     existing: ResponseRow | null,
-  ): Promise<JsonValue | undefined> {
+  ): Promise<{ responseJson?: JsonValue; questionSnapshot?: QuestionSnapshot }> {
     // A save that sends no JSON of its own used to leave the column untouched.
     // Now that a snapshot is written into it, the stored value has to be carried
     // forward explicitly or the write would replace an adaptive answer's fields
     // with nothing but the snapshot.
-    const base = responseJson === undefined ? (existing?.responseJson ?? undefined) : responseJson;
-
-    // A non-object payload (array, string, number) has nowhere to hold a
-    // snapshot, and the candidate's own data outranks the snapshot.
-    if (base != null && !isJsonObject(base)) return base;
-
-    const snapshot = readQuestionSnapshot(existing?.responseJson) ?? (await this.loadQuestionSnapshot(questionId));
-    if (!snapshot) return base;
-    return { ...(isJsonObject(base) ? base : {}), questionSnapshot: snapshot };
+    const base = sanitizePublicResponseJson(
+      responseJson === undefined ? (existing?.responseJson ?? undefined) : responseJson,
+    );
+    const snapshot = readQuestionSnapshot(existing?.questionSnapshot)
+      ?? readLegacyQuestionSnapshot(existing?.responseJson)
+      ?? (await this.loadQuestionSnapshot(questionId));
+    return { responseJson: base, questionSnapshot: snapshot };
   }
 
   private async loadQuestionSnapshot(questionId: string): Promise<QuestionSnapshot | undefined> {
@@ -196,6 +221,7 @@ export class ResponsesService {
       if (!question) return undefined;
 
       return {
+        rubricVersion: 1,
         questionText: question.questionText ?? "",
         rubric: toStringArray(question.rubric),
         moduleTitle: optionalString(question.module?.title),
@@ -304,7 +330,13 @@ export class ResponsesService {
     });
   }
 
-  private async createResponse(sessionId: string, questionId: string | undefined, responseText: string, responseJson: JsonValue | undefined): Promise<ResponseRow> {
+  private async createResponse(
+    sessionId: string,
+    questionId: string | undefined,
+    responseText: string,
+    responseJson: JsonValue | undefined,
+    questionSnapshot?: QuestionSnapshot,
+  ): Promise<ResponseRow> {
     const create = requireMethod(this.prisma.response.create, "response.create");
     return create({
       data: {
@@ -312,17 +344,26 @@ export class ResponsesService {
         questionId,
         responseText,
         responseJson,
+        ...(questionSnapshot ? { questionSnapshot } : {}),
       },
     });
   }
 
-  private async updateResponse(id: string, responseText: string, responseJson: JsonValue | undefined): Promise<ResponseRow> {
+  private async updateResponse(
+    id: string,
+    responseText: string,
+    prepared: { responseJson?: JsonValue; questionSnapshot?: QuestionSnapshot },
+  ): Promise<ResponseRow> {
     const update = requireMethod(this.prisma.response.update, "response.update");
+    const privateContext = prepared.questionSnapshot
+      ? { questionSnapshot: prepared.questionSnapshot }
+      : {};
     return update({
       where: { id },
       data: {
         responseText,
-        responseJson,
+        responseJson: prepared.responseJson,
+        ...privateContext,
       },
     });
   }
@@ -334,10 +375,18 @@ function buildResponseOwnershipWhere(access?: AccessContext): Record<string, unk
 }
 
 /** The snapshot an earlier save already wrote, returned exactly as it was stored. */
-function readQuestionSnapshot(responseJson: JsonValue | null | undefined): QuestionSnapshot | undefined {
+function readQuestionSnapshot(value: JsonValue | null | undefined): QuestionSnapshot | undefined {
+  return isJsonObject(value) ? (value as unknown as QuestionSnapshot) : undefined;
+}
+
+/** Compatibility for rows created by the unfinished responseJson implementation. */
+function readLegacyQuestionSnapshot(responseJson: JsonValue | null | undefined): QuestionSnapshot | undefined {
   if (!isJsonObject(responseJson)) return undefined;
   const snapshot = responseJson.questionSnapshot;
-  return isJsonObject(snapshot) ? (snapshot as unknown as QuestionSnapshot) : undefined;
+  if (!isJsonObject(snapshot)) return undefined;
+  // Legacy snapshots used the defective sentence rubrics. Their wording remains
+  // useful, but the absent version tells reports to use the corrected live rubric.
+  return snapshot as unknown as QuestionSnapshot;
 }
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
@@ -377,10 +426,34 @@ function toResponseDto(response: ResponseRow): CandidateResponseDto {
     sessionId: response.sessionId,
     questionId: response.questionId ?? undefined,
     responseText: response.responseText,
-    responseJson: response.responseJson ?? undefined,
+    responseJson: sanitizePublicResponseJson(response.responseJson),
     savedAt: toIso(response.updatedAt ?? response.createdAt),
     createdAt: toIso(response.createdAt),
   };
+}
+
+/**
+ * Candidate JSON may hold choice/scale values and an AI follow-up answer, but
+ * never server-authored scoring context. This runs on writes and reads so rows
+ * created by the unfinished implementation stop leaking immediately.
+ */
+function sanitizePublicResponseJson(value: JsonValue | null | undefined): JsonValue | undefined {
+  if (value == null) return undefined;
+  if (!isJsonObject(value)) return value;
+
+  const rest = Object.fromEntries(
+    Object.entries(value).filter(([key]) => key !== "questionSnapshot" && key !== "aiFollowUp"),
+  );
+  const safeFollowUp = sanitizeAiFollowUp(value.aiFollowUp);
+  const sanitized = safeFollowUp ? { ...rest, aiFollowUp: safeFollowUp } : rest;
+  return Object.keys(sanitized).length ? (sanitized as JsonValue) : undefined;
+}
+
+function sanitizeAiFollowUp(value: unknown): { question?: string; answer?: string } | undefined {
+  if (!isJsonObject(value)) return undefined;
+  const question = optionalString(value.question)?.slice(0, 4_000);
+  const answer = optionalString(value.answer)?.slice(0, 12_000);
+  return question || answer ? { question, answer } : undefined;
 }
 
 function toIso(value?: Date | null): string | undefined {

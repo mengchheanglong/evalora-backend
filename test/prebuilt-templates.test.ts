@@ -118,6 +118,29 @@ test("prebuilt templates include researched question-bank depth and candidate su
   }
 });
 
+test("prebuilt rubrics remain scorer-compatible concepts rather than prose instructions", () => {
+  const instructionWords = /\b(describe|explain|discuss|mention|provide|show|demonstrate|include|outline)\b/i;
+
+  for (const template of PREBUILT_ASSESSMENT_TEMPLATES) {
+    for (const module of template.modules) {
+      for (const question of module.questions) {
+        for (const criterion of question.rubric) {
+          const words = criterion.trim().split(/\s+/);
+          assert.ok(
+            words.length <= 4,
+            `${question.id} rubric criterion should be a compact concept: "${criterion}"`,
+          );
+          assert.doesNotMatch(
+            criterion,
+            instructionWords,
+            `${question.id} rubric criterion must not require a literal instruction verb`,
+          );
+        }
+      }
+    }
+  }
+});
+
 test("prebuilt templates include the expected role/module coverage", () => {
   assert.deepEqual(
     templateByRole("HR Generalist").modules.map((module) => module.type),

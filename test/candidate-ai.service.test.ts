@@ -164,6 +164,36 @@ test("a follow-up names the question it was generated from", async () => {
   assert.deepEqual(Object.keys(probe ?? {}).sort(), ["basedOnQuestion", "content", "createdAt", "id", "role"]);
 });
 
+test("conversation recovers the parent question for follow-ups saved before provenance metadata", async () => {
+  const createdAt = new Date("2026-07-20T10:00:00.000Z");
+  const messages = [
+    {
+      id: "candidate-message",
+      role: "candidate",
+      content: "I rolled the deployment back.",
+      metadata: { question: "Describe a difficult deployment." },
+      createdAt,
+    },
+    {
+      id: "assistant-message",
+      role: "assistant",
+      content: "What signal made you roll it back?",
+      metadata: { provider: "deepseek" },
+      createdAt,
+    },
+  ];
+  const prisma = {
+    interviewSession: { findFirst: async () => openSession },
+    aIMessage: { findMany: async () => messages },
+  };
+  const service = new CandidateAiService(prisma as any, {} as any);
+
+  const conversation = await service.conversation("ACCESS-1");
+  const probe = conversation.find((message) => message.id === "assistant-message");
+
+  assert.equal(probe?.basedOnQuestion, "Describe a difficult deployment.");
+});
+
 test("adaptive context compaction retains every authored response", () => {
   const responses = Array.from({ length: 193 }, (_, index) => ({
     question: { questionText: `Question ${index + 1}` },

@@ -26,6 +26,11 @@ export interface EmbeddedFollowUpSplit {
   followUp?: { questionText: string; answerText?: string };
 }
 
+export interface StructuredAiFollowUp {
+  questionText?: string;
+  answerText?: string;
+}
+
 function trimmedOrUndefined(value: string): string | undefined {
   const trimmed = value.trim();
   return trimmed.length ? trimmed : undefined;
@@ -54,4 +59,23 @@ export function splitEmbeddedFollowUp(responseText: string): EmbeddedFollowUpSpl
     answerText: trimmedOrUndefined(responseText.slice(0, start)),
     followUp: { questionText, answerText },
   };
+}
+
+/**
+ * New rows keep the AI exchange out of responseText. The question is included
+ * for reload compatibility, while reports still treat it as context only.
+ */
+export function readStructuredAiFollowUp(value: unknown): StructuredAiFollowUp | undefined {
+  if (!isRecord(value) || !isRecord(value.aiFollowUp)) return undefined;
+  const questionText = trimmedOrUndefined(
+    typeof value.aiFollowUp.question === "string" ? value.aiFollowUp.question : "",
+  );
+  const answerText = trimmedOrUndefined(
+    typeof value.aiFollowUp.answer === "string" ? value.aiFollowUp.answer : "",
+  );
+  return questionText || answerText ? { questionText, answerText } : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

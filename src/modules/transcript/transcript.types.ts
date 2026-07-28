@@ -125,6 +125,7 @@ export interface TranscriptResponseRow {
   id: string;
   responseText: string;
   responseJson?: unknown;
+  questionSnapshot?: unknown;
   createdAt?: Date | null;
   question?: {
     id: string;

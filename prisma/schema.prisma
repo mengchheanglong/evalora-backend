@@ -213,6 +213,9 @@ model Response {
   question     Question?        @relation(fields: [questionId], references: [id])
   responseText String           @map("response_text")
   responseJson Json?            @map("response_json")
+  // Private, server-authored scoring context. Never return this field through
+  // candidate access-code endpoints.
+  questionSnapshot Json?        @map("question_snapshot")
   createdAt    DateTime         @default(now()) @map("created_at")
   updatedAt    DateTime         @updatedAt @map("updated_at")
 

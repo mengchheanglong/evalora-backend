@@ -50,11 +50,11 @@ export const softwareCodingModule: PrebuiltModuleDefinition = {
         ]
       },
       "rubric": [
-        "normalize case and strip punctuation",
-        "handle empty text and a single word",
-        "break ties by a stated rule",
-        "use clear names and small functions",
-        "show the cases the code was checked against"
+        "string-processing",
+        "edge cases",
+        "deterministic-behavior",
+        "readability",
+        "tests"
       ]
     },
     {
@@ -69,10 +69,10 @@ export const softwareCodingModule: PrebuiltModuleDefinition = {
         ]
       },
       "rubric": [
-        "sort or scan the intervals in one pass",
-        "detect overlap correctly, including touching ends",
-        "state the time complexity and why",
-        "handle empty and single-interval input"
+        "algorithm-choice",
+        "correctness",
+        "complexity",
+        "edge cases"
       ]
     },
     {
@@ -83,11 +83,10 @@ export const softwareCodingModule: PrebuiltModuleDefinition = {
         "language": "typescript"
       },
       "rubric": [
-        "check every required field and its type",
-        "return a clear error naming the bad field",
-        "leave the incoming payload unmutated",
-        "keep the rules readable as fields change",
-        "show the invalid payloads tested"
+        "input-validation",
+        "error-handling",
+        "maintainability",
+        "test-coverage"
       ]
     },
     {
@@ -95,10 +94,10 @@ export const softwareCodingModule: PrebuiltModuleDefinition = {
       "questionText": "Transform a flat list of question rows into modules with ordered questions. Explain how you handle missing modules or duplicate order indexes.",
       "questionType": "coding",
       "rubric": [
-        "group rows into modules without losing any",
-        "handle a missing or unknown module",
-        "produce a stable order for duplicate indexes",
-        "explain the chosen behaviour in the code"
+        "data-transformation",
+        "defensive-programming",
+        "ordering",
+        "clarity"
       ]
     },
     {
@@ -109,11 +108,11 @@ export const softwareCodingModule: PrebuiltModuleDefinition = {
         "language": "typescript"
       },
       "rubric": [
-        "get and set return the expected values",
-        "expire entries once the ttl has passed",
-        "keep the implementation small and readable",
-        "name a limitation such as unbounded memory",
-        "show the expiry cases tested"
+        "correctness",
+        "time-handling",
+        "simplicity",
+        "limitation-awareness",
+        "tests"
       ]
     }
   ]

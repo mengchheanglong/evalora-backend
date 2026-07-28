@@ -296,6 +296,16 @@ test("generateAndPersistReport evaluates saved responses by module and persists 
           },
           orderBy: { createdAt: "asc" },
         },
+        aiMessages: {
+          select: {
+            id: true,
+            role: true,
+            content: true,
+            metadata: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: "asc" },
+        },
         codeSubmissions: {
           select: {
             questionId: true,
@@ -657,6 +667,105 @@ test("an AI follow-up question embedded in the stored answer cannot change the c
   );
 });
 
+test("a structured AI follow-up answer is scored while its question remains context", async () => {
+  const inputs: any[] = [];
+  const service = new ReportsService(undefined, {
+    evaluateResponse: async (input: any) => {
+      inputs.push(input);
+      return evaluateResponse(input);
+    },
+  } as any);
+
+  await (service as any).evaluateSessionResponses({
+    id: "session-structured-follow-up",
+    organizationId: "org-1",
+    template: {
+      title: "SE Assessment",
+      modules: [{ id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1 }],
+    },
+    responses: [{
+      id: "response-1",
+      responseText: "I rolled back the deployment.",
+      responseJson: {
+        aiFollowUp: {
+          question: "Would you say you showed ownership and measurable impact?",
+          answer: "I notified the team, tested the fix, and reduced errors by 30 percent.",
+        },
+      },
+      question: {
+        id: "question-1",
+        questionText: "Describe a rollout that went wrong.",
+        rubric: ["ownership", "measurable impact"],
+        module: { id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1 },
+      },
+    }],
+    aiMessages: [],
+    interviewerFollowUps: [],
+    codeSubmissions: [],
+  });
+
+  assert.match(inputs[0].responseText, /I rolled back the deployment/);
+  assert.match(inputs[0].responseText, /reduced errors by 30 percent/);
+  assert.doesNotMatch(inputs[0].responseText, /Would you say/);
+  assert.deepEqual(inputs[0].questionContext, [
+    "Question: Describe a rollout that went wrong.\nAI follow-up: Would you say you showed ownership and measurable impact?",
+  ]);
+});
+
+test("reports recover an answer-only follow-up written before basedOnQuestion existed", async () => {
+  const inputs: any[] = [];
+  const service = new ReportsService(undefined, {
+    evaluateResponse: async (input: any) => {
+      inputs.push(input);
+      return evaluateResponse(input);
+    },
+  } as any);
+  const createdAt = new Date("2026-07-20T10:00:00.000Z");
+
+  await (service as any).evaluateSessionResponses({
+    id: "session-legacy-follow-up",
+    organizationId: "org-1",
+    template: {
+      title: "SE Assessment",
+      modules: [{ id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1 }],
+    },
+    responses: [{
+      id: "response-1",
+      responseText: "I rolled back the deployment.",
+      responseJson: { aiFollowUp: { answer: "The error budget was exhausted." } },
+      question: {
+        id: "question-1",
+        questionText: "Describe a rollout that went wrong.",
+        rubric: ["ownership"],
+        module: { id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1 },
+      },
+    }],
+    aiMessages: [
+      {
+        id: "legacy-candidate",
+        role: "candidate",
+        content: "I rolled back the deployment.",
+        metadata: { question: "Describe a rollout that went wrong." },
+        createdAt,
+      },
+      {
+        id: "legacy-assistant",
+        role: "assistant",
+        content: "What signal made you roll it back?",
+        metadata: { provider: "deepseek" },
+        createdAt,
+      },
+    ],
+    interviewerFollowUps: [],
+    codeSubmissions: [],
+  });
+
+  assert.match(inputs[0].responseText, /The error budget was exhausted/);
+  assert.deepEqual(inputs[0].questionContext, [
+    "Question: Describe a rollout that went wrong.\nAI follow-up: What signal made you roll it back?",
+  ]);
+});
+
 test("a keyword-stuffed question snapshot in responseJson cannot change the candidate's score", async () => {
   // Answers now carry a frozen copy of their question at responseJson.questionSnapshot.
   // responseJson is serialised into the SCORED text, so an assessment author who writes
@@ -761,12 +870,11 @@ test("report scoring uses the rubric and question wording snapshotted at answer 
         // Answered before the template was edited: the frozen copy wins over the live row.
         id: "response-1",
         responseText: "I rolled back the deployment and explained the failure to the team.",
-        responseJson: {
-          questionSnapshot: {
-            questionText: "Describe a rollout that went wrong.",
-            rubric: ["ownership"],
-            capturedAt: "2026-07-21T09:00:00.000Z",
-          },
+        questionSnapshot: {
+          rubricVersion: 1,
+          questionText: "Describe a rollout that went wrong.",
+          rubric: ["ownership"],
+          capturedAt: "2026-07-21T09:00:00.000Z",
         },
         question: {
           id: "question-1",
@@ -791,12 +899,11 @@ test("report scoring uses the rubric and question wording snapshotted at answer 
         // template afterwards were never put to this candidate.
         id: "response-3",
         responseText: "I clarified the deadline with the client and tested the fix.",
-        responseJson: {
-          questionSnapshot: {
-            questionText: "What did you do next?",
-            rubric: [],
-            capturedAt: "2026-07-21T09:05:00.000Z",
-          },
+        questionSnapshot: {
+          rubricVersion: 1,
+          questionText: "What did you do next?",
+          rubric: [],
+          capturedAt: "2026-07-21T09:05:00.000Z",
         },
         question: {
           id: "question-3",
@@ -821,6 +928,121 @@ test("report scoring uses the rubric and question wording snapshotted at answer 
     "Question: How do you work with others?",
     "Question: What did you do next?",
   ]);
+});
+
+test("reports ignore unversioned rubric snapshots from the unfinished storage format", async () => {
+  const aiInputs: any[] = [];
+  const service = new ReportsService(undefined, {
+    evaluateResponse: async (input: any) => {
+      aiInputs.push(input);
+      return evaluateResponse(input);
+    },
+  } as any);
+
+  await (service as any).evaluateSessionResponses({
+    id: "session-untrusted-snapshot",
+    organizationId: "org-1",
+    template: {
+      title: "SE Assessment",
+      modules: [{ id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1 }],
+    },
+    responses: [{
+      id: "response-1",
+      responseText: "I coordinated the rollback with the team.",
+      responseJson: {
+        questionSnapshot: {
+          questionText: "Original question wording.",
+          rubric: ["attacker controlled rubric"],
+        },
+      },
+      question: {
+        id: "question-1",
+        questionText: "Current question wording.",
+        rubric: ["ownership"],
+        module: { id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1 },
+      },
+    }],
+    aiMessages: [],
+    interviewerFollowUps: [],
+    codeSubmissions: [],
+  });
+
+  assert.deepEqual(aiInputs[0].rubric, ["ownership"]);
+  assert.deepEqual(aiInputs[0].questionContext, ["Question: Original question wording."]);
+});
+
+test("reports repair verbose prebuilt rubrics already seeded in the database", async () => {
+  const aiInputs: any[] = [];
+  const service = new ReportsService(undefined, {
+    evaluateResponse: async (input: any) => {
+      aiInputs.push(input);
+      return evaluateResponse(input);
+    },
+  } as any);
+  const questionText = "Describe a time you owned a problem beyond your assigned ticket. What was the outcome?";
+
+  await (service as any).evaluateSessionResponses({
+    id: "session-seeded-before-fix",
+    organizationId: "org-1",
+    template: {
+      title: "Software Engineer Assessment",
+      modules: [{ id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1 }],
+    },
+    responses: [{
+      id: "response-1",
+      responseText: "I found an abandoned reliability issue, fixed it, and reduced errors.",
+      question: {
+        id: "question-1",
+        questionText,
+        rubric: [
+          "describe the problem nobody had picked up",
+          "say what they did beyond the assigned ticket",
+          "give the result in numbers or user terms",
+          "describe how they saw it through to the end",
+        ],
+        module: { id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1 },
+      },
+    }],
+    aiMessages: [],
+    interviewerFollowUps: [],
+    codeSubmissions: [],
+  });
+
+  assert.deepEqual(aiInputs[0].rubric, ["ownership", "initiative", "impact", "follow-through"]);
+});
+
+test("reports preserve concise custom rubrics on prebuilt question wording", async () => {
+  const aiInputs: any[] = [];
+  const service = new ReportsService(undefined, {
+    evaluateResponse: async (input: any) => {
+      aiInputs.push(input);
+      return evaluateResponse(input);
+    },
+  } as any);
+
+  await (service as any).evaluateSessionResponses({
+    id: "session-custom-rubric",
+    organizationId: "org-1",
+    template: {
+      title: "Customized Assessment",
+      modules: [{ id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1 }],
+    },
+    responses: [{
+      id: "response-1",
+      responseText: "I fixed an abandoned reliability issue.",
+      question: {
+        id: "question-1",
+        questionText: "Describe a time you owned a problem beyond your assigned ticket. What was the outcome?",
+        rubric: ["reliability", "customer safety"],
+        module: { id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1 },
+      },
+    }],
+    aiMessages: [],
+    interviewerFollowUps: [],
+    codeSubmissions: [],
+  });
+
+  assert.deepEqual(aiInputs[0].rubric, ["reliability", "customer safety"]);
 });
 
 test("generateAndPersistDemoReport checks organization ownership before writing report data", async () => {

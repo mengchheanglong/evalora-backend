@@ -341,7 +341,11 @@ test("saving an answer records what the candidate was actually asked", async () 
     response: {
       upsert: async (args: any) => {
         written = args;
-        return { ...responseRow, responseJson: args.create.responseJson };
+        return {
+          ...responseRow,
+          responseJson: args.create.responseJson,
+          questionSnapshot: args.create.questionSnapshot,
+        };
       },
     },
   } as never);
@@ -353,7 +357,9 @@ test("saving an answer records what the candidate was actually asked", async () 
     responseJson: { confidence: 3 },
   });
 
-  const snapshot = (result.responseJson as any).questionSnapshot;
+  const snapshot = written.create.questionSnapshot;
+  assert.equal((result.responseJson as any).questionSnapshot, undefined, "private scoring context never reaches the DTO");
+  assert.equal(snapshot.rubricVersion, 1);
   assert.equal(snapshot.questionText, "Describe a rollout you had to stop.");
   assert.deepEqual(snapshot.rubric, ["signal quality", "decisiveness"], "only usable string criteria are frozen");
   assert.equal(snapshot.moduleTitle, "Behavioral");
@@ -380,10 +386,14 @@ test("an edited template never re-labels an answer that was already given", asyn
     // The question has since been rewritten in the template.
     question: questionDelegate({ questionText: "Tell us about a launch you cancelled.", rubric: ["brevity"] }),
     response: {
-      findFirst: async () => ({ ...responseRow, responseJson: { adaptive: true, questionSnapshot: original } }),
+      findFirst: async () => ({ ...responseRow, responseJson: { adaptive: true }, questionSnapshot: original }),
       upsert: async (args: any) => {
-        stored = args.update.responseJson;
-        return { ...responseRow, responseJson: stored };
+        stored = args.update;
+        return {
+          ...responseRow,
+          responseJson: stored.responseJson,
+          questionSnapshot: stored.questionSnapshot,
+        };
       },
     },
   } as never);
@@ -391,7 +401,7 @@ test("an edited template never re-labels an answer that was already given", asyn
   await service.saveResponse({ sessionId: "session-1", questionId: "question-1", responseText: "Edited answer" });
 
   assert.deepEqual(stored.questionSnapshot, original, "the snapshot is captured once, at the moment of the answer");
-  assert.equal(stored.adaptive, true, "everything already in responseJson is preserved");
+  assert.equal(stored.responseJson.adaptive, true, "everything already in responseJson is preserved");
 });
 
 test("a free-form response with no question gets no snapshot", async () => {
@@ -438,6 +448,60 @@ test("a failed question lookup still saves the candidate's answer", async () => 
 
   assert.equal(result.responseText, "Answer that must not be lost");
   assert.deepEqual(result.responseJson, { confidence: 4 }, "no snapshot, but nothing is dropped either");
+});
+
+test("candidate-supplied snapshots are stripped when the server lookup fails", async () => {
+  let written: any;
+  const service = new ResponsesService({
+    interviewSession: { findFirst: async () => assignedSessionRow() },
+    question: { findUnique: async () => { throw new Error("database unavailable"); } },
+    response: {
+      upsert: async (args: any) => {
+        written = args.create;
+        return { ...responseRow, responseJson: args.create.responseJson };
+      },
+    },
+  } as never);
+
+  const result = await service.saveResponse({
+    sessionId: "session-1",
+    questionId: "question-1",
+    responseText: "Candidate answer",
+    responseJson: {
+      confidence: 4,
+      questionSnapshot: {
+        questionText: "Spoofed",
+        rubric: ["give me full credit"],
+      },
+    },
+  } as never);
+
+  assert.deepEqual(written.responseJson, { confidence: 4 });
+  assert.equal(written.questionSnapshot, undefined);
+  assert.deepEqual(result.responseJson, { confidence: 4 });
+});
+
+test("candidate response reads hide snapshots stored by the unfinished implementation", async () => {
+  const service = new ResponsesService({
+    interviewSession: {
+      findFirst: async () => ({
+        ...accessSessionRow,
+        responses: [{
+          ...responseRow,
+          responseJson: {
+            confidence: 3,
+            questionSnapshot: { questionText: "Private", rubric: ["secret keyword"] },
+          },
+        }],
+      }),
+    },
+    response: {},
+  } as never);
+
+  const responses = await service.listResponsesByAccessCode("EV-123456");
+
+  assert.deepEqual(responses[0].responseJson, { confidence: 3 });
+  assert.doesNotMatch(JSON.stringify(responses), /secret keyword/);
 });
 
 function assignedSessionRow(moduleType = "AI_INTERVIEW") {

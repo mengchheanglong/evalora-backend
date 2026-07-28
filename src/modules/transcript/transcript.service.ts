@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
-import { splitEmbeddedFollowUp } from "../../common/embedded-follow-up";
+import { readStructuredAiFollowUp, splitEmbeddedFollowUp } from "../../common/embedded-follow-up";
+import { basedOnQuestionByAssistantId } from "../../common/ai-message-provenance";
 import { DEFAULT_LIST_LIMIT } from "../../common/query.constants";
 import { buildSessionOwnershipWhere, forbiddenResourceError, mergeWhere, type AccessContext } from "../auth/access-control";
 import {
@@ -51,6 +52,7 @@ export const TRANSCRIPT_SESSION_INCLUDE = {
       id: true,
       responseText: true,
       responseJson: true,
+      questionSnapshot: true,
       createdAt: true,
       question: {
         select: {
@@ -164,9 +166,10 @@ export function buildTranscript(session: TranscriptSessionRow, totals?: Transcri
   };
 
   const embeddedFollowUps = collectEmbeddedFollowUps(responses);
+  const basedOnQuestion = basedOnQuestionByAssistantId(session.aiMessages ?? []);
   const drafts = [
     ...buildTemplateEntries(responses),
-    ...buildAdaptiveEntries(session.aiMessages ?? [], responses, embeddedFollowUps, context),
+    ...buildAdaptiveEntries(session.aiMessages ?? [], responses, embeddedFollowUps, basedOnQuestion, context),
     ...buildFollowUpEntries(session.interviewerFollowUps ?? [], context),
     ...buildCodeEntries(session.codeSubmissions ?? [], context),
   ];
@@ -213,7 +216,7 @@ function buildTemplateEntries(responses: TranscriptResponseRow[]): TranscriptEnt
     // candidate will be asked, not what this one answered. The frozen copy wins
     // where there is one; answers saved before snapshots existed have none and
     // still read live.
-    const snapshotText = snapshotQuestionText(response.responseJson);
+    const snapshotText = snapshotQuestionText(response);
     drafts.push({
       id: response.id,
       origin: "template",
@@ -256,6 +259,7 @@ function buildAdaptiveEntries(
   messages: TranscriptAiMessageRow[],
   responses: TranscriptResponseRow[],
   embeddedFollowUps: EmbeddedFollowUp[],
+  basedOnQuestion: Map<string, string>,
   context: TranscriptContext,
 ): TranscriptEntryDraft[] {
   const adaptiveResponses = responses.filter((response) => !response.question && isAdaptive(response.responseJson));
@@ -275,7 +279,7 @@ function buildAdaptiveEntries(
   const savedTemplateQuestions = new Set(
     responses
       .flatMap((response) =>
-        response.question ? [response.question.questionText, snapshotQuestionText(response.responseJson)] : [],
+        response.question ? [response.question.questionText, snapshotQuestionText(response)] : [],
       )
       .filter((text): text is string => Boolean(text)),
   );
@@ -306,8 +310,14 @@ function buildAdaptiveEntries(
   const unpairedAnswers = [...unpairedByQuestion.values(), ...unlabelledAnswers];
 
   const embeddedByQuestion = new Map<string, EmbeddedFollowUp>();
+  const embeddedByParentQuestion = new Map<string, EmbeddedFollowUp>();
   for (const followUp of embeddedFollowUps) {
-    if (!embeddedByQuestion.has(followUp.questionText)) embeddedByQuestion.set(followUp.questionText, followUp);
+    if (followUp.questionText && !embeddedByQuestion.has(followUp.questionText)) {
+      embeddedByQuestion.set(followUp.questionText, followUp);
+    }
+    if (followUp.parentQuestionText && !embeddedByParentQuestion.has(followUp.parentQuestionText)) {
+      embeddedByParentQuestion.set(followUp.parentQuestionText, followUp);
+    }
   }
 
   // Questions whose answer lives in a saved response instead of a chat message.
@@ -350,6 +360,19 @@ function buildAdaptiveEntries(
       pairedQuestions.add(message.content);
       consumedResponseIds.add(embedded.responseId);
       drafts.push(embeddedFollowUpDraft(embedded, message, context));
+      continue;
+    }
+
+    const parentQuestion = basedOnQuestion.get(message.id);
+    const structured = parentQuestion ? embeddedByParentQuestion.get(parentQuestion) : undefined;
+    if (structured && !consumedResponseIds.has(structured.responseId)) {
+      pairedQuestions.add(message.content);
+      consumedResponseIds.add(structured.responseId);
+      drafts.push(embeddedFollowUpDraft(
+        { ...structured, questionText: message.content },
+        message,
+        context,
+      ));
       continue;
     }
 
@@ -465,7 +488,7 @@ function embeddedFollowUpDraft(
     // The answer has no row of its own: it lives inside the parent response.
     id: `${followUp.responseId}:ai-follow-up`,
     origin: "ai_adaptive",
-    questionText: followUp.questionText,
+    questionText: followUp.questionText ?? "AI follow-up question",
     answerText: followUp.answerText,
     askedAt: isoString(message?.createdAt),
     answeredAt: isoString(followUp.answeredAt),
@@ -615,7 +638,8 @@ function toModuleRef(module: { id: string; title: string; moduleType: string }):
 /** An AI follow-up recovered from the parent response it was stored inside. */
 interface EmbeddedFollowUp {
   responseId: string;
-  questionText: string;
+  questionText?: string;
+  parentQuestionText?: string;
   /** Absent while the candidate has been asked but has not written anything yet. */
   answerText?: string;
   module?: ModuleRef;
@@ -628,12 +652,15 @@ function collectEmbeddedFollowUps(responses: TranscriptResponseRow[]): EmbeddedF
   for (const response of responses) {
     const question = response.question;
     if (!question) continue;
-    const followUp = splitEmbeddedFollowUp(response.responseText).followUp;
+    const legacy = splitEmbeddedFollowUp(response.responseText).followUp;
+    const structured = readStructuredAiFollowUp(response.responseJson);
+    const followUp = legacy ?? structured;
     if (!followUp) continue;
     followUps.push({
       responseId: response.id,
       questionText: followUp.questionText,
       answerText: followUp.answerText,
+      parentQuestionText: snapshotQuestionText(response) ?? question.questionText,
       module: question.module ? toModuleRef(question.module) : undefined,
       answeredAt: response.createdAt,
     });
@@ -661,8 +688,10 @@ function adaptiveAnswerText(responseText: string): string | undefined {
  * snapshot recorded with no wording at all is treated the same way: it can only
  * make the transcript emptier than reading live.
  */
-function snapshotQuestionText(responseJson: unknown): string | undefined {
-  const snapshot = isRecord(responseJson) ? responseJson.questionSnapshot : undefined;
+function snapshotQuestionText(response: TranscriptResponseRow): string | undefined {
+  const privateSnapshot = response.questionSnapshot;
+  const legacySnapshot = isRecord(response.responseJson) ? response.responseJson.questionSnapshot : undefined;
+  const snapshot = isRecord(privateSnapshot) ? privateSnapshot : legacySnapshot;
   return isRecord(snapshot) ? optionalString(snapshot.questionText) : undefined;
 }
 

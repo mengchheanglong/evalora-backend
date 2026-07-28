@@ -17,11 +17,11 @@ export const hrBehavioralModule: PrebuiltModuleDefinition = {
       "questionText": "Tell us about a time you handled a sensitive employee or candidate issue while staying fair and confidential.",
       "questionType": "scenario",
       "rubric": [
-        "limit who the details were shared with",
-        "hear both sides before concluding",
-        "acknowledge how the person felt",
-        "follow the policy that applied",
-        "record the facts rather than impressions"
+        "confidentiality",
+        "fairness",
+        "empathy",
+        "policy-awareness",
+        "evidence"
       ]
     },
     {
@@ -29,10 +29,10 @@ export const hrBehavioralModule: PrebuiltModuleDefinition = {
       "questionText": "How would you handle a hiring manager who wants to skip a required interview or documentation step?",
       "questionType": "scenario",
       "rubric": [
-        "explain why the step exists",
-        "offer a faster route that still complies",
-        "name the legal or fairness risk of skipping",
-        "hold the line without making it personal"
+        "process-discipline",
+        "stakeholder-communication",
+        "risk-management",
+        "professionalism"
       ]
     },
     {
@@ -40,11 +40,11 @@ export const hrBehavioralModule: PrebuiltModuleDefinition = {
       "questionText": "Tell us about a time you helped resolve conflict between employees, managers, or candidates. What did you do first?",
       "questionType": "short_answer",
       "rubric": [
-        "hear each person separately first",
-        "avoid taking a side too early",
-        "gather what was actually said or done",
-        "agree a concrete resolution",
-        "check back after an agreed period"
+        "listening",
+        "neutrality",
+        "evidence-gathering",
+        "resolution",
+        "follow-up"
       ]
     },
     {
@@ -52,10 +52,10 @@ export const hrBehavioralModule: PrebuiltModuleDefinition = {
       "questionText": "Describe a time an HR policy or process changed quickly. How did you adapt and help others understand the change?",
       "questionType": "short_answer",
       "rubric": [
-        "explain what changed and why",
-        "answer the questions people actually asked",
-        "apply the new policy consistently",
-        "help managers deliver the message"
+        "adaptability",
+        "communication",
+        "policy-understanding",
+        "change-management"
       ]
     },
     {
@@ -63,10 +63,10 @@ export const hrBehavioralModule: PrebuiltModuleDefinition = {
       "questionText": "Tell us about an HR or administrative mistake you made. How did you fix it and prevent it from happening again?",
       "questionType": "short_answer",
       "rubric": [
-        "state the mistake without softening it",
-        "tell the affected people promptly",
-        "explain how the mistake happened",
-        "describe the check added afterward"
+        "ownership",
+        "transparency",
+        "root-cause-analysis",
+        "process-improvement"
       ]
     }
   ]

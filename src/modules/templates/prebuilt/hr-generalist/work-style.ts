@@ -16,10 +16,10 @@ export const hrWorkStyleModule: PrebuiltModuleDefinition = {
       "questionText": "Which work environment helps you perform best, and how do you communicate workload limits before quality drops?",
       "questionType": "short_answer",
       "rubric": [
-        "name the conditions they work best in",
-        "raise the limit before quality slips",
-        "propose what to drop or delay",
-        "own the commitment they already made"
+        "self-awareness",
+        "communication",
+        "ownership",
+        "prioritization"
       ]
     },
     {
@@ -35,9 +35,9 @@ export const hrWorkStyleModule: PrebuiltModuleDefinition = {
         ]
       },
       "rubric": [
-        "record decisions at the time they are made",
-        "say what they do when details are missing",
-        "keep the same standard under time pressure"
+        "documentation",
+        "accountability",
+        "process-consistency"
       ]
     },
     {
@@ -45,10 +45,10 @@ export const hrWorkStyleModule: PrebuiltModuleDefinition = {
       "questionText": "Three urgent requests arrive at once: payroll error, candidate offer deadline, and manager policy question. How do you prioritize?",
       "questionType": "scenario",
       "rubric": [
-        "rank by harm caused and by deadline",
-        "treat a pay problem as time critical",
-        "name the legal or compliance risk",
-        "tell the waiting people when to expect a reply"
+        "urgency-assessment",
+        "employee-impact",
+        "risk-management",
+        "communication"
       ]
     },
     {
@@ -56,10 +56,10 @@ export const hrWorkStyleModule: PrebuiltModuleDefinition = {
       "questionText": "What daily habits help you protect confidential employee and candidate information?",
       "questionType": "short_answer",
       "rubric": [
-        "keep records in the approved system only",
-        "share on a need-to-know basis",
-        "describe a habit such as locking screens",
-        "apply it to casual conversation too"
+        "privacy-awareness",
+        "systems-discipline",
+        "need-to-know",
+        "consistency"
       ]
     },
     {
@@ -67,10 +67,10 @@ export const hrWorkStyleModule: PrebuiltModuleDefinition = {
       "questionText": "How do you stay helpful to employees while still enforcing policy consistently?",
       "questionType": "short_answer",
       "rubric": [
-        "listen before quoting the policy",
-        "explain what they can and cannot do",
-        "apply the rule the same way for everyone",
-        "escalate rather than quietly make an exception"
+        "service-mindset",
+        "boundaries",
+        "fairness",
+        "policy-consistency"
       ]
     }
   ]

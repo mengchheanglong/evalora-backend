@@ -3,6 +3,8 @@ import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { type SaveResponseInput, ResponsesService } from "./responses.service";
 import { CandidateAccessRateLimitGuard } from "../sessions/access-rate-limit.guard";
+import { ValidateDto } from "../../common/pipes/validate-dto.pipe";
+import { SaveResponseDto } from "./dto/save-response.dto";
 
 @Controller("responses")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -11,9 +13,9 @@ export class ResponsesController {
 
   @Post()
   @Roles("admin", "organization", "interviewer")
-  async submit(@Body() body: SaveResponseInput, @Req() request: AuthenticatedRequest) {
+  async submit(@Body(new ValidateDto(SaveResponseDto)) body: SaveResponseDto, @Req() request: AuthenticatedRequest) {
     try {
-      return await this.responsesService.saveResponse(body, toAccessContext(request.user));
+      return await this.responsesService.saveResponse(body as SaveResponseInput, toAccessContext(request.user));
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new BadRequestException(error instanceof Error ? error.message : "Response save failed.");
@@ -33,9 +35,12 @@ export class CandidateResponsesAccessController {
   constructor(@Inject(ResponsesService) private readonly responsesService: ResponsesService) {}
 
   @Post(":accessCode")
-  async submitByAccessCode(@Param("accessCode") accessCode: string, @Body() body: SaveResponseInput) {
+  async submitByAccessCode(
+    @Param("accessCode") accessCode: string,
+    @Body(new ValidateDto(SaveResponseDto)) body: SaveResponseDto,
+  ) {
     try {
-      return await this.responsesService.saveResponseByAccessCode(accessCode, body);
+      return await this.responsesService.saveResponseByAccessCode(accessCode, body as SaveResponseInput);
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new BadRequestException(error instanceof Error ? error.message : "Response save failed.");

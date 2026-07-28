@@ -1,9 +1,11 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { splitEmbeddedFollowUp } from "../../common/embedded-follow-up";
+import { readStructuredAiFollowUp, splitEmbeddedFollowUp } from "../../common/embedded-follow-up";
+import { basedOnQuestionByAssistantId } from "../../common/ai-message-provenance";
 import type { JsonValue, ModuleType } from "../../domain/evalora.types";
 import type { AiService } from "../ai/ai.service";
 import { evaluateResponse, generateCandidateReport, type EvaluateResponseInput, type EvaluationResultDto, type GeneratedCandidateReport } from "../ai/evaluation.service";
 import { buildSessionOwnershipWhere, forbiddenResourceError, mergeWhere, type AccessContext } from "../auth/access-control";
+import { PREBUILT_ASSESSMENT_TEMPLATES } from "../templates/prebuilt-templates";
 import type { QuestionSnapshot } from "../responses/responses.service";
 
 interface ReportPersistenceClient {
@@ -59,7 +61,16 @@ interface EvaluationResponseRow {
   id?: unknown;
   responseText?: unknown;
   responseJson?: JsonValue | null;
+  questionSnapshot?: JsonValue | null;
   question?: EvaluationQuestionRow | null;
+}
+
+interface EvaluationAiMessageRow {
+  id: string;
+  role: string;
+  content: string;
+  metadata?: JsonValue | null;
+  createdAt?: Date | null;
 }
 
 interface EvaluationSessionRow {
@@ -68,6 +79,7 @@ interface EvaluationSessionRow {
   candidate?: { name?: unknown } | null;
   template?: { title?: unknown; modules?: EvaluationModuleRow[] | null } | null;
   responses?: EvaluationResponseRow[] | null;
+  aiMessages?: EvaluationAiMessageRow[] | null;
   codeSubmissions?: EvaluationCodeSubmissionRow[] | null;
   interviewerFollowUps?: EvaluationInterviewerFollowUpRow[] | null;
 }
@@ -131,6 +143,13 @@ interface PersistReportInput {
 }
 
 const REPORT_ADVISORY_NOTICE = "AI feedback is advisory and not a final hiring decision.";
+const CANONICAL_PREBUILT_RUBRIC_BY_QUESTION = new Map(
+  PREBUILT_ASSESSMENT_TEMPLATES.flatMap((template) =>
+    template.modules.flatMap((module) =>
+      module.questions.map((question) => [normalizeQuestionText(question.questionText), question.rubric] as const),
+    ),
+  ),
+);
 
 const REPORT_EVALUATION_SESSION_INCLUDE = {
   candidate: { select: { name: true } },
@@ -150,6 +169,10 @@ const REPORT_EVALUATION_SESSION_INCLUDE = {
         },
       },
     },
+    orderBy: { createdAt: "asc" },
+  },
+  aiMessages: {
+    select: { id: true, role: true, content: true, metadata: true, createdAt: true },
     orderBy: { createdAt: "asc" },
   },
   codeSubmissions: {
@@ -375,13 +398,14 @@ export class ReportsService {
 
   private async evaluateSessionResponses(session: EvaluationSessionRow): Promise<EvaluationResultDto[]> {
     const groups = groupResponsesByModule(session.responses ?? []);
+    const aiFollowUpQuestions = buildAiFollowUpQuestionIndex(session.aiMessages ?? []);
     const inputs: EvaluateResponseInput[] = [];
     const templateModules = session.template?.modules ?? [];
 
     for (const module of templateModules) {
       const moduleId = optionalString(module.id);
       const group = moduleId ? groups.get(moduleId) : undefined;
-      const evidence = group ? buildModuleEvidence(group.entries) : emptyEvidence();
+      const evidence = group ? buildModuleEvidence(group.entries, aiFollowUpQuestions) : emptyEvidence();
       inputs.push({
         moduleId,
         moduleTitle: optionalString(module.title),
@@ -397,7 +421,7 @@ export class ReportsService {
     // only through Response.question.module.
     for (const [key, group] of groups) {
       if (inputs.some((input) => input.moduleId === key)) continue;
-      const evidence = buildModuleEvidence(group.entries);
+      const evidence = buildModuleEvidence(group.entries, aiFollowUpQuestions);
       inputs.push({
         moduleId: optionalString(group.module.id),
         moduleTitle: optionalString(group.module.title),
@@ -682,25 +706,44 @@ function buildInterviewerFollowUpEvidence(followUps: EvaluationInterviewerFollow
  * adaptive answers, on rows saved before snapshots existed, and when the save-time
  * question lookup failed — those fall back to the live template row.
  */
-function readQuestionSnapshot(responseJson: JsonValue | null | undefined): Partial<QuestionSnapshot> | undefined {
+function readQuestionSnapshot(response: EvaluationResponseRow): Partial<QuestionSnapshot> | undefined {
+  if (response.questionSnapshot && typeof response.questionSnapshot === "object" && !Array.isArray(response.questionSnapshot)) {
+    return response.questionSnapshot as Partial<QuestionSnapshot>;
+  }
+  const responseJson = response.responseJson;
   if (!responseJson || typeof responseJson !== "object" || Array.isArray(responseJson)) return undefined;
-  const snapshot = (responseJson as Record<string, unknown>).questionSnapshot;
-  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return undefined;
-  return snapshot as Partial<QuestionSnapshot>;
+  const legacy = (responseJson as Record<string, unknown>).questionSnapshot;
+  return legacy && typeof legacy === "object" && !Array.isArray(legacy)
+    ? legacy as Partial<QuestionSnapshot>
+    : undefined;
 }
 
-/** The rubric as it stood when this answer was given. A snapshot wins even when its
- *  rubric is empty: criteria added to the template afterwards were never put to this
- *  candidate, so they must not re-score an answer that is already in the past. */
+/**
+ * Versioned private snapshots are authoritative, including an intentionally
+ * empty rubric. Unversioned snapshots came from the unfinished public storage
+ * format and cannot be trusted for scoring.
+ *
+ * A seeded database may still contain the verbose prebuilt rewrite after the
+ * source catalog is corrected. For an exact prebuilt question, replace only that
+ * known instruction-style shape with the canonical concept rubric. Concise
+ * custom rubrics remain untouched.
+ */
 function entryRubric(entry: GroupedResponseEntry): string[] {
-  const snapshot = readQuestionSnapshot(entry.response.responseJson);
-  return snapshot ? stringArray(snapshot.rubric) : stringArray(entry.question.rubric);
+  const snapshot = readQuestionSnapshot(entry.response);
+  if (snapshot?.rubricVersion === 1) return stringArray(snapshot.rubric);
+
+  const liveRubric = stringArray(entry.question.rubric);
+  const questionText = optionalString(snapshot?.questionText) ?? optionalString(entry.question.questionText);
+  const canonical = questionText
+    ? CANONICAL_PREBUILT_RUBRIC_BY_QUESTION.get(normalizeQuestionText(questionText))
+    : undefined;
+  return canonical && isInstructionStyleRubric(liveRubric) ? canonical : liveRubric;
 }
 
 /** The wording the candidate was shown, so an edited template can no longer re-label
  *  a past answer in the report. */
 function entryQuestionText(entry: GroupedResponseEntry): string {
-  const snapshot = readQuestionSnapshot(entry.response.responseJson);
+  const snapshot = readQuestionSnapshot(entry.response);
   return optionalString(snapshot?.questionText) ?? stringValue(entry.question.questionText, "Untitled question");
 }
 
@@ -713,11 +756,16 @@ function entryQuestionText(entry: GroupedResponseEntry): string {
  */
 function structuredResponseJson(value: JsonValue | null | undefined): JsonValue | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value ?? undefined;
-  const rest = Object.fromEntries(Object.entries(value).filter(([key]) => key !== "questionSnapshot"));
+  const rest = Object.fromEntries(
+    Object.entries(value).filter(([key]) => key !== "questionSnapshot" && key !== "aiFollowUp"),
+  );
   return Object.keys(rest).length ? (rest as JsonValue) : undefined;
 }
 
-function buildModuleEvidence(entries: GroupedResponseEntry[]): ModuleEvidence {
+function buildModuleEvidence(
+  entries: GroupedResponseEntry[],
+  aiFollowUpQuestions: Map<string, string>,
+): ModuleEvidence {
   const answers: string[] = [];
   const questionContext: string[] = [];
 
@@ -726,9 +774,18 @@ function buildModuleEvidence(entries: GroupedResponseEntry[]): ModuleEvidence {
     // The stored column can carry an AI follow-up exchange appended to the
     // candidate's answer. Its QUESTION is model-authored, so it belongs in the
     // context alongside the template question, never in the scored text.
-    const { answerText, followUp } = splitEmbeddedFollowUp(stringValue(entry.response.responseText, ""));
+    const legacy = splitEmbeddedFollowUp(stringValue(entry.response.responseText, ""));
+    const structured = readStructuredAiFollowUp(entry.response.responseJson);
+    const followUp = legacy.followUp ?? (
+      structured
+        ? {
+          questionText: structured.questionText ?? aiFollowUpQuestions.get(questionText) ?? "AI follow-up question",
+          answerText: structured.answerText,
+        }
+        : undefined
+    );
 
-    const lines = [answerText ?? ""];
+    const lines = [legacy.answerText ?? ""];
     // The candidate's reply to the follow-up is still their own words.
     if (followUp?.answerText) lines.push(followUp.answerText);
     const structuredResponse = formatJson(structuredResponseJson(entry.response.responseJson));
@@ -747,6 +804,30 @@ function buildModuleEvidence(entries: GroupedResponseEntry[]): ModuleEvidence {
   }
 
   return { responseText: answers.join("\n\n"), questionContext };
+}
+
+function buildAiFollowUpQuestionIndex(messages: EvaluationAiMessageRow[]): Map<string, string> {
+  const basedOnQuestion = basedOnQuestionByAssistantId(messages);
+  const questions = new Map<string, string>();
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    const parent = basedOnQuestion.get(message.id);
+    const question = optionalString(message.content);
+    if (parent && question) questions.set(parent, question);
+  }
+  return questions;
+}
+
+function normalizeQuestionText(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function isInstructionStyleRubric(rubric: string[]): boolean {
+  return rubric.some((criterion) => {
+    const words = criterion.trim().split(/\s+/);
+    return words.length > 4
+      || /\b(describe|explain|discuss|mention|provide|show|demonstrate|include|outline)\b/i.test(criterion);
+  });
 }
 
 function buildCodeSubmissionEvidence(submissions: EvaluationCodeSubmissionRow[]): ModuleEvidence {

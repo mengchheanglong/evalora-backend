@@ -4,6 +4,7 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { forbiddenResourceError } from "../auth/access-control";
 import { AiService, type FollowUpInput, type GeneratedFollowUp } from "./ai.service";
 import { createDeepSeekProviderFromEnv, DeepSeekAiProvider, type DeepSeekDeltaHandler } from "./deepseek.provider";
+import { basedOnQuestionByAssistantId } from "../../common/ai-message-provenance";
 
 export interface FollowUpStreamHandler {
   /** Appends text to whatever the candidate is already reading. */
@@ -38,6 +39,7 @@ export class CandidateAiService {
       orderBy: { createdAt: "asc" },
       select: { id: true, role: true, content: true, createdAt: true, metadata: true },
     });
+    const basedOnQuestion = basedOnQuestionByAssistantId(messages);
     return messages.map((message) => ({
       id: message.id,
       role: message.role,
@@ -46,7 +48,7 @@ export class CandidateAiService {
       // Lets the candidate app put a restored follow-up back under the answer it
       // belongs to without the question being copied onto that answer. Nothing else
       // from metadata is exposed to a candidate: it also carries the scoring rubric.
-      basedOnQuestion: metadataString(message.metadata, "basedOnQuestion"),
+      basedOnQuestion: basedOnQuestion.get(message.id),
     }));
   }
 

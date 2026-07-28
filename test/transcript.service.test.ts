@@ -353,6 +353,77 @@ test("getTranscript keeps an AI-authored follow-up out of the candidate's own an
   assert.deepEqual(transcript.entries.map((entry) => entry.origin), ["template", "ai_adaptive"]);
 });
 
+test("getTranscript renders a structured AI follow-up as answered evidence", async () => {
+  const service = new TranscriptService(
+    createFakePrisma({
+      ...aiFollowUpRow,
+      responses: [{
+        ...(aiFollowUpRow.responses ?? [])[0],
+        responseText: CANDIDATE_ANSWER,
+        responseJson: {
+          aiFollowUp: {
+            question: AI_FOLLOW_UP,
+            answer: FOLLOW_UP_ANSWER,
+          },
+        },
+      }],
+      aiMessages: [{
+        id: "message-2",
+        role: "assistant",
+        content: AI_FOLLOW_UP,
+        metadata: { basedOnQuestion: "Describe a system you scaled." },
+        createdAt: at(4),
+      }],
+    }),
+  );
+
+  const transcript = await service.getTranscript("session-1", interviewerAccess);
+  const [templateEntry] = byOrigin(transcript.entries, "template");
+  const [followUpEntry] = byOrigin(transcript.entries, "ai_adaptive");
+
+  assert.equal(templateEntry.answerText, CANDIDATE_ANSWER);
+  assert.equal(followUpEntry.questionText, AI_FOLLOW_UP);
+  assert.equal(followUpEntry.answerText, FOLLOW_UP_ANSWER);
+  assert.equal(followUpEntry.isEvidence, true);
+});
+
+test("getTranscript recovers an answer-only structured follow-up from legacy AI messages", async () => {
+  const legacyTime = at(4);
+  const service = new TranscriptService(
+    createFakePrisma({
+      ...aiFollowUpRow,
+      responses: [{
+        ...(aiFollowUpRow.responses ?? [])[0],
+        responseText: CANDIDATE_ANSWER,
+        responseJson: { aiFollowUp: { answer: FOLLOW_UP_ANSWER } },
+      }],
+      aiMessages: [
+        {
+          id: "legacy-candidate",
+          role: "candidate",
+          content: CANDIDATE_ANSWER,
+          metadata: { question: "Describe a system you scaled." },
+          createdAt: legacyTime,
+        },
+        {
+          id: "legacy-assistant",
+          role: "assistant",
+          content: AI_FOLLOW_UP,
+          metadata: { provider: "deepseek" },
+          createdAt: legacyTime,
+        },
+      ],
+    }),
+  );
+
+  const transcript = await service.getTranscript("session-1", interviewerAccess);
+  const followUps = byOrigin(transcript.entries, "ai_adaptive");
+
+  assert.equal(followUps.length, 1);
+  assert.equal(followUps[0].questionText, AI_FOLLOW_UP);
+  assert.equal(followUps[0].answerText, FOLLOW_UP_ANSWER);
+});
+
 test("getTranscript leaves an ambiguous follow-up marker inside the candidate's answer", async () => {
   const ambiguous = [
     // The candidate quoted the marker themselves: two blocks cannot be told apart.
