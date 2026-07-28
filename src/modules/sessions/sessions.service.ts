@@ -210,6 +210,24 @@ const CANDIDATE_SELECT = { id: true, role: true, organizationId: true };
 const INVITE_ONLY_PASSWORD_PREFIX = "evalora-invite-only";
 const SALT_ROUNDS = 12;
 
+/**
+ * Candidates are invite-only: they authenticate with the private access code and
+ * `login` refuses the CANDIDATE role outright, so this stored hash is a
+ * placeholder that can never grant access.
+ *
+ * It is computed once per process instead of per candidate because bcryptjs is
+ * pure JavaScript and blocks the event loop — hashing on every session creation
+ * serialized concurrent requests and dominated create latency under load. The
+ * plaintext is a random UUID that is never stored, logged, or transmitted.
+ */
+let inviteOnlyPasswordHash: string | null = null;
+async function getInviteOnlyPasswordHash(): Promise<string> {
+  if (!inviteOnlyPasswordHash) {
+    inviteOnlyPasswordHash = await bcrypt.hash(`${INVITE_ONLY_PASSWORD_PREFIX}-${randomUUID()}`, SALT_ROUNDS);
+  }
+  return inviteOnlyPasswordHash;
+}
+
 @Injectable()
 export class SessionsService {
   private readonly generateAccessCode: () => string;
@@ -525,7 +543,7 @@ export class SessionsService {
       return existingCandidate.id;
     }
 
-    const passwordHash = await bcrypt.hash(`${INVITE_ONLY_PASSWORD_PREFIX}-${randomUUID()}`, SALT_ROUNDS);
+    const passwordHash = await getInviteOnlyPasswordHash();
     const candidate = await create({
       data: {
         name,

@@ -2,11 +2,22 @@ import { BadRequestException, Controller, Get, Inject, Query, Req, UseGuards } f
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { AnalyticsService } from "./analytics.service";
+import { SystemHealthService } from "./system-health.service";
 
 @Controller("analytics")
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AnalyticsController {
-  constructor(@Inject(AnalyticsService) private readonly analyticsService: AnalyticsService) {}
+  constructor(
+    @Inject(AnalyticsService) private readonly analyticsService: AnalyticsService,
+    @Inject(SystemHealthService) private readonly systemHealthService: SystemHealthService,
+  ) {}
+
+  /** Operational view: live transport stats, workload, and dependency health. */
+  @Get("system-health")
+  @Roles("admin", "organization", "interviewer")
+  systemHealth(@Req() request: AuthenticatedRequest) {
+    return this.systemHealthService.snapshot(toAccessContext(request.user));
+  }
 
   @Get("summary")
   @Roles("admin", "organization", "interviewer")

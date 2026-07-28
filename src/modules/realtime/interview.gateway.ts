@@ -61,6 +61,9 @@ function roomName(sessionId: string) {
 })
 export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(InterviewGateway.name);
+  /** Cheap in-process counters powering the System Activity view. */
+  private readonly counters = { connections: 0, disconnects: 0, joins: 0, rejectedJoins: 0, eventsEmitted: 0 };
+  private readonly startedAt = Date.now();
 
   @WebSocketServer()
   server!: Server;
@@ -73,6 +76,7 @@ export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnec
   // ------------------------------------------------------------- lifecycle
 
   handleConnection(client: Socket) {
+    this.counters.connections += 1;
     // Registered synchronously so a `join` that arrives before authentication
     // finishes can await it instead of being rejected as unauthenticated.
     authInFlight.set(client, this.authenticate(client));
@@ -126,6 +130,7 @@ export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   handleDisconnect(client: Socket) {
+    this.counters.disconnects += 1;
     const identity = sockets.get(client);
     if (!identity) return;
     // Announce departure so the other side sees presence drop immediately.
@@ -148,7 +153,11 @@ export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnec
       if (!identity) return { ok: false, message: "Not authenticated." };
 
       const session = await this.resolveAuthorizedSession(identity, body);
-      if (!session) return { ok: false, message: "Session not found or access denied." };
+      if (!session) {
+        this.counters.rejectedJoins += 1;
+        return { ok: false, message: "Session not found or access denied." };
+      }
+      this.counters.joins += 1;
 
       await client.join(roomName(session.id));
       identity.rooms.add(session.id);
@@ -186,7 +195,29 @@ export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnec
   /** Called by services after a successful DB write. */
   emitToSession(sessionId: string, event: string, payload: unknown) {
     if (!this.server) return;
+    this.counters.eventsEmitted += 1;
     this.server.to(roomName(sessionId)).emit(event, payload);
+  }
+
+  /** Live transport stats for the System Activity dashboard. */
+  getRealtimeStats() {
+    const container = this.server as unknown as Record<string, unknown>;
+    const nested = container.sockets as Record<string, unknown> | undefined;
+    const rooms =
+      (container.adapter as { rooms?: Map<string, Set<string>> } | undefined)?.rooms ??
+      (nested?.adapter as { rooms?: Map<string, Set<string>> } | undefined)?.rooms;
+    const socketsById = (nested instanceof Map ? nested : (nested?.sockets as Map<string, unknown> | undefined)) as
+      | Map<string, unknown>
+      | undefined;
+
+    // socket.io also creates a room per socket id; only `session:` rooms count.
+    const sessionRooms = rooms ? [...rooms.keys()].filter((key) => key.startsWith("session:")) : [];
+    return {
+      connectedSockets: socketsById?.size ?? 0,
+      activeSessionRooms: sessionRooms.length,
+      ...this.counters,
+      uptimeSeconds: Math.round((Date.now() - this.startedAt) / 1000),
+    };
   }
 
   async broadcastPresence(sessionId: string) {

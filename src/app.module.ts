@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { AnalyticsController } from "./modules/analytics/analytics.controller";
 import { AnalyticsService } from "./modules/analytics/analytics.service";
+import { SystemHealthService } from "./modules/analytics/system-health.service";
 import { AppController } from "./app.controller";
 import { AiController, CandidateAiController } from "./modules/ai/ai.controller";
 import { AiService } from "./modules/ai/ai.service";
@@ -54,6 +55,7 @@ import { PrismaModule } from "./prisma/prisma.module";
   ],
   providers: [
     AnalyticsService,
+    SystemHealthService,
     AuthRateLimitGuard,
     CandidateAccessRateLimitGuard,
     CandidateAiService,
