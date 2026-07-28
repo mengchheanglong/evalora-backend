@@ -29,6 +29,8 @@ import { SessionsService } from "./modules/sessions/sessions.service";
 import { CandidateAccessRateLimitGuard } from "./modules/sessions/access-rate-limit.guard";
 import { TemplatesController } from "./modules/templates/templates.controller";
 import { TemplatesService } from "./modules/templates/templates.service";
+import { TranscriptController } from "./modules/transcript/transcript.controller";
+import { TranscriptService } from "./modules/transcript/transcript.service";
 import { OrganizationController } from "./modules/organization/organization.controller";
 import { OrganizationService } from "./modules/organization/organization.service";
 import { createEmailServiceFromEnv, EmailService } from "./modules/email/email.service";
@@ -51,6 +53,7 @@ import { PrismaModule } from "./prisma/prisma.module";
     InterviewerFollowUpsController,
     CandidateInterviewerFollowUpsController,
     ReportsController,
+    TranscriptController,
     AnalyticsController,
   ],
   providers: [
@@ -98,6 +101,11 @@ import { PrismaModule } from "./prisma/prisma.module";
     {
       provide: ResponsesService,
       useFactory: (prisma: PrismaService) => new ResponsesService(prisma),
+      inject: [PrismaService],
+    },
+    {
+      provide: TranscriptService,
+      useFactory: (prisma: PrismaService) => new TranscriptService(prisma),
       inject: [PrismaService],
     },
     {

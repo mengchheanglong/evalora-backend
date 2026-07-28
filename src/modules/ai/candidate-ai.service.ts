@@ -1,17 +1,35 @@
-import { BadRequestException, Inject, Injectable } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, Optional, ServiceUnavailableException } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { forbiddenResourceError } from "../auth/access-control";
-import { AiService } from "./ai.service";
+import { AiService, type FollowUpInput, type GeneratedFollowUp } from "./ai.service";
+import { createDeepSeekProviderFromEnv, DeepSeekAiProvider, type DeepSeekDeltaHandler } from "./deepseek.provider";
+
+export interface FollowUpStreamHandler {
+  /** Appends text to whatever the candidate is already reading. */
+  onDelta: DeepSeekDeltaHandler;
+  /**
+   * Replaces everything streamed so far with `text`. Needed because a stream that
+   * stops mid-clause leaves a half-written question on screen, and appending a second
+   * question to it produces one unreadable run-on sentence.
+   */
+  onReplace: (text: string) => void;
+}
 
 @Injectable()
 export class CandidateAiService {
   private readonly adaptiveSaveLocks = new Map<string, Promise<void>>();
+  private readonly streamingProvider: DeepSeekAiProvider;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiService) private readonly aiService: AiService,
-  ) {}
+    // Streaming needs the provider itself, not the buffered AiService wrapper. The
+    // provider is not a module provider, so it is built from the environment here.
+    @Optional() @Inject(DeepSeekAiProvider) streamingProvider?: DeepSeekAiProvider,
+  ) {
+    this.streamingProvider = streamingProvider ?? createDeepSeekProviderFromEnv();
+  }
 
   async conversation(accessCode: string) {
     const session = await this.findOpenSession(accessCode);
@@ -56,6 +74,98 @@ export class CandidateAiService {
       this.prisma.aIMessage.create({ data: { sessionId: session.id, role: "assistant", content: generated.question, metadata: { provider: generated.provider, basedOn: generated.basedOn } } }),
     ]);
     return generated;
+  }
+
+  /**
+   * Same contract as followUp, but the question is delivered token by token while the
+   * model writes it. Access gating and validation run before the first delta so a
+   * rejected request can still fail as a normal HTTP error.
+   *
+   * The streamed text is only a preview: this method resolves after the question is
+   * stored, so the caller can treat its return value as the commit point and never
+   * hand the candidate a question that has no row behind it.
+   */
+  async followUpStream(
+    accessCode: string,
+    input: { question?: string; answer?: string; rubric?: string[] },
+    handler: FollowUpStreamHandler,
+  ): Promise<GeneratedFollowUp> {
+    const session = await this.findOpenSession(accessCode);
+    const question = requiredText(input.question, "Question is required.", 4_000);
+    const answer = requiredText(input.answer, "Answer is required.", 12_000);
+
+    const generated = await this.streamFollowUpQuestion({ question, answer, rubric: safeStringArray(input.rubric, 10) }, handler);
+    await this.persistStreamedFollowUp(session.id, { question, answer, generated });
+    return generated;
+  }
+
+  /**
+   * The candidate is already reading the question by the time this runs, so a brief
+   * database blip must not be the difference between an answered question and no
+   * record of it. Both rows stay in one transaction - retrying a partial write would
+   * leave an orphan answer - and the retries are what make the late failure survivable.
+   */
+  private async persistStreamedFollowUp(
+    sessionId: string,
+    context: { question: string; answer: string; generated: GeneratedFollowUp },
+  ): Promise<void> {
+    const { question, answer, generated } = context;
+    for (let attempt = 1; attempt <= FOLLOW_UP_PERSIST_ATTEMPTS; attempt += 1) {
+      try {
+        await this.prisma.$transaction([
+          this.prisma.aIMessage.create({ data: { sessionId, role: "candidate", content: answer, metadata: { question } } }),
+          this.prisma.aIMessage.create({
+            data: {
+              sessionId,
+              role: "assistant",
+              content: generated.question,
+              metadata: { provider: generated.provider, basedOn: generated.basedOn, streamed: true },
+            },
+          }),
+        ]);
+        return;
+      } catch {
+        if (attempt >= FOLLOW_UP_PERSIST_ATTEMPTS) break;
+        await delay(FOLLOW_UP_PERSIST_RETRY_MS * attempt);
+      }
+    }
+
+    // Every retry failed, so the candidate must not be left answering an unsaved
+    // question. The caller withdraws the preview and shows this message instead.
+    throw new ServiceUnavailableException("We could not save this question. Please send your answer again in a moment.");
+  }
+
+  private async streamFollowUpQuestion(input: FollowUpInput, handler: FollowUpStreamHandler): Promise<GeneratedFollowUp> {
+    const basedOn = input.answer ? "candidate_answer" : "default_follow_up";
+    let emitted = "";
+    const onDelta: DeepSeekDeltaHandler = (text) => {
+      emitted += text;
+      handler.onDelta(text);
+    };
+
+    try {
+      const streamed = await this.streamingProvider.streamFollowUp(input, onDelta);
+      const usable = usableStreamedQuestion(streamed.text, streamed.truncated);
+      if (usable) {
+        // A cut-off stream ends mid-clause, so the trimmed question replaces what is on
+        // screen. It is never patched by writing more text after the dangling words.
+        if (usable !== emitted.trim()) handler.onReplace(usable);
+        return { question: usable, basedOn, provider: "deepseek" };
+      }
+    } catch {
+      // Falls through to the deterministic question below.
+    }
+
+    // A missing key or a failed upstream must never leave the candidate on a dead
+    // spinner, so the deterministic question is still delivered. Appending it to a
+    // half-written question is what produced "...between latency andWhat trade-off
+    // did you consider", so anything already on screen is replaced outright.
+    if (emitted.trim()) {
+      handler.onReplace(FALLBACK_FOLLOW_UP_QUESTION);
+    } else {
+      for (const delta of splitIntoDeltas(FALLBACK_FOLLOW_UP_QUESTION)) handler.onDelta(delta);
+    }
+    return { question: FALLBACK_FOLLOW_UP_QUESTION, basedOn, provider: "fallback" };
   }
 
   /**
@@ -234,6 +344,15 @@ export class CandidateAiService {
   }
 }
 
+// Mirrors the deterministic follow-up AiService returns when no provider answers.
+const FALLBACK_FOLLOW_UP_QUESTION = "What trade-off did you consider, and how did you decide between options?";
+const FALLBACK_DELTA_PARTS = 4;
+const FOLLOW_UP_PERSIST_ATTEMPTS = 3;
+const FOLLOW_UP_PERSIST_RETRY_MS = 100;
+// Shorter than this a trimmed stream is a scrap of a sentence, not a question worth
+// asking, so the deterministic question reads better than whatever arrived.
+const MIN_STREAMED_QUESTION_LENGTH = 20;
+
 const ADAPTIVE_CONTEXT_BUDGET = 48_000;
 const ADAPTIVE_MIN_ENTRY_LENGTH = 160;
 
@@ -255,6 +374,39 @@ export function compactAdaptiveHistory(responses: AdaptiveResponseContext[]): st
 
   const entryLimit = Math.max(ADAPTIVE_MIN_ENTRY_LENGTH, Math.floor(ADAPTIVE_CONTEXT_BUDGET / entries.length));
   return entries.map((entry) => truncateText(entry, entryLimit));
+}
+
+/**
+ * Decides what a candidate should end up reading when a stream was cut short.
+ * A whole question the model actually wrote beats a generic one, so a truncated
+ * stream is trimmed back to its last complete question and kept. Below that the
+ * remainder is a dangling clause with no question in it, and the candidate is better
+ * served by the deterministic question than by a fragment they cannot answer.
+ */
+function usableStreamedQuestion(text: string, truncated: boolean): string | undefined {
+  const normalized = text.trim();
+  if (!normalized) return undefined;
+  if (!truncated) return normalized;
+
+  const lastQuestionMark = normalized.lastIndexOf("?");
+  if (lastQuestionMark === -1) return undefined;
+  const completed = normalized.slice(0, lastQuestionMark + 1).trim();
+  return completed.length >= MIN_STREAMED_QUESTION_LENGTH ? completed : undefined;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function splitIntoDeltas(text: string, parts = FALLBACK_DELTA_PARTS): string[] {
+  const words = text.split(" ");
+  const size = Math.max(1, Math.ceil(words.length / parts));
+  const deltas: string[] = [];
+  for (let index = 0; index < words.length; index += size) {
+    const chunk = words.slice(index, index + size).join(" ");
+    deltas.push(index === 0 ? chunk : ` ${chunk}`);
+  }
+  return deltas;
 }
 
 function truncateText(value: string, limit: number): string {

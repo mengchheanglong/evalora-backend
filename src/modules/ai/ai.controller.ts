@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Inject, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, HttpException, Inject, Param, Post, Res, UseGuards } from "@nestjs/common";
+import type { Response } from "express";
 import { ValidateDto } from "../../common/pipes/validate-dto.pipe";
 import { JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { CandidateAccessRateLimitGuard } from "../sessions/access-rate-limit.guard";
@@ -85,6 +86,54 @@ export class CandidateAiController {
     return this.candidateAiService.followUp(accessCode, body);
   }
 
+  @Post(":accessCode/follow-up/stream")
+  async followUpStream(
+    @Param("accessCode") accessCode: string,
+    @Body(new ValidateDto(CandidateFollowUpDto)) body: CandidateFollowUpDto,
+    @Res() response: Response,
+  ) {
+    let streaming = false;
+    const openStream = () => {
+      if (streaming) return;
+      streaming = true;
+      response.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+      response.setHeader("Cache-Control", "no-cache");
+      response.setHeader("Connection", "keep-alive");
+      // Nginx buffers proxied responses by default, which would hold every token
+      // back until the answer is complete and defeat the whole feature.
+      response.setHeader("X-Accel-Buffering", "no");
+      response.flushHeaders();
+    };
+
+    try {
+      // followUpStream only resolves once the question is stored, so the done frame is
+      // the commit point: the client may treat the question as answerable only after it.
+      const generated = await this.candidateAiService.followUpStream(accessCode, body, {
+        onDelta: (delta) => {
+          openStream();
+          writeStreamFrame(response, { delta });
+        },
+        // A replace frame is the whole rendered question, not more text: the client
+        // must drop what it has shown so far rather than append to a partial question.
+        onReplace: (question) => {
+          openStream();
+          writeStreamFrame(response, { replace: question });
+        },
+      });
+      openStream();
+      writeStreamFrame(response, { done: true, question: generated.question, provider: generated.provider });
+      response.end();
+    } catch (error) {
+      // Nothing written yet means access or validation failed, so the normal HTTP
+      // error is still available; after the first frame the stream owns the response.
+      if (!streaming) throw error;
+      // No done frame was written, so the preview is withdrawn as well. Leaving it on
+      // screen would invite an answer to a question the server never stored.
+      writeStreamFrame(response, { replace: "", error: streamErrorMessage(error) });
+      response.end();
+    }
+  }
+
   @Post(":accessCode/adaptive-questions")
   adaptiveQuestions(@Param("accessCode") accessCode: string, @Body(new ValidateDto(AdaptiveQuestionsDto)) body: AdaptiveQuestionsDto) {
     return this.candidateAiService.adaptiveQuestions(accessCode, body.count ?? 3);
@@ -99,4 +148,15 @@ export class CandidateAiController {
   saveAdaptiveAnswer(@Param("accessCode") accessCode: string, @Body(new ValidateDto(AdaptiveAnswerDto)) body: AdaptiveAnswerDto) {
     return this.candidateAiService.saveAdaptiveAnswer(accessCode, body);
   }
+}
+
+function writeStreamFrame(response: Response, payload: Record<string, unknown>) {
+  response.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+function streamErrorMessage(error: unknown): string {
+  // Provider errors can carry the request URL or key material, so only curated
+  // exception messages ever reach the candidate.
+  if (error instanceof HttpException) return error.message;
+  return "The AI assistant is unavailable right now. Please try again.";
 }
