@@ -79,7 +79,11 @@ demonstrated at 50 concurrent.
 
 ## Live observability
 
-`GET /api/analytics/system-health` (and the **System Activity** screen) report the
-same class of metrics at runtime: connected sockets, active session rooms, join
-success rate, events delivered, today's workload, measured database latency, and
-dependency status.
+`GET /api/analytics/system-health` reports the same class of metrics at runtime:
+connected sockets, active session rooms, join success rate, events delivered,
+today's workload, measured database latency, and dependency status.
+
+There is deliberately no operator screen for this in the product UI. The
+customer is a hiring team, not an SRE team — transport counters and heap usage
+are not decisions they make. The endpoint stays because it is how these numbers
+are verified.
