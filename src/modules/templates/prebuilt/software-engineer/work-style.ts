@@ -16,10 +16,10 @@ export const softwareWorkStyleModule: PrebuiltModuleDefinition = {
       "questionText": "How do you decide what to test before saying a feature is done?",
       "questionType": "short_answer",
       "rubric": [
-        "test-strategy",
-        "edge-cases",
-        "risk-awareness",
-        "definition-of-done"
+        "choose tests by where the risk is",
+        "cover empty, invalid, and boundary input",
+        "say what they deliberately do not test",
+        "state what done means for this feature"
       ]
     },
     {
@@ -27,11 +27,11 @@ export const softwareWorkStyleModule: PrebuiltModuleDefinition = {
       "questionText": "What do you look for when reviewing someone else's code beyond whether it works?",
       "questionType": "short_answer",
       "rubric": [
-        "maintainability",
-        "security",
-        "readability",
-        "test-coverage",
-        "architecture-awareness"
+        "ask whether the next person can change it",
+        "check input handling and exposed data",
+        "question names that hide intent",
+        "look for missing tests around new branches",
+        "notice when the code belongs somewhere else"
       ]
     },
     {
@@ -39,10 +39,10 @@ export const softwareWorkStyleModule: PrebuiltModuleDefinition = {
       "questionText": "A ticket is unclear and the deadline is close. What do you do before starting implementation?",
       "questionType": "scenario",
       "rubric": [
-        "clarifying-questions",
-        "scope-control",
-        "communication",
-        "execution"
+        "ask the specific question that unblocks them",
+        "agree the smallest useful scope",
+        "flag the deadline risk early",
+        "start on the part that is already clear"
       ]
     },
     {
@@ -50,10 +50,10 @@ export const softwareWorkStyleModule: PrebuiltModuleDefinition = {
       "questionText": "When is it appropriate to use AI while coding, and what work must remain your responsibility?",
       "questionType": "short_answer",
       "rubric": [
-        "ai-judgment",
-        "verification",
-        "ownership",
-        "security-awareness"
+        "say where generated code is and is not safe",
+        "read and test the output before using it",
+        "take responsibility for the merged result",
+        "keep secrets and customer data out of prompts"
       ]
     },
     {
@@ -61,10 +61,10 @@ export const softwareWorkStyleModule: PrebuiltModuleDefinition = {
       "questionText": "Describe your preferred way to pair-program or collaborate on a difficult bug.",
       "questionType": "short_answer",
       "rubric": [
-        "collaboration",
-        "communication",
-        "learning-mindset",
-        "focus"
+        "agree who drives and who navigates",
+        "think out loud while debugging",
+        "treat the other person's idea as testable",
+        "set a time box before regrouping"
       ]
     }
   ]

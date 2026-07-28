@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { DEFAULT_LIST_LIMIT } from "../../common/query.constants";
 import { buildSessionOwnershipWhere, forbiddenResourceError, mergeWhere, type AccessContext } from "../auth/access-control";
-import { INTERVIEW_EVENTS } from "../realtime/realtime.types";
+import { INTERVIEW_EVENTS, type InterviewEventPublisher } from "../realtime/realtime.types";
 import {
   ANSWER_TEXT_MAX,
   QUESTION_TEXT_MAX,
@@ -41,11 +41,6 @@ export interface InterviewerFollowUpPrismaClient {
 }
 
 const ASKED_BY_SELECT = { select: { id: true, name: true } };
-
-/** Real-time fan-out. Optional so the service stays unit-testable without a gateway. */
-export interface InterviewEventPublisher {
-  emitToSession(sessionId: string, event: string, payload: unknown): void;
-}
 
 @Injectable()
 export class InterviewerFollowUpsService {

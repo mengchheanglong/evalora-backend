@@ -50,11 +50,11 @@ export const softwareCodingModule: PrebuiltModuleDefinition = {
         ]
       },
       "rubric": [
-        "string-processing",
-        "edge cases",
-        "deterministic-behavior",
-        "readability",
-        "tests"
+        "normalize case and strip punctuation",
+        "handle empty text and a single word",
+        "break ties by a stated rule",
+        "use clear names and small functions",
+        "show the cases the code was checked against"
       ]
     },
     {
@@ -69,10 +69,10 @@ export const softwareCodingModule: PrebuiltModuleDefinition = {
         ]
       },
       "rubric": [
-        "algorithm-choice",
-        "correctness",
-        "complexity",
-        "edge cases"
+        "sort or scan the intervals in one pass",
+        "detect overlap correctly, including touching ends",
+        "state the time complexity and why",
+        "handle empty and single-interval input"
       ]
     },
     {
@@ -83,10 +83,11 @@ export const softwareCodingModule: PrebuiltModuleDefinition = {
         "language": "typescript"
       },
       "rubric": [
-        "input-validation",
-        "error-handling",
-        "maintainability",
-        "test-coverage"
+        "check every required field and its type",
+        "return a clear error naming the bad field",
+        "leave the incoming payload unmutated",
+        "keep the rules readable as fields change",
+        "show the invalid payloads tested"
       ]
     },
     {
@@ -94,10 +95,10 @@ export const softwareCodingModule: PrebuiltModuleDefinition = {
       "questionText": "Transform a flat list of question rows into modules with ordered questions. Explain how you handle missing modules or duplicate order indexes.",
       "questionType": "coding",
       "rubric": [
-        "data-transformation",
-        "defensive-programming",
-        "ordering",
-        "clarity"
+        "group rows into modules without losing any",
+        "handle a missing or unknown module",
+        "produce a stable order for duplicate indexes",
+        "explain the chosen behaviour in the code"
       ]
     },
     {
@@ -108,11 +109,11 @@ export const softwareCodingModule: PrebuiltModuleDefinition = {
         "language": "typescript"
       },
       "rubric": [
-        "correctness",
-        "time-handling",
-        "simplicity",
-        "limitation-awareness",
-        "tests"
+        "get and set return the expected values",
+        "expire entries once the ttl has passed",
+        "keep the implementation small and readable",
+        "name a limitation such as unbounded memory",
+        "show the expiry cases tested"
       ]
     }
   ]

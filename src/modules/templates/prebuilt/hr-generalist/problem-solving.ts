@@ -16,11 +16,11 @@ export const hrProblemSolvingModule: PrebuiltModuleDefinition = {
       "questionText": "A new-hire onboarding process has high drop-off in the first two weeks. How would you diagnose the causes and improve it?",
       "questionType": "scenario",
       "rubric": [
-        "root-cause-analysis",
-        "data-use",
-        "stakeholder-collaboration",
-        "implementation-plan",
-        "measurement"
+        "separate hiring, manager, and role causes",
+        "use exit conversations and start-date data",
+        "involve the managers who run the process",
+        "propose changes with owners and dates",
+        "say which number would prove it worked"
       ]
     },
     {
@@ -28,11 +28,11 @@ export const hrProblemSolvingModule: PrebuiltModuleDefinition = {
       "questionText": "A department has 25% turnover in six months. What data would you review first, and what actions might you recommend?",
       "questionType": "scenario",
       "rubric": [
-        "data-selection",
-        "hypothesis-building",
-        "employee-experience",
-        "action-plan",
-        "measurement"
+        "name the data to pull first and why",
+        "form testable causes before acting",
+        "ask leavers and stayers what changed",
+        "propose actions the manager can run",
+        "set a review point to check the effect"
       ]
     },
     {
@@ -40,11 +40,11 @@ export const hrProblemSolvingModule: PrebuiltModuleDefinition = {
       "questionText": "An employee reports a payroll discrepancy and is upset. How do you handle the issue from intake to resolution?",
       "questionType": "scenario",
       "rubric": [
-        "urgency",
-        "accuracy",
-        "cross-functional-follow-up",
-        "communication",
-        "documentation"
+        "treat missing pay as same-day urgent",
+        "verify the figures before replying",
+        "chase finance or payroll to a resolution",
+        "keep the employee updated while it is open",
+        "record the cause and the correction"
       ]
     },
     {
@@ -52,11 +52,11 @@ export const hrProblemSolvingModule: PrebuiltModuleDefinition = {
       "questionText": "You notice repeated absenteeism in one team. How would you investigate without making unfair assumptions?",
       "questionType": "scenario",
       "rubric": [
-        "fairness",
-        "data-review",
-        "manager-consultation",
-        "employee-support",
-        "policy-awareness"
+        "avoid assuming a reason from a pattern",
+        "check the attendance records first",
+        "ask the manager what changed in the team",
+        "offer support before applying sanctions",
+        "follow the absence policy and any legal duty"
       ]
     },
     {
@@ -64,11 +64,11 @@ export const hrProblemSolvingModule: PrebuiltModuleDefinition = {
       "questionText": "A role has many applicants but few qualified interviews. How would you improve the recruiting funnel?",
       "questionType": "scenario",
       "rubric": [
-        "funnel-analysis",
-        "job-description-quality",
-        "screening-criteria",
-        "stakeholder-alignment",
-        "measurement"
+        "find the stage where candidates drop out",
+        "question whether the advert matches the job",
+        "tighten the screening criteria with the manager",
+        "agree what qualified actually means",
+        "track the change in interview-to-offer rate"
       ]
     }
   ]

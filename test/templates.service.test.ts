@@ -14,7 +14,7 @@ const templateRow = {
   modules: [
     {
       id: "module-1",
-      moduleType: "AI_INTERVIEW",
+      moduleType: "AI_INTERVIEW" as const,
       title: "AI Interview",
       description: "Scenario questions",
       weight: 1.25,
@@ -24,7 +24,7 @@ const templateRow = {
         {
           id: "question-1",
           questionText: "Tell us about a production incident.",
-          questionType: "SCENARIO",
+          questionType: "SCENARIO" as const,
           options: null,
           rubric: ["clarity", "ownership"],
         },

@@ -43,6 +43,9 @@ export class EvaluateDto {
   @IsOptional() @IsString() @MaxLength(SHORT_MAX) moduleTitle?: string;
   @IsOptional() @IsIn(MODULE_TYPES) moduleType?: ModuleType;
   @IsOptional() @IsString() @MaxLength(TEXT_MAX) responseText?: string;
+  // Kept separate from responseText so the question wording a caller supplies is
+  // carried as context and never scored as if the candidate had said it.
+  @IsOptional() @IsArray() @ArrayMaxSize(ARRAY_MAX) @IsString({ each: true }) @MaxLength(ITEM_MAX, { each: true }) questionContext?: string[];
   @IsOptional() @IsArray() @ArrayMaxSize(ARRAY_MAX) @IsString({ each: true }) @MaxLength(ITEM_MAX, { each: true }) rubric?: string[];
   @IsOptional() @IsNumber() @Min(0) @Max(100) weight?: number;
 }

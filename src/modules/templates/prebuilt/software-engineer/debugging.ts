@@ -16,11 +16,11 @@ export const softwareDebuggingModule: PrebuiltModuleDefinition = {
       "questionText": "An API endpoint became five times slower after a deployment. Walk through how you would diagnose, mitigate, and prevent the issue from recurring.",
       "questionType": "scenario",
       "rubric": [
-        "hypothesis-building",
-        "observability",
-        "rollback-safety",
-        "root-cause-analysis",
-        "prevention"
+        "list candidate causes before changing anything",
+        "name the traces, metrics, or logs to compare",
+        "restore service first, then investigate",
+        "confirm the cause with evidence, not a guess",
+        "add an alert or check that catches it earlier"
       ]
     },
     {
@@ -28,10 +28,10 @@ export const softwareDebuggingModule: PrebuiltModuleDefinition = {
       "questionText": "A test fails randomly in CI but passes locally. What steps do you take before disabling it?",
       "questionType": "scenario",
       "rubric": [
-        "reproducibility",
-        "test-isolation",
-        "root-cause-analysis",
-        "quality-discipline"
+        "try to reproduce the failure on demand",
+        "look for shared state, timing, or ordering",
+        "explain the real cause before touching the test",
+        "treat disabling the test as a last resort"
       ]
     },
     {
@@ -39,10 +39,10 @@ export const softwareDebuggingModule: PrebuiltModuleDefinition = {
       "questionText": "A service slowly consumes more memory over several hours. What evidence would you collect and what fixes might you consider?",
       "questionType": "scenario",
       "rubric": [
-        "instrumentation",
-        "hypothesis-building",
-        "resource-awareness",
-        "safe-fix-plan"
+        "collect heap or memory usage over time",
+        "name likely causes such as retained references",
+        "connect the growth to a specific code path",
+        "propose a fix that can be verified and reverted"
       ]
     },
     {
@@ -50,10 +50,11 @@ export const softwareDebuggingModule: PrebuiltModuleDefinition = {
       "questionText": "Users report occasional crashes from a null value that logs do not fully explain. How would you debug and test the fix?",
       "questionType": "scenario",
       "rubric": [
-        "log-analysis",
-        "defensive-coding",
-        "regression-tests",
-        "user-impact"
+        "use the logs to narrow when it happens",
+        "add the logging that was missing",
+        "handle the missing value at its source",
+        "add a test that fails before the fix",
+        "say how many users are affected"
       ]
     },
     {
@@ -61,10 +62,10 @@ export const softwareDebuggingModule: PrebuiltModuleDefinition = {
       "questionText": "A deployment fails only in staging because of an environment variable issue. How do you fix it and prevent repeat incidents?",
       "questionType": "scenario",
       "rubric": [
-        "configuration-management",
-        "validation",
-        "documentation",
-        "automation"
+        "compare the environments to find the difference",
+        "validate required config at startup",
+        "record the setting where the team will find it",
+        "automate the check so it fails early"
       ]
     },
     {
@@ -72,10 +73,10 @@ export const softwareDebuggingModule: PrebuiltModuleDefinition = {
       "questionText": "A report shows inconsistent totals between two screens. How do you determine whether the issue is frontend, backend, or data-related?",
       "questionType": "scenario",
       "rubric": [
-        "systematic-debugging",
-        "data-tracing",
-        "api-contract-awareness",
-        "communication"
+        "narrow down the layer before blaming one team",
+        "compare the same query at each layer",
+        "check the api response against what the screen shows",
+        "report the finding without guessing"
       ]
     }
   ]

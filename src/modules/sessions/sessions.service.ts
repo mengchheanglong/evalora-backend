@@ -5,11 +5,9 @@ import { DEFAULT_LIST_LIMIT } from "../../common/query.constants";
 import type { AssessmentTemplateDto, InterviewSessionDto, JsonValue, ModuleType, QuestionType, SessionStatus } from "../../domain/evalora.types";
 import { buildSessionOwnershipWhere, buildTemplateOwnershipWhere, forbiddenResourceError, mergeWhere, requireOrganizationId, type AccessContext } from "../auth/access-control";
 import type { EmailDeliveryResult, EmailService } from "../email/email.service";
-// Type-only import of the publisher contract already used by the follow-ups
-// service, so both services fan out through one shared shape instead of two
-// look-alike interfaces that can drift.
-import type { InterviewEventPublisher } from "../interviewer-follow-ups/interviewer-follow-ups.service";
-import { INTERVIEW_EVENTS } from "../realtime/realtime.types";
+// The publisher contract belongs to the realtime transport, so every service
+// fans out through one shared shape instead of look-alike interfaces that drift.
+import { INTERVIEW_EVENTS, type InterviewEventPublisher } from "../realtime/realtime.types";
 
 type PrismaSessionStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "EXPIRED";
 type PrismaRole = "ADMIN" | "ORGANIZATION" | "INTERVIEWER" | "CANDIDATE";
@@ -265,9 +263,10 @@ export class SessionsService {
     try {
       this.events?.emitToSession(session.id, INTERVIEW_EVENTS.sessionUpdated, {
         sessionId: session.id,
-        // Same field names and raw status vocabulary as SessionSnapshot, so a
-        // live update and a re-join snapshot can never disagree.
-        status: session.status,
+        // Same field names and lowercase status vocabulary as SessionSnapshot and
+        // every REST DTO, so a live update, a re-join snapshot and a fetched
+        // session can never disagree.
+        status: fromPrismaSessionStatus(session.status),
         startedAt: toIso(session.startedAt),
         completedAt: toIso(session.completedAt),
       });

@@ -27,6 +27,20 @@ export interface TranscriptEntry {
   /** 1-based position in `entries`, so a reviewer can cite "line 7" of a transcript. */
   sequence: number;
   questionText: string;
+  /**
+   * True when `questionText` is the frozen copy stored on the answer instead of
+   * the template row read live, i.e. the wording the candidate was actually
+   * shown. Only a template answer can carry one, and only if it was saved after
+   * snapshots existed; every other line reads live and reports false.
+   */
+  questionTextIsSnapshot: boolean;
+  /**
+   * The template's wording today, carried only when it no longer matches the
+   * snapshot above. Its presence is the signal that the question was edited
+   * after this answer was given, which a reviewer has to see before judging the
+   * answer against it.
+   */
+  liveQuestionText?: string;
   answerText?: string;
   /** Interviewer follow-ups only: the human who asked. */
   askedBy?: { name: string };
@@ -86,8 +100,15 @@ export interface SessionTranscriptDto {
   truncation: TranscriptTruncation;
 }
 
-/** Sequence is assigned after the flat list is ordered, so drafts carry a sort key instead. */
-export type TranscriptEntryDraft = Omit<TranscriptEntry, "sequence"> & { orderedAt: number };
+/**
+ * Sequence is assigned after the flat list is ordered, so drafts carry a sort key
+ * instead. Only the template builder can know whether it read a snapshot, so the
+ * flag is optional here and defaulted once the entry is built.
+ */
+export type TranscriptEntryDraft = Omit<TranscriptEntry, "sequence" | "questionTextIsSnapshot"> & {
+  questionTextIsSnapshot?: boolean;
+  orderedAt: number;
+};
 
 type PrismaSessionStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "EXPIRED";
 type PrismaInterviewerFollowUpStatus = "SENT" | "ANSWERED" | "CANCELLED";

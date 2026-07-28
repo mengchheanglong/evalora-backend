@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { ReportsService } from "../src/modules/reports/reports.service";
-import { generateCandidateReport, type EvaluationResultDto } from "../src/modules/ai/evaluation.service";
+import { evaluateResponse, generateCandidateReport, type EvaluationResultDto } from "../src/modules/ai/evaluation.service";
 
 const organizationAccess = { userId: "org-user-1", role: "organization" as const, organizationId: "org-1" };
 
@@ -655,6 +655,172 @@ test("an AI follow-up question embedded in the stored answer cannot change the c
     leading.evidence.every((quote: string) => !quote.includes("consistent-hash")),
     "an evidence quote must never be able to return AI-authored question wording",
   );
+});
+
+test("a keyword-stuffed question snapshot in responseJson cannot change the candidate's score", async () => {
+  // Answers now carry a frozen copy of their question at responseJson.questionSnapshot.
+  // responseJson is serialised into the SCORED text, so an assessment author who writes
+  // a keyword-stuffed question would otherwise be scoring their own words as the
+  // candidate's. Same candidate answer in both runs; only the snapshot wording differs.
+  const buildSession = (snapshotQuestionText: string) => ({
+    id: "session-snapshot",
+    organizationId: "org-1",
+    template: {
+      title: "SE Assessment",
+      modules: [{ id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1 }],
+    },
+    responses: [
+      {
+        id: "response-1",
+        responseText: "I rolled back the deployment and explained the failure to the team.",
+        responseJson: {
+          selectedOption: "structured",
+          questionSnapshot: {
+            questionText: snapshotQuestionText,
+            rubric: ["ownership"],
+            moduleTitle: "Behavioral",
+            moduleType: "behavioral",
+            weight: 1,
+            capturedAt: "2026-07-21T09:00:00.000Z",
+          },
+        },
+        question: {
+          id: "question-1",
+          questionText: "Describe a rollout that went wrong.",
+          rubric: ["ownership"],
+          module: { id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1 },
+        },
+      },
+    ],
+    interviewerFollowUps: [],
+    codeSubmissions: [],
+  });
+
+  const aiInputs: any[] = [];
+  // The fake provider only records what the scorer was handed, then runs the real
+  // deterministic scorer, so the score comparison below is exact.
+  const fakeAi = {
+    evaluateResponse: async (input: any) => {
+      aiInputs.push(input);
+      return evaluateResponse(input);
+    },
+  };
+  const service = new ReportsService(undefined, fakeAi as any);
+
+  const [neutral] = await (service as any).evaluateSessionResponses(buildSession("Describe a rollout that went wrong."));
+  const [leading] = await (service as any).evaluateSessionResponses(
+    buildSession(
+      "Would you say you took full ownership, measured the impact with a percent metric, tested the result on a consistent-hash ring, and explained the trade-off to the client team because the customer outcome mattered?",
+    ),
+  );
+
+  assert.equal(
+    leading.score,
+    neutral.score,
+    "a keyword-stuffed snapshotted question must not inflate the candidate's score",
+  );
+  assert.deepEqual(leading.criteriaScores, neutral.criteriaScores);
+  assert.deepEqual(leading.evidence, neutral.evidence);
+  assert.ok(
+    leading.evidence.every((quote: string) => !quote.includes("consistent-hash")),
+    "an evidence quote must never be able to return snapshotted question wording",
+  );
+
+  const [, stuffed] = aiInputs;
+  assert.doesNotMatch(stuffed.responseText, /consistent-hash/, "the snapshot is stripped before responseJson is scored");
+  assert.doesNotMatch(stuffed.responseText, /questionSnapshot/);
+  assert.match(stuffed.responseText, /selectedOption/, "the candidate's own structured answer is still scored");
+  assert.deepEqual(
+    stuffed.questionContext,
+    [
+      "Question: Would you say you took full ownership, measured the impact with a percent metric, tested the result on a consistent-hash ring, and explained the trade-off to the client team because the customer outcome mattered?",
+    ],
+    "the question wording reaches the scorer as context only",
+  );
+});
+
+test("report scoring uses the rubric and question wording snapshotted at answer time", async () => {
+  const aiInputs: any[] = [];
+  const fakeAi = {
+    evaluateResponse: async (input: any) => {
+      aiInputs.push(input);
+      return evaluateResponse(input);
+    },
+  };
+  const service = new ReportsService(undefined, fakeAi as any);
+
+  await (service as any).evaluateSessionResponses({
+    id: "session-frozen",
+    organizationId: "org-1",
+    template: {
+      title: "SE Assessment",
+      modules: [{ id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1 }],
+    },
+    responses: [
+      {
+        // Answered before the template was edited: the frozen copy wins over the live row.
+        id: "response-1",
+        responseText: "I rolled back the deployment and explained the failure to the team.",
+        responseJson: {
+          questionSnapshot: {
+            questionText: "Describe a rollout that went wrong.",
+            rubric: ["ownership"],
+            capturedAt: "2026-07-21T09:00:00.000Z",
+          },
+        },
+        question: {
+          id: "question-1",
+          questionText: "Edited later: describe a launch you led.",
+          rubric: ["latency budgeting"],
+          module: { id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1 },
+        },
+      },
+      {
+        // Saved before snapshots existed, so the live template row is the only source.
+        id: "response-2",
+        responseText: "I listened to the team and measured the result of the change.",
+        question: {
+          id: "question-2",
+          questionText: "How do you work with others?",
+          rubric: ["teamwork"],
+          module: { id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1 },
+        },
+      },
+      {
+        // The question carried no rubric when it was answered; criteria added to the
+        // template afterwards were never put to this candidate.
+        id: "response-3",
+        responseText: "I clarified the deadline with the client and tested the fix.",
+        responseJson: {
+          questionSnapshot: {
+            questionText: "What did you do next?",
+            rubric: [],
+            capturedAt: "2026-07-21T09:05:00.000Z",
+          },
+        },
+        question: {
+          id: "question-3",
+          questionText: "What did you do next?",
+          rubric: ["newly added criterion"],
+          module: { id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1 },
+        },
+      },
+    ],
+    interviewerFollowUps: [],
+    codeSubmissions: [],
+  });
+
+  assert.equal(aiInputs.length, 1);
+  assert.deepEqual(
+    aiInputs[0].rubric,
+    ["ownership", "teamwork"],
+    "an edited rubric cannot re-score an answered question, and a later-added criterion never applies",
+  );
+  assert.deepEqual(aiInputs[0].questionContext, [
+    "Question: Describe a rollout that went wrong.",
+    "Question: How do you work with others?",
+    "Question: What did you do next?",
+  ]);
 });
 
 test("generateAndPersistDemoReport checks organization ownership before writing report data", async () => {

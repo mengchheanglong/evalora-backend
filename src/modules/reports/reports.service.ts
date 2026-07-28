@@ -4,6 +4,7 @@ import type { JsonValue, ModuleType } from "../../domain/evalora.types";
 import type { AiService } from "../ai/ai.service";
 import { evaluateResponse, generateCandidateReport, type EvaluateResponseInput, type EvaluationResultDto, type GeneratedCandidateReport } from "../ai/evaluation.service";
 import { buildSessionOwnershipWhere, forbiddenResourceError, mergeWhere, type AccessContext } from "../auth/access-control";
+import type { QuestionSnapshot } from "../responses/responses.service";
 
 interface ReportPersistenceClient {
   interviewSession?: {
@@ -387,7 +388,7 @@ export class ReportsService {
         moduleType: fromPrismaModuleType(module.moduleType),
         responseText: evidence.responseText,
         questionContext: evidence.questionContext,
-        rubric: group ? unique(group.entries.flatMap((entry) => stringArray(entry.question.rubric))) : [],
+        rubric: group ? unique(group.entries.flatMap((entry) => entryRubric(entry))) : [],
         weight: numberValue(module.weight, 1),
       });
     }
@@ -403,7 +404,7 @@ export class ReportsService {
         moduleType: fromPrismaModuleType(group.module.moduleType),
         responseText: evidence.responseText,
         questionContext: evidence.questionContext,
-        rubric: unique(group.entries.flatMap((entry) => stringArray(entry.question.rubric))),
+        rubric: unique(group.entries.flatMap((entry) => entryRubric(entry))),
         weight: numberValue(group.module.weight, 1),
       });
     }
@@ -675,12 +676,53 @@ function buildInterviewerFollowUpEvidence(followUps: EvaluationInterviewerFollow
   return { responseText: answers.join("\n\n"), questionContext };
 }
 
+/**
+ * The frozen copy of the question the candidate actually answered, written onto
+ * the response at save time. Read defensively: it is absent on free-form and
+ * adaptive answers, on rows saved before snapshots existed, and when the save-time
+ * question lookup failed — those fall back to the live template row.
+ */
+function readQuestionSnapshot(responseJson: JsonValue | null | undefined): Partial<QuestionSnapshot> | undefined {
+  if (!responseJson || typeof responseJson !== "object" || Array.isArray(responseJson)) return undefined;
+  const snapshot = (responseJson as Record<string, unknown>).questionSnapshot;
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return undefined;
+  return snapshot as Partial<QuestionSnapshot>;
+}
+
+/** The rubric as it stood when this answer was given. A snapshot wins even when its
+ *  rubric is empty: criteria added to the template afterwards were never put to this
+ *  candidate, so they must not re-score an answer that is already in the past. */
+function entryRubric(entry: GroupedResponseEntry): string[] {
+  const snapshot = readQuestionSnapshot(entry.response.responseJson);
+  return snapshot ? stringArray(snapshot.rubric) : stringArray(entry.question.rubric);
+}
+
+/** The wording the candidate was shown, so an edited template can no longer re-label
+ *  a past answer in the report. */
+function entryQuestionText(entry: GroupedResponseEntry): string {
+  const snapshot = readQuestionSnapshot(entry.response.responseJson);
+  return optionalString(snapshot?.questionText) ?? stringValue(entry.question.questionText, "Untitled question");
+}
+
+/**
+ * The stored JSON minus the question snapshot. The snapshot holds the question
+ * wording, and this JSON is serialised into the SCORED text — leaving it in would
+ * feed the assessment author's words back to the scorer as if the candidate had
+ * written them, which a keyword-stuffed question could exploit for free marks.
+ * The wording still reaches the scorer, but only as questionContext.
+ */
+function structuredResponseJson(value: JsonValue | null | undefined): JsonValue | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value ?? undefined;
+  const rest = Object.fromEntries(Object.entries(value).filter(([key]) => key !== "questionSnapshot"));
+  return Object.keys(rest).length ? (rest as JsonValue) : undefined;
+}
+
 function buildModuleEvidence(entries: GroupedResponseEntry[]): ModuleEvidence {
   const answers: string[] = [];
   const questionContext: string[] = [];
 
   for (const entry of entries) {
-    const questionText = stringValue(entry.question.questionText, "Untitled question");
+    const questionText = entryQuestionText(entry);
     // The stored column can carry an AI follow-up exchange appended to the
     // candidate's answer. Its QUESTION is model-authored, so it belongs in the
     // context alongside the template question, never in the scored text.
@@ -689,7 +731,7 @@ function buildModuleEvidence(entries: GroupedResponseEntry[]): ModuleEvidence {
     const lines = [answerText ?? ""];
     // The candidate's reply to the follow-up is still their own words.
     if (followUp?.answerText) lines.push(followUp.answerText);
-    const structuredResponse = formatJson(entry.response.responseJson);
+    const structuredResponse = formatJson(structuredResponseJson(entry.response.responseJson));
     if (structuredResponse) lines.push(`Structured response: ${structuredResponse}`);
 
     const answer = lines.filter(Boolean).join("\n");

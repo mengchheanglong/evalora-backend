@@ -2,6 +2,7 @@ import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { InterviewerFollowUpsService } from "../src/modules/interviewer-follow-ups/interviewer-follow-ups.service";
 import type { AccessContext } from "../src/modules/auth/access-control";
+import { INTERVIEW_EVENTS, type InterviewEventPublisher } from "../src/modules/realtime/realtime.types";
 
 const ownerAccess: AccessContext = { userId: "owner-1", role: "organization", organizationId: "org-1" };
 const interviewerAccess: AccessContext = { userId: "int-1", role: "interviewer", organizationId: "org-1" };
@@ -258,4 +259,27 @@ test("the candidate projection hides interviewer identity beyond the display nam
 test("candidate endpoints reject an unknown access code", async () => {
   const service = createService(createFakePrisma());
   await assert.rejects(() => service.listByAccessCode("EV-NOPE"), /not found or access denied/i);
+});
+
+test("questions and submitted answers fan out through the shared realtime publisher", async () => {
+  const emitted: Array<{ sessionId: string; event: string }> = [];
+  // Typed as the transport contract so this test fails if the shape drifts from
+  // the one the gateway and sessions.service publish through.
+  const events: InterviewEventPublisher = {
+    emitToSession(sessionId, event) {
+      emitted.push({ sessionId, event });
+    },
+  };
+  const service = new InterviewerFollowUpsService(createFakePrisma() as never, events);
+
+  const sent = await service.send("session-1", { questionText: validQuestion }, ownerAccess);
+  await service.answerByAccessCode("EV-123456", sent.id, { answerText: "Draft only", submit: false });
+  await service.answerByAccessCode("EV-123456", sent.id, { answerText: "Final answer.", submit: true });
+
+  assert.deepEqual(
+    emitted.map((entry) => entry.event),
+    [INTERVIEW_EVENTS.questionSent, INTERVIEW_EVENTS.questionAnswered],
+    "an autosaved draft stays private until the candidate sends it",
+  );
+  assert.ok(emitted.every((entry) => entry.sessionId === "session-1"));
 });

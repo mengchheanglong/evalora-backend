@@ -16,10 +16,10 @@ export const softwareCommunicationModule: PrebuiltModuleDefinition = {
       "questionText": "Explain a technical delay to a product manager in a way that is honest, concise, and includes recovery options.",
       "questionType": "roleplay",
       "rubric": [
-        "clarity",
-        "stakeholder-empathy",
-        "risk-framing",
-        "solution-orientation"
+        "lead with the delay and the new date",
+        "skip jargon the reader cannot act on",
+        "state what the delay costs the product",
+        "offer options rather than only the problem"
       ]
     },
     {
@@ -27,10 +27,10 @@ export const softwareCommunicationModule: PrebuiltModuleDefinition = {
       "questionText": "Write a pull request review comment for code that works but is hard to maintain. Be direct and respectful.",
       "questionType": "short_answer",
       "rubric": [
-        "specificity",
-        "respect",
-        "maintainability",
-        "actionability"
+        "point at specific lines, not the person",
+        "say why the code will be hard to change",
+        "suggest a concrete alternative",
+        "separate blocking comments from optional ones"
       ]
     },
     {
@@ -38,10 +38,10 @@ export const softwareCommunicationModule: PrebuiltModuleDefinition = {
       "questionText": "Write a short incident update for non-technical stakeholders after a partial outage.",
       "questionType": "short_answer",
       "rubric": [
-        "plain-language",
-        "impact-framing",
-        "next-steps",
-        "accountability"
+        "describe the outage without technical jargon",
+        "say who was affected and for how long",
+        "give the time of the next update",
+        "own the problem rather than assign blame"
       ]
     },
     {
@@ -49,10 +49,10 @@ export const softwareCommunicationModule: PrebuiltModuleDefinition = {
       "questionText": "You disagree with a senior engineer's design. How do you raise your concern productively?",
       "questionType": "roleplay",
       "rubric": [
-        "evidence",
-        "respect",
-        "trade-off-framing",
-        "collaboration"
+        "bring data or a failing case, not opinion",
+        "ask what the design is optimising for",
+        "frame it as a trade-off, not a mistake",
+        "accept the outcome once the call is made"
       ]
     },
     {
@@ -60,11 +60,11 @@ export const softwareCommunicationModule: PrebuiltModuleDefinition = {
       "questionText": "What information should be included when handing off an unfinished technical task to another engineer?",
       "questionType": "short_answer",
       "rubric": [
-        "context",
-        "current-state",
-        "known-risks",
-        "next-steps",
-        "test-status"
+        "explain why the task exists",
+        "say exactly what is done and not done",
+        "list the traps the next person will hit",
+        "name the clear next action",
+        "state which tests pass and which do not"
       ]
     }
   ]

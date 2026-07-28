@@ -36,7 +36,7 @@ function createFakePrisma() {
   const invites: InviteRow[] = [];
   const organizations = [{ id: "org-1", name: "Acme Talent" }];
 
-  const prisma = {
+  const client = {
     user: {
       async findMany(args: { where: { organizationId: string; role: { in: Role[] } }; orderBy: unknown; select: unknown }) {
         return users
@@ -179,8 +179,14 @@ function createFakePrisma() {
         return { count };
       },
     },
-    async $transaction<T>(fn: (tx: typeof prisma) => Promise<T>) {
-      return fn(prisma);
+  };
+
+  // The fake is its own transaction client. Declaring $transaction on `client`
+  // would make the object's type reference itself, so it is layered on top here.
+  const prisma = {
+    ...client,
+    async $transaction<T>(fn: (tx: typeof client) => Promise<T>) {
+      return fn(client);
     },
   };
 

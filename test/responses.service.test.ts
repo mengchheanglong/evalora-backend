@@ -20,6 +20,18 @@ const accessSessionRow = {
   expiresAt: new Date("2026-08-01T00:00:00.000Z"),
 };
 
+/** The live template question a snapshot is taken from. */
+function questionDelegate(overrides: Record<string, unknown> = {}) {
+  return {
+    findUnique: async () => ({
+      questionText: "Describe a rollout you had to stop.",
+      rubric: ["signal quality", "decisiveness", 7],
+      module: { title: "Behavioral", moduleType: "BEHAVIORAL", weight: 2 },
+      ...overrides,
+    }),
+  };
+}
+
 test("saveResponse creates a new answer when no existing session/question response exists", async () => {
   const calls: unknown[] = [];
   const service = new ResponsesService({
@@ -319,6 +331,113 @@ test("saveResponse reconciles a concurrent insert race (P2002) by updating the e
   const result = await service.saveResponse({ sessionId: "session-1", questionId: "question-1", responseText: "raced" });
   assert.deepEqual(calls, ["upsert", "update"], "P2002 → update the row the race winner inserted");
   assert.equal(result.responseText, "raced");
+});
+
+test("saving an answer records what the candidate was actually asked", async () => {
+  let written: any;
+  const service = new ResponsesService({
+    interviewSession: { findFirst: async () => assignedSessionRow() },
+    question: questionDelegate(),
+    response: {
+      upsert: async (args: any) => {
+        written = args;
+        return { ...responseRow, responseJson: args.create.responseJson };
+      },
+    },
+  } as never);
+
+  const result = await service.saveResponse({
+    sessionId: "session-1",
+    questionId: "question-1",
+    responseText: "I stopped it on the error budget burn.",
+    responseJson: { confidence: 3 },
+  });
+
+  const snapshot = (result.responseJson as any).questionSnapshot;
+  assert.equal(snapshot.questionText, "Describe a rollout you had to stop.");
+  assert.deepEqual(snapshot.rubric, ["signal quality", "decisiveness"], "only usable string criteria are frozen");
+  assert.equal(snapshot.moduleTitle, "Behavioral");
+  assert.equal(snapshot.moduleType, "behavioral", "lowercase wire vocabulary, as everywhere else");
+  assert.equal(snapshot.weight, 2);
+  assert.ok(!Number.isNaN(Date.parse(snapshot.capturedAt)), "capturedAt is an ISO timestamp");
+  // The candidate's own structured answer must survive the merge.
+  assert.equal((result.responseJson as any).confidence, 3);
+  assert.deepEqual(written.update.responseJson, written.create.responseJson, "both branches store the same JSON");
+});
+
+test("an edited template never re-labels an answer that was already given", async () => {
+  const original = {
+    questionText: "Describe a rollout you had to stop.",
+    rubric: ["signal quality"],
+    moduleTitle: "Behavioral",
+    moduleType: "behavioral",
+    weight: 2,
+    capturedAt: "2026-07-06T14:00:00.000Z",
+  };
+  let stored: any;
+  const service = new ResponsesService({
+    interviewSession: { findFirst: async () => assignedSessionRow() },
+    // The question has since been rewritten in the template.
+    question: questionDelegate({ questionText: "Tell us about a launch you cancelled.", rubric: ["brevity"] }),
+    response: {
+      findFirst: async () => ({ ...responseRow, responseJson: { adaptive: true, questionSnapshot: original } }),
+      upsert: async (args: any) => {
+        stored = args.update.responseJson;
+        return { ...responseRow, responseJson: stored };
+      },
+    },
+  } as never);
+
+  await service.saveResponse({ sessionId: "session-1", questionId: "question-1", responseText: "Edited answer" });
+
+  assert.deepEqual(stored.questionSnapshot, original, "the snapshot is captured once, at the moment of the answer");
+  assert.equal(stored.adaptive, true, "everything already in responseJson is preserved");
+});
+
+test("a free-form response with no question gets no snapshot", async () => {
+  let created: any;
+  const service = new ResponsesService({
+    interviewSession: { findFirst: async () => assignedSessionRow() },
+    question: {
+      findUnique: async () => {
+        throw new Error("a response with no question must never look one up");
+      },
+    },
+    response: {
+      create: async (args: any) => {
+        created = args;
+        return { ...responseRow, questionId: null };
+      },
+    },
+  } as never);
+
+  await service.saveResponse({ sessionId: "session-1", responseText: "Free-form note" });
+
+  assert.equal(created.data.responseJson, undefined);
+});
+
+test("a failed question lookup still saves the candidate's answer", async () => {
+  const service = new ResponsesService({
+    interviewSession: { findFirst: async () => assignedSessionRow() },
+    question: {
+      findUnique: async () => {
+        throw new Error("the database is unreachable");
+      },
+    },
+    response: {
+      upsert: async (args: any) => ({ ...responseRow, responseText: args.create.responseText, responseJson: args.create.responseJson }),
+    },
+  } as never);
+
+  const result = await service.saveResponse({
+    sessionId: "session-1",
+    questionId: "question-1",
+    responseText: "Answer that must not be lost",
+    responseJson: { confidence: 4 },
+  });
+
+  assert.equal(result.responseText, "Answer that must not be lost");
+  assert.deepEqual(result.responseJson, { confidence: 4 }, "no snapshot, but nothing is dropped either");
 });
 
 function assignedSessionRow(moduleType = "AI_INTERVIEW") {

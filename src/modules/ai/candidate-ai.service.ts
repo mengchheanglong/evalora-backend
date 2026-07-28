@@ -36,9 +36,18 @@ export class CandidateAiService {
     const messages = await this.prisma.aIMessage.findMany({
       where: { sessionId: session.id },
       orderBy: { createdAt: "asc" },
-      select: { id: true, role: true, content: true, createdAt: true },
+      select: { id: true, role: true, content: true, createdAt: true, metadata: true },
     });
-    return messages.map((message) => ({ ...message, createdAt: message.createdAt.toISOString() }));
+    return messages.map((message) => ({
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      createdAt: message.createdAt.toISOString(),
+      // Lets the candidate app put a restored follow-up back under the answer it
+      // belongs to without the question being copied onto that answer. Nothing else
+      // from metadata is exposed to a candidate: it also carries the scoring rubric.
+      basedOnQuestion: metadataString(message.metadata, "basedOnQuestion"),
+    }));
   }
 
   async interviewQuestion(accessCode: string, input: { conversationHistory?: string[]; rubric?: string[] }) {
@@ -71,7 +80,10 @@ export class CandidateAiService {
     const generated = await this.aiService.generateFollowUp({ question, answer, rubric: safeStringArray(input.rubric, 10) });
     await this.prisma.$transaction([
       this.prisma.aIMessage.create({ data: { sessionId: session.id, role: "candidate", content: answer, metadata: { question } } }),
-      this.prisma.aIMessage.create({ data: { sessionId: session.id, role: "assistant", content: generated.question, metadata: { provider: generated.provider, basedOn: generated.basedOn } } }),
+      // Both rows share the transaction timestamp, so the probe cannot be tied back to
+      // the question it came from by ordering. Naming that question here is what lets a
+      // reader pair them without the candidate app copying the probe onto the answer.
+      this.prisma.aIMessage.create({ data: { sessionId: session.id, role: "assistant", content: generated.question, metadata: { provider: generated.provider, basedOn: generated.basedOn, basedOnQuestion: question } } }),
     ]);
     return generated;
   }
@@ -119,7 +131,7 @@ export class CandidateAiService {
               sessionId,
               role: "assistant",
               content: generated.question,
-              metadata: { provider: generated.provider, basedOn: generated.basedOn, streamed: true },
+              metadata: { provider: generated.provider, basedOn: generated.basedOn, basedOnQuestion: question, streamed: true },
             },
           }),
         ]);
@@ -282,7 +294,10 @@ export class CandidateAiService {
     );
     if (!assigned) throw forbiddenResourceError("Adaptive interview question");
 
-    const responseText = `AI interview - ${question}\n\nResponse: ${answer}`;
+    // Only the candidate's own words go in the text column. The question is already
+    // structured data on responseJson, and a reader cannot tell a model-authored
+    // question from the candidate's answer once the two are glued into one string.
+    const responseText = answer;
     const responseJson = { adaptive: true, questionId, question } as Prisma.InputJsonValue;
     const matchingResponses = adaptiveResponses.filter((response) => adaptiveQuestionId(response.responseJson) === questionId);
     const existing = matchingResponses[0];
@@ -441,16 +456,18 @@ function isAdaptiveMetadata(value: unknown): boolean {
   return Boolean(value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).adaptive === true);
 }
 
-function providerFromMetadata(value: unknown): string | undefined {
+function metadataString(value: unknown, key: string): string | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const provider = (value as Record<string, unknown>).provider;
-  return typeof provider === "string" && provider.trim() ? provider : undefined;
+  const entry = (value as Record<string, unknown>)[key];
+  return typeof entry === "string" && entry.trim() ? entry : undefined;
+}
+
+function providerFromMetadata(value: unknown): string | undefined {
+  return metadataString(value, "provider");
 }
 
 function adaptiveQuestionId(value: unknown): string | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const questionId = (value as Record<string, unknown>).questionId;
-  return typeof questionId === "string" && questionId.trim() ? questionId : undefined;
+  return metadataString(value, "questionId");
 }
 
 function requiredAdaptiveQuestionId(value: string | undefined): string {

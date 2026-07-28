@@ -9,7 +9,8 @@ test("comparable analytics reject missing, blank, and repeated template ids", ()
   const service = {
     modulePerformance: () => { throw new Error("service should not be called"); },
   };
-  const controller = new AnalyticsController(service as never);
+  // The health service is never reached: the guard clause rejects before any service call.
+  const controller = new AnalyticsController(service as never, {} as never);
   const request = {
     user: { id: "reviewer-1", role: "interviewer", organizationId: "org-1" },
   } as never;

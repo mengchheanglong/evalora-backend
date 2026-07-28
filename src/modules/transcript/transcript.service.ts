@@ -209,13 +209,25 @@ function buildTemplateEntries(responses: TranscriptResponseRow[]): TranscriptEnt
     // Only the candidate's own words belong under their answer; an AI follow-up
     // stored in the same column is split out into its own labelled entry.
     const answerText = splitEmbeddedFollowUp(response.responseText).answerText;
+    // A template can be reworded at any time, so the live row says what the next
+    // candidate will be asked, not what this one answered. The frozen copy wins
+    // where there is one; answers saved before snapshots existed have none and
+    // still read live.
+    const snapshotText = snapshotQuestionText(response.responseJson);
     drafts.push({
       id: response.id,
       origin: "template",
       moduleId: module?.id,
       moduleTitle: module?.title,
       moduleType: module?.moduleType,
-      questionText: question.questionText,
+      questionText: snapshotText ?? question.questionText,
+      questionTextIsSnapshot: snapshotText !== undefined,
+      // Surfaced rather than resolved: only the reviewer can judge whether the
+      // rewrite changed what the answer was supposed to cover.
+      liveQuestionText:
+        snapshotText !== undefined && snapshotText !== question.questionText
+          ? optionalString(question.questionText)
+          : undefined,
       answerText,
       answeredAt: isoString(response.createdAt),
       // Scoring groups answers by their question's module and drops empty text.
@@ -257,8 +269,15 @@ function buildAdaptiveEntries(
   }
 
   const askedQuestions = new Set(messages.filter((message) => message.role === "assistant").map((message) => message.content));
+  // Both wordings count: a chat message repeats the question as it was ASKED, so
+  // a template edited since then would no longer match its own saved answer and
+  // the answer would be replayed a second time under the AI's name.
   const savedTemplateQuestions = new Set(
-    responses.map((response) => response.question?.questionText).filter((text): text is string => Boolean(text)),
+    responses
+      .flatMap((response) =>
+        response.question ? [response.question.questionText, snapshotQuestionText(response.responseJson)] : [],
+      )
+      .filter((text): text is string => Boolean(text)),
   );
 
   const answerByQuestion = new Map<string, TranscriptAiMessageRow>();
@@ -540,7 +559,13 @@ function orderEntries(drafts: TranscriptEntryDraft[]): TranscriptEntry[] {
 
 /** `orderedAt` orders the drafts and must not reach the reviewer's response. */
 function toEntry(draft: TranscriptEntryDraft, sequence: number): TranscriptEntry {
-  const entry: TranscriptEntry & { orderedAt?: number } = { ...draft, sequence };
+  const entry: TranscriptEntry & { orderedAt?: number } = {
+    ...draft,
+    // Every other origin quotes wording that was never stored on a template row,
+    // so it is always live by definition.
+    questionTextIsSnapshot: draft.questionTextIsSnapshot === true,
+    sequence,
+  };
   delete entry.orderedAt;
   return entry;
 }
@@ -626,6 +651,19 @@ function adaptiveAnswerText(responseText: string): string | undefined {
   const marker = "\n\nResponse: ";
   const at = responseText.indexOf(marker);
   return optionalString(at === -1 ? responseText : responseText.slice(at + marker.length));
+}
+
+/**
+ * The question as the candidate was shown it, frozen onto the answer by
+ * responses.service (`responseJson.questionSnapshot`). Absent on free-form
+ * answers, on rows written before snapshots existed, and when the lookup failed,
+ * so the caller must always be able to fall back to the live template row. A
+ * snapshot recorded with no wording at all is treated the same way: it can only
+ * make the transcript emptier than reading live.
+ */
+function snapshotQuestionText(responseJson: unknown): string | undefined {
+  const snapshot = isRecord(responseJson) ? responseJson.questionSnapshot : undefined;
+  return isRecord(snapshot) ? optionalString(snapshot.questionText) : undefined;
 }
 
 function isAdaptive(value: unknown): boolean {

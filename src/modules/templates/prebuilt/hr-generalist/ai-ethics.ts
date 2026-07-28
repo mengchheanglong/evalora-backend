@@ -17,11 +17,11 @@ export const hrAiEthicsModule: PrebuiltModuleDefinition = {
       "questionText": "Design a fair intake process for an employee relations complaint. What information do you collect and what do you avoid promising?",
       "questionType": "scenario",
       "rubric": [
-        "structured-intake",
-        "fairness",
-        "confidentiality",
-        "scope-control",
-        "documentation"
+        "use the same intake questions every time",
+        "gather facts before forming a view",
+        "say who will see what is shared",
+        "avoid promising an outcome or total secrecy",
+        "write the account down at the time"
       ]
     },
     {
@@ -29,11 +29,11 @@ export const hrAiEthicsModule: PrebuiltModuleDefinition = {
       "questionText": "If an AI tool ranks resumes for a role, what risks would you check before trusting the shortlist?",
       "questionType": "scenario",
       "rubric": [
-        "bias-awareness",
-        "human-review",
-        "job-relevance",
-        "auditability",
-        "compliance-risk"
+        "ask what the model learned to favour",
+        "keep a person deciding the shortlist",
+        "check the criteria relate to the job",
+        "require an explanation for each ranking",
+        "name the discrimination risk of trusting it blind"
       ]
     },
     {
@@ -41,10 +41,10 @@ export const hrAiEthicsModule: PrebuiltModuleDefinition = {
       "questionText": "How do you balance being approachable to employees with protecting company policy and legal risk?",
       "questionType": "short_answer",
       "rubric": [
-        "balanced-judgment",
-        "trust",
-        "boundaries",
-        "policy-awareness"
+        "be honest about what stays confidential",
+        "listen without promising a result",
+        "say where the employer's interest applies",
+        "apply policy without hiding behind it"
       ]
     },
     {
@@ -52,11 +52,11 @@ export const hrAiEthicsModule: PrebuiltModuleDefinition = {
       "questionText": "An engagement survey shows low trust in management. What follow-up questions and data would you gather before recommending action?",
       "questionType": "scenario",
       "rubric": [
-        "data-triangulation",
-        "employee-voice",
-        "manager-context",
-        "actionability",
-        "measurement"
+        "compare the survey with turnover and exits",
+        "ask employees what the scores mean",
+        "hear the manager's side before acting",
+        "recommend changes someone can own",
+        "agree how improvement will be measured"
       ]
     },
     {
@@ -64,10 +64,10 @@ export const hrAiEthicsModule: PrebuiltModuleDefinition = {
       "questionText": "A manager wants to paste employee complaint details into a public AI chatbot to draft a response. What guidance do you give?",
       "questionType": "scenario",
       "rubric": [
-        "privacy",
-        "ai-risk-awareness",
-        "safe-alternatives",
-        "manager-coaching"
+        "stop personal details leaving the company",
+        "explain that prompts may be stored or reused",
+        "offer an approved tool or a template",
+        "coach the manager instead of only refusing"
       ]
     }
   ]

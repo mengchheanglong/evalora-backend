@@ -478,6 +478,112 @@ test("getTranscript does not claim an interviewer follow-up on a removed module 
   assert.equal(followUps[1].isEvidence, true);
 });
 
+const LIVE_QUESTION = "Describe a system you scaled.";
+const ASKED_QUESTION = "Describe a system you scaled, and what broke first.";
+
+/** The template answer alone, with whatever the responses service left on its JSON. */
+function rowWithResponseJson(responseJson: unknown): TranscriptSessionRow {
+  return {
+    ...sessionRow,
+    responses: [{ ...(sessionRow.responses ?? [])[0], responseJson }],
+    aiMessages: [],
+    codeSubmissions: [],
+    interviewerFollowUps: [],
+  };
+}
+
+test("getTranscript shows the question as it was asked, not as the template reads today", async () => {
+  const service = new TranscriptService(
+    createFakePrisma(
+      rowWithResponseJson({
+        questionSnapshot: { questionText: ASKED_QUESTION, rubric: ["depth"], capturedAt: at(5).toISOString() },
+      }),
+    ),
+  );
+
+  const transcript = await service.getTranscript("session-1", interviewerAccess);
+  const [templateEntry] = byOrigin(transcript.entries, "template");
+
+  assert.equal(templateEntry.questionText, ASKED_QUESTION);
+  assert.equal(templateEntry.questionTextIsSnapshot, true);
+  // The rewrite is surfaced, not hidden: the reviewer judges the answer against
+  // the question the candidate actually saw and can see it has since changed.
+  assert.equal(templateEntry.liveQuestionText, LIVE_QUESTION);
+  assert.equal(templateEntry.answerText, "I sharded the write path and added a read replica.");
+});
+
+test("getTranscript does not claim an edit when the template still reads as it was asked", async () => {
+  const service = new TranscriptService(
+    createFakePrisma(
+      rowWithResponseJson({ questionSnapshot: { questionText: LIVE_QUESTION, rubric: [], capturedAt: at(5).toISOString() } }),
+    ),
+  );
+
+  const transcript = await service.getTranscript("session-1", interviewerAccess);
+  const [templateEntry] = byOrigin(transcript.entries, "template");
+
+  assert.equal(templateEntry.questionText, LIVE_QUESTION);
+  assert.equal(templateEntry.questionTextIsSnapshot, true);
+  assert.equal(templateEntry.liveQuestionText, undefined);
+});
+
+test("getTranscript falls back to the live question when the answer carries no usable snapshot", async () => {
+  // Every shape the column really holds without a snapshot: an answer saved
+  // before snapshots existed, a structured payload, a snapshot the lookup could
+  // not fill in, and a non-object payload with nowhere to put one.
+  const withoutSnapshot = [undefined, null, { adaptive: false }, { questionSnapshot: { questionText: "", rubric: [] } }, "plain text"];
+
+  for (const responseJson of withoutSnapshot) {
+    const service = new TranscriptService(createFakePrisma(rowWithResponseJson(responseJson)));
+
+    const transcript = await service.getTranscript("session-1", interviewerAccess);
+    const [templateEntry] = byOrigin(transcript.entries, "template");
+
+    assert.equal(templateEntry.questionText, LIVE_QUESTION);
+    assert.equal(templateEntry.questionTextIsSnapshot, false);
+    assert.equal(templateEntry.liveQuestionText, undefined);
+    assert.equal(templateEntry.isEvidence, true);
+  }
+});
+
+test("getTranscript leaves a legacy session, written before snapshots, reading exactly as before", async () => {
+  const service = new TranscriptService(createFakePrisma());
+
+  const transcript = await service.getTranscript("session-1", interviewerAccess);
+
+  assert.deepEqual(transcript.counts, { template: 1, aiAdaptive: 1, interviewerFollowUp: 2, codeSubmission: 2 });
+  const [templateEntry] = byOrigin(transcript.entries, "template");
+  assert.equal(templateEntry.questionText, LIVE_QUESTION);
+  // No snapshot anywhere means no line may claim to be one, whatever its origin.
+  assert.equal(transcript.entries.every((entry) => entry.questionTextIsSnapshot === false), true);
+  assert.equal(transcript.entries.every((entry) => entry.liveQuestionText === undefined), true);
+});
+
+test("getTranscript does not replay an answer as an AI line when its question was reworded", async () => {
+  // The chat message repeats the question as it was ASKED, so matching it against
+  // the edited template row alone would leave the same answer showing twice.
+  const service = new TranscriptService(
+    createFakePrisma({
+      ...rowWithResponseJson({
+        questionSnapshot: { questionText: ASKED_QUESTION, rubric: [], capturedAt: at(5).toISOString() },
+      }),
+      aiMessages: [
+        {
+          id: "message-1",
+          role: "candidate",
+          content: "I sharded the write path and added a read replica.",
+          metadata: { question: ASKED_QUESTION },
+          createdAt: at(5),
+        },
+      ],
+    }),
+  );
+
+  const transcript = await service.getTranscript("session-1", interviewerAccess);
+
+  assert.deepEqual(transcript.counts, { template: 1, aiAdaptive: 0, interviewerFollowUp: 0, codeSubmission: 0 });
+});
+
 test("getTranscript reports a complete transcript as untruncated", async () => {
   const service = new TranscriptService(createFakePrisma());
 

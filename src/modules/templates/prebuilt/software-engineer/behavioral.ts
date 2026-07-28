@@ -16,10 +16,10 @@ export const softwareBehavioralModule: PrebuiltModuleDefinition = {
       "questionText": "Tell us about a time you had a technical disagreement with a teammate. What changed your mind or theirs?",
       "questionType": "short_answer",
       "rubric": [
-        "collaboration",
-        "evidence",
-        "humility",
-        "decision-quality"
+        "describe the other person's argument fairly",
+        "bring data or a test that settled it",
+        "admit which part they got wrong",
+        "say what was decided and how it held up"
       ]
     },
     {
@@ -27,10 +27,10 @@ export const softwareBehavioralModule: PrebuiltModuleDefinition = {
       "questionText": "Describe a time you owned a problem beyond your assigned ticket. What was the outcome?",
       "questionType": "short_answer",
       "rubric": [
-        "ownership",
-        "initiative",
-        "impact",
-        "follow-through"
+        "describe the problem nobody had picked up",
+        "say what they did beyond the assigned ticket",
+        "give the result in numbers or user terms",
+        "describe how they saw it through to the end"
       ]
     },
     {
@@ -38,10 +38,10 @@ export const softwareBehavioralModule: PrebuiltModuleDefinition = {
       "questionText": "Tell us about a feature or fix that did not work as expected. What did you learn?",
       "questionType": "short_answer",
       "rubric": [
-        "reflection",
-        "accountability",
-        "technical-learning",
-        "prevention"
+        "say plainly what went wrong",
+        "own their part without blaming others",
+        "name the technical lesson learned",
+        "describe the change that stops a repeat"
       ]
     },
     {
@@ -49,10 +49,10 @@ export const softwareBehavioralModule: PrebuiltModuleDefinition = {
       "questionText": "Give an example of when user or customer impact changed your technical approach.",
       "questionType": "short_answer",
       "rubric": [
-        "user-focus",
-        "trade-offs",
-        "product-thinking",
-        "impact"
+        "describe what users actually needed",
+        "say what the simpler approach gave up",
+        "connect the technical choice to the outcome",
+        "give evidence the change helped"
       ]
     },
     {
@@ -60,10 +60,10 @@ export const softwareBehavioralModule: PrebuiltModuleDefinition = {
       "questionText": "How did you learn a new tool, framework, or codebase under time pressure?",
       "questionType": "short_answer",
       "rubric": [
-        "learning-strategy",
-        "resourcefulness",
-        "execution",
-        "communication"
+        "describe how they got oriented quickly",
+        "name the sources or people they used",
+        "say what shipped despite the time pressure",
+        "describe what they told the team along the way"
       ]
     }
   ]

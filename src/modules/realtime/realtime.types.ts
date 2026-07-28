@@ -1,3 +1,5 @@
+import type { SessionStatus } from "../../domain/evalora.types";
+
 export type ParticipantRole = "candidate" | "interviewer";
 
 export interface InterviewParticipant {
@@ -22,12 +24,31 @@ export interface SnapshotFollowUp {
  */
 export interface SessionSnapshot {
   sessionId: string;
-  status: string;
+  /**
+   * Lowercase, exactly like every REST DTO and SnapshotFollowUp.status. The raw
+   * Prisma enum ("IN_PROGRESS") never reaches a client, so a screen can compare
+   * a live status against a fetched one without knowing which channel it came
+   * from.
+   */
+  status: SessionStatus;
   startedAt?: string;
   completedAt?: string;
   participants: InterviewParticipant[];
   followUps: SnapshotFollowUp[];
   serverTime: number;
+}
+
+/**
+ * How a service hands work to the live transport. It lives with the rest of the
+ * realtime contract rather than in one of the services that publishes through
+ * it, so every publisher depends on the transport and never on a sibling
+ * feature module.
+ *
+ * Optional wherever it is injected, so services stay unit-testable without a
+ * gateway.
+ */
+export interface InterviewEventPublisher {
+  emitToSession(sessionId: string, event: string, payload: unknown): void;
 }
 
 /** Single source of truth for event names on both sides of the wire. */

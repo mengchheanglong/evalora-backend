@@ -22,16 +22,50 @@ interface ResponseSessionAccessRow {
   expiresAt?: Date | null;
 }
 
+/**
+ * What the candidate was actually asked, recorded on their answer.
+ *
+ * Templates are mutable and carry no version, so question text and rubric read
+ * live would silently re-label and re-score every past answer the moment a
+ * prebuilt question is edited. This is the frozen copy the transcript and the
+ * report scorer can trust.
+ */
+export interface QuestionSnapshot {
+  questionText: string;
+  rubric: string[];
+  moduleTitle?: string;
+  /** Lowercase wire vocabulary ("ai_interview"), as everywhere else. */
+  moduleType?: string;
+  weight?: number;
+  capturedAt: string;
+}
+
+interface SnapshotQuestionRow {
+  questionText?: string | null;
+  rubric?: JsonValue | null;
+  module?: {
+    title?: string | null;
+    moduleType?: string | null;
+    weight?: number | null;
+  } | null;
+}
+
 type ResponseFindFirstFn = (args: any) => Promise<ResponseRow | null>;
 type ResponseCreateFn = (args: any) => Promise<ResponseRow>;
 type ResponseUpdateFn = (args: any) => Promise<ResponseRow>;
 type ResponseUpsertFn = (args: any) => Promise<ResponseRow>;
 type ResponseFindManyFn = (args: any) => Promise<ResponseRow[]>;
 type SessionFindFirstFn = (args: any) => Promise<any | null>;
+type QuestionFindFn = (args: any) => Promise<SnapshotQuestionRow | null>;
 
 interface ResponsePrismaClient {
   interviewSession?: {
     findFirst?: SessionFindFirstFn;
+  };
+  /** Optional so existing mocks keep working; present on the real client. */
+  question?: {
+    findUnique?: QuestionFindFn;
+    findFirst?: QuestionFindFn;
   };
   response: {
     findFirst?: ResponseFindFirstFn;
@@ -74,6 +108,12 @@ export class ResponsesService {
     responseText: string,
     responseJson: JsonValue | undefined,
   ): Promise<CandidateResponseDto> {
+    // Read for its stored snapshot only — the write below is still the atomic
+    // upsert, so this never decides create-vs-update and never reintroduces the
+    // old TOCTOU race.
+    const existing = await this.findExistingResponse(sessionId, questionId);
+    const snapshotted = await this.withQuestionSnapshot(questionId, responseJson, existing);
+
     // Idempotent write keyed on the @@unique([sessionId, questionId]) index, so a
     // double-submit / autosave-plus-Save / network retry updates the same row
     // instead of inserting a duplicate. Replaces the old read-then-write (TOCTOU).
@@ -83,28 +123,91 @@ export class ResponsesService {
         return toResponseDto(
           await upsert({
             where: { sessionId_questionId: { sessionId, questionId } },
-            create: { sessionId, questionId, responseText, responseJson },
-            update: { responseText, responseJson },
+            create: { sessionId, questionId, responseText, responseJson: snapshotted },
+            update: { responseText, responseJson: snapshotted },
           }),
         );
       } catch (error) {
         // Lost a concurrent insert race: the DB unique constraint rejected the
         // second insert (P2002). The row now exists — update it instead of erroring.
         if (isUniqueViolation(error)) {
-          const existing = await this.findExistingResponse(sessionId, questionId);
-          if (existing) return toResponseDto(await this.updateResponse(existing.id, responseText, responseJson));
+          const raced = await this.findExistingResponse(sessionId, questionId);
+          // The race winner's snapshot is the one that was captured first, so it
+          // is the one that survives.
+          if (raced) {
+            return toResponseDto(
+              await this.updateResponse(raced.id, responseText, await this.withQuestionSnapshot(questionId, responseJson, raced)),
+            );
+          }
         }
         throw error;
       }
     }
 
     // Fallback for clients/mocks without upsert (preserves the previous behavior).
-    const existing = await this.findExistingResponse(sessionId, questionId);
     return toResponseDto(
       existing
-        ? await this.updateResponse(existing.id, responseText, responseJson)
-        : await this.createResponse(sessionId, questionId, responseText, responseJson),
+        ? await this.updateResponse(existing.id, responseText, snapshotted)
+        : await this.createResponse(sessionId, questionId, responseText, snapshotted),
     );
+  }
+
+  /**
+   * Merges the question snapshot into the answer's JSON, without ever disturbing
+   * what is already stored there (structured answers, the adaptive AI fields).
+   *
+   * Captured once: a re-save keeps the snapshot the first save wrote, because the
+   * record has to say what the candidate was asked when they answered — not what
+   * the template says today.
+   */
+  private async withQuestionSnapshot(
+    questionId: string,
+    responseJson: JsonValue | undefined,
+    existing: ResponseRow | null,
+  ): Promise<JsonValue | undefined> {
+    // A save that sends no JSON of its own used to leave the column untouched.
+    // Now that a snapshot is written into it, the stored value has to be carried
+    // forward explicitly or the write would replace an adaptive answer's fields
+    // with nothing but the snapshot.
+    const base = responseJson === undefined ? (existing?.responseJson ?? undefined) : responseJson;
+
+    // A non-object payload (array, string, number) has nowhere to hold a
+    // snapshot, and the candidate's own data outranks the snapshot.
+    if (base != null && !isJsonObject(base)) return base;
+
+    const snapshot = readQuestionSnapshot(existing?.responseJson) ?? (await this.loadQuestionSnapshot(questionId));
+    if (!snapshot) return base;
+    return { ...(isJsonObject(base) ? base : {}), questionSnapshot: snapshot };
+  }
+
+  private async loadQuestionSnapshot(questionId: string): Promise<QuestionSnapshot | undefined> {
+    const findQuestion = this.prisma.question?.findUnique ?? this.prisma.question?.findFirst;
+    if (!findQuestion) return undefined;
+
+    try {
+      const question = await findQuestion({
+        where: { id: questionId },
+        select: {
+          questionText: true,
+          rubric: true,
+          module: { select: { title: true, moduleType: true, weight: true } },
+        },
+      });
+      if (!question) return undefined;
+
+      return {
+        questionText: question.questionText ?? "",
+        rubric: toStringArray(question.rubric),
+        moduleTitle: optionalString(question.module?.title),
+        moduleType: question.module?.moduleType ? String(question.module.moduleType).toLowerCase() : undefined,
+        weight: typeof question.module?.weight === "number" && Number.isFinite(question.module.weight) ? question.module.weight : undefined,
+        capturedAt: new Date().toISOString(),
+      };
+    } catch {
+      // The candidate's answer is the thing that must not be lost. A snapshot
+      // that could not be read leaves the answer saved without one.
+      return undefined;
+    }
   }
 
   async listResponsesBySession(sessionId: string, access?: AccessContext): Promise<CandidateResponseDto[]> {
@@ -228,6 +331,28 @@ export class ResponsesService {
 function buildResponseOwnershipWhere(access?: AccessContext): Record<string, unknown> | undefined {
   const sessionScope = buildSessionOwnershipWhere(access);
   return Object.keys(sessionScope).length ? { session: sessionScope } : undefined;
+}
+
+/** The snapshot an earlier save already wrote, returned exactly as it was stored. */
+function readQuestionSnapshot(responseJson: JsonValue | null | undefined): QuestionSnapshot | undefined {
+  if (!isJsonObject(responseJson)) return undefined;
+  const snapshot = responseJson.questionSnapshot;
+  return isJsonObject(snapshot) ? (snapshot as unknown as QuestionSnapshot) : undefined;
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Rubric is a free-form Json column; only usable string criteria are kept. */
+function toStringArray(value: JsonValue | null | undefined): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function optionalString(value: unknown): string | undefined {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return trimmed ? trimmed : undefined;
 }
 
 /** Prisma unique-constraint violation (used to reconcile a concurrent insert race). */

@@ -16,10 +16,10 @@ export const teamLeaderWorkStyleModule: PrebuiltModuleDefinition = {
       "questionText": "How do you keep your own priorities clear when your team receives many interruptions?",
       "questionType": "short_answer",
       "rubric": [
-        "focus",
-        "prioritization",
-        "boundary-setting",
-        "communication"
+        "protect blocks of time for their own work",
+        "decide which interruptions they absorb",
+        "say no or renegotiate the deadline",
+        "tell the team where their attention is"
       ]
     },
     {
@@ -35,10 +35,10 @@ export const teamLeaderWorkStyleModule: PrebuiltModuleDefinition = {
         ]
       },
       "rubric": [
-        "decision-making",
-        "risk-control",
-        "self-awareness",
-        "communication"
+        "decide rather than wait for certainty",
+        "name the safeguard used for reversible calls",
+        "know which decisions they find hard",
+        "share the reasoning with the team"
       ]
     },
     {
@@ -46,10 +46,10 @@ export const teamLeaderWorkStyleModule: PrebuiltModuleDefinition = {
       "questionText": "Which meetings or rituals would you keep for a small delivery team, and which would you avoid?",
       "questionType": "short_answer",
       "rubric": [
-        "meeting-discipline",
-        "team-rhythm",
-        "simplicity",
-        "outcome-focus"
+        "keep only meetings with a clear purpose",
+        "name what each ritual should produce",
+        "cut status meetings a written update covers",
+        "leave the team uninterrupted days"
       ]
     },
     {
@@ -57,10 +57,10 @@ export const teamLeaderWorkStyleModule: PrebuiltModuleDefinition = {
       "questionText": "How do you use written updates or documentation to reduce confusion on the team?",
       "questionType": "short_answer",
       "rubric": [
-        "clarity",
-        "async-communication",
-        "accountability",
-        "context-sharing"
+        "write decisions where people can find them",
+        "record the owner and the date",
+        "explain the reasoning, not only the outcome",
+        "reduce the need to be in the room"
       ]
     },
     {
@@ -68,10 +68,10 @@ export const teamLeaderWorkStyleModule: PrebuiltModuleDefinition = {
       "questionText": "What signs tell you that delegation is working, and what signs tell you you need to step in?",
       "questionType": "short_answer",
       "rubric": [
-        "delegation",
-        "inspection",
-        "coaching",
-        "risk-awareness"
+        "name the signs that the work is on track",
+        "inspect the output, not the hours",
+        "coach before taking the work back",
+        "step in when risk or harm is rising"
       ]
     }
   ]

@@ -187,15 +187,15 @@ function scoreResponse(response: string, rubric: string[]): number {
   const wordCount = wordCountOf(response);
   if (wordCount < MIN_SUBSTANTIVE_WORDS || isExplicitNonAnswer(response)) return 0;
 
-  const criteriaHits = rubric.filter((criterion) => includesAny(response, meaningfulTerms(criterion))).length;
+  const criteriaCoverage = rubric.reduce((total, criterion) => total + criterionCoverage(response, criterion), 0);
   const actionHits = countMatches(response, ["explain", "clarify", "listen", "test", "measure", "trade-off", "deadline", "client", "team", "evidence"]);
 
   // Length alone never earns credit; at least one rubric, action, or evidence
   // signal is required before assigning an anchored score.
   const evidenceHits = countMatches(response, ["because", "example", "result", "impact", "metric", "percent", "customer", "outcome"]);
-  if (criteriaHits + actionHits + evidenceHits === 0) return 0;
+  if (criteriaCoverage + actionHits + evidenceHits === 0) return 0;
   const quality =
-    (criteriaHits / Math.max(1, rubric.length)) * 0.45
+    (criteriaCoverage / Math.max(1, rubric.length)) * 0.45
     + Math.min(1, actionHits / 4) * 0.25
     + Math.min(1, evidenceHits / 3) * 0.2
     + Math.min(1, wordCount / 80) * 0.1;
@@ -205,9 +205,52 @@ function scoreResponse(response: string, rubric: string[]): number {
   return 5;
 }
 
+/** Words that turn up in almost any answer. They are dropped from a criterion's
+ *  terms so that spelling a criterion out as a behaviour makes it harder to
+ *  satisfy, not easier — otherwise filler alone could cover "state what they
+ *  would have done". */
+const COMMON_RUBRIC_WORDS = new Set([
+  "about", "after", "also", "another", "back", "been", "before", "both", "could", "does", "each",
+  "even", "every", "from", "give", "have", "here", "into", "just", "know", "like", "make", "many",
+  "more", "most", "much", "must", "need", "only", "other", "over", "same", "should", "some", "such",
+  "take", "than", "that", "their", "them", "then", "there", "these", "they", "thing", "this",
+  "those", "through", "very", "well", "were", "what", "when", "where", "which", "while", "will",
+  "with", "would", "your",
+]);
+
+/** How many of a criterion's terms an answer must evidence before the criterion
+ *  counts at all. */
+const MIN_EVIDENCED_TERMS = 2;
+
+/** Share of one criterion the answer evidences, from 0 to 1.
+ *
+ *  A single incidental word must never satisfy a criterion: "technical" alone is
+ *  not proof of "technical reasoning", and it is exactly how question wording used
+ *  to score itself. Above the floor the credit is proportional, so a partly
+ *  evidenced criterion earns partial score instead of the whole thing.
+ *
+ *  Single-term criteria stay all-or-nothing on purpose. Discounting them would
+ *  dock the candidate for a rubric author writing one vague noun, which is the
+ *  rubric's fault and not the candidate's. */
+function criterionCoverage(response: string, criterion: string): number {
+  const terms = meaningfulTerms(criterion);
+  const matched = terms.filter((term) => matchesTerm(response, term)).length;
+  if (terms.length < MIN_EVIDENCED_TERMS) return matched;
+  return matched < MIN_EVIDENCED_TERMS ? 0 : matched / terms.length;
+}
+
 function meaningfulTerms(criterion: string): string[] {
-  const terms = criterion.toLowerCase().split(/[^a-z0-9]+/).filter((term) => term.length >= 4);
-  return terms.length ? terms : [criterion];
+  const words = criterion.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4);
+  const informative = words.filter((word) => !COMMON_RUBRIC_WORDS.has(word));
+  // Never return nothing: a criterion built only from common words is weak, but
+  // silently scoring it 0 would penalise the candidate for how it was written.
+  return unique(informative.length ? informative : words.length ? words : [criterion]);
+}
+
+/** Rubric terms match at the start of a word only, so "test" is evidenced by
+ *  "tested" or "testing" but never by "latest" or "contest". */
+function matchesTerm(response: string, term: string): boolean {
+  return new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(response);
 }
 
 function isExplicitNonAnswer(response: string): boolean {

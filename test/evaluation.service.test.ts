@@ -88,6 +88,41 @@ test("evaluateResponse scores candidate answers rather than question text", () =
   assert.equal(result.score, 0);
 });
 
+test("a rubric criterion is not satisfied by one incidental keyword", () => {
+  const rubric = ["technical reasoning", "incident process", "prevention change"];
+  const namesTheWords = evaluateResponse({
+    moduleType: "ai_interview",
+    responseText: "The incident was technical and the process changed, and I care about the team.",
+    rubric,
+  });
+  const showsTheBehaviour = evaluateResponse({
+    moduleType: "ai_interview",
+    responseText:
+      "The technical reasoning was that a dropped index made one query 2000 times slower. Our incident process is to roll back first, then investigate, so I reverted the deploy and explained the customer impact to the team. The prevention change was a slow-query alert.",
+    rubric,
+  });
+
+  assert.ok(
+    showsTheBehaviour.score > namesTheWords.score,
+    `an answer demonstrating the criteria (${showsTheBehaviour.score}) must outscore one only naming them (${namesTheWords.score})`,
+  );
+});
+
+test("rubric terms match whole words, not fragments inside other words", () => {
+  const fragmentOnly = evaluateResponse({
+    moduleType: "coding",
+    responseText: "I shipped the latest release to the contest environment without further review.",
+    rubric: ["test"],
+  });
+  const realTerm = evaluateResponse({
+    moduleType: "coding",
+    responseText: "I tested the latest release in the contest environment before shipping it.",
+    rubric: ["test"],
+  });
+
+  assert.ok(fragmentOnly.score < realTerm.score, "\"latest\" and \"contest\" must not evidence a \"test\" criterion");
+});
+
 test("questionContext never changes the score, the criteria, or the evidence quotes", () => {
   const candidateAnswer = "I rolled back the deployment and explained the failure to the team.";
   const rubric = ["ownership"];

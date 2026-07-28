@@ -16,11 +16,11 @@ export const teamLeaderProblemSolvingModule: PrebuiltModuleDefinition = {
       "questionText": "Quality metrics have declined for three consecutive sprints, yet velocity is stable and the team reports being busy. How do you diagnose the root cause, what data do you gather, and what changes do you make to the operating rhythm?",
       "questionType": "scenario",
       "rubric": [
-        "root-cause-analysis",
-        "metrics",
-        "prioritization",
-        "team-process",
-        "follow-through"
+        "question why busy did not mean effective",
+        "name the quality data to pull first",
+        "choose one or two changes, not ten",
+        "change the working rhythm, not just the target",
+        "set a date to review the effect"
       ]
     },
     {
@@ -28,10 +28,10 @@ export const teamLeaderProblemSolvingModule: PrebuiltModuleDefinition = {
       "questionText": "Your team has capacity for two of five urgent tasks this sprint: (1) a critical bug affecting 10% of users, (2) a Sales-requested feature for an enterprise deal, (3) technical debt frustrating developers, (4) a leadership-requested analytics dashboard, and (5) a performance optimization. Walk through your decision framework — what questions do you ask and who do you consult?",
       "questionType": "scenario",
       "rubric": [
-        "prioritization",
-        "trade-off-reasoning",
-        "stakeholder-management",
-        "execution-plan"
+        "rank by user harm and revenue at risk",
+        "say what the deferred items cost",
+        "ask sales and leadership the missing questions",
+        "commit to what the sprint will deliver"
       ]
     },
     {
@@ -39,10 +39,10 @@ export const teamLeaderProblemSolvingModule: PrebuiltModuleDefinition = {
       "questionText": "A senior team member has become the decision bottleneck — every major decision flows through them, slowing delivery, and they believe they are protecting quality. How do you address it while preserving their engagement and developing other team members?",
       "questionType": "scenario",
       "rubric": [
-        "process-design",
-        "delegation",
-        "risk-management",
-        "team-growth"
+        "define which decisions still need that person",
+        "move routine calls to the rest of the team",
+        "keep a review step for risky changes",
+        "give others decisions to practise on"
       ]
     },
     {
@@ -50,11 +50,11 @@ export const teamLeaderProblemSolvingModule: PrebuiltModuleDefinition = {
       "questionText": "A major customer complains about repeated mistakes from your team. In the first 48 hours: what is your immediate response to the customer, how do you investigate internally, what short-term fixes do you apply, and what long-term prevention do you put in place?",
       "questionType": "scenario",
       "rubric": [
-        "customer-focus",
-        "containment",
-        "root-cause-analysis",
-        "communication",
-        "prevention"
+        "contact the customer within the first day",
+        "stop the repeat mistakes immediately",
+        "trace why the errors kept happening",
+        "tell the customer what changed, with dates",
+        "add the check that prevents a repeat"
       ]
     },
     {
@@ -62,10 +62,10 @@ export const teamLeaderProblemSolvingModule: PrebuiltModuleDefinition = {
       "questionText": "You are taking over a struggling team. What leading and lagging indicators would you track to know it is improving? How do you balance output, outcome, and team-health metrics, and what would you do if they conflict — for example, velocity up but quality down?",
       "questionType": "short_answer",
       "rubric": [
-        "metric-selection",
-        "balance",
-        "actionability",
-        "team-health"
+        "name a leading and a lagging indicator",
+        "pair output numbers with quality numbers",
+        "choose measures the team can act on",
+        "treat a quality drop as the stronger signal"
       ]
     }
   ]

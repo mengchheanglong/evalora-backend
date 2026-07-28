@@ -17,11 +17,11 @@ export const teamLeaderLeadershipModule: PrebuiltModuleDefinition = {
       "questionText": "Two strong team members disagree publicly and progress is blocked. How would you handle the conflict and keep delivery moving?",
       "questionType": "scenario",
       "rubric": [
-        "conflict-resolution",
-        "decision-making",
-        "team-alignment",
-        "accountability",
-        "communication"
+        "speak with each person separately first",
+        "separate the technical issue from the personal one",
+        "make the call and explain the reasoning",
+        "own the decision rather than defer it",
+        "tell the wider team what was agreed"
       ]
     },
     {
@@ -29,10 +29,10 @@ export const teamLeaderLeadershipModule: PrebuiltModuleDefinition = {
       "questionText": "Your team is likely to miss an important deadline. What do you communicate, what do you change, and how do you protect trust?",
       "questionType": "scenario",
       "rubric": [
-        "prioritization",
-        "stakeholder-management",
-        "risk-management",
-        "ownership"
+        "say what will ship and what will not",
+        "warn stakeholders before the date passes",
+        "protect the riskiest work first",
+        "take the miss as the leader's own"
       ]
     },
     {
@@ -40,11 +40,11 @@ export const teamLeaderLeadershipModule: PrebuiltModuleDefinition = {
       "questionText": "A reliable team member starts missing deadlines and says they are overloaded. How do you handle it?",
       "questionType": "scenario",
       "rubric": [
-        "empathy",
-        "performance-management",
-        "workload-analysis",
-        "action-plan",
-        "follow-up"
+        "ask what changed before judging",
+        "look at the real workload and priorities",
+        "agree what to drop or reassign",
+        "set clear expectations and a date",
+        "check progress rather than assume"
       ]
     },
     {
@@ -52,10 +52,10 @@ export const teamLeaderLeadershipModule: PrebuiltModuleDefinition = {
       "questionText": "The team is burned out after several urgent releases. What would you change in the next month?",
       "questionType": "scenario",
       "rubric": [
-        "team-health",
-        "prioritization",
-        "sustainable-pace",
-        "stakeholder-communication"
+        "name the burnout signals they watch for",
+        "cut or delay committed work",
+        "change the pace, not just grant a day off",
+        "tell stakeholders what slows down and why"
       ]
     },
     {
@@ -63,10 +63,10 @@ export const teamLeaderLeadershipModule: PrebuiltModuleDefinition = {
       "questionText": "How do you decide what to delegate, what to inspect, and what to own yourself?",
       "questionType": "short_answer",
       "rubric": [
-        "delegation",
-        "trust",
-        "risk-awareness",
-        "coaching"
+        "match the task to the person's level",
+        "agree the check-in points up front",
+        "keep the calls that carry real risk",
+        "let people learn from small mistakes"
       ]
     },
     {
@@ -74,11 +74,11 @@ export const teamLeaderLeadershipModule: PrebuiltModuleDefinition = {
       "questionText": "Two high-performing team members are in conflict over a technical approach. It has become personal and is hurting morale. How do you handle it in the next 48 hours, and what is your longer-term approach?",
       "questionType": "scenario",
       "rubric": [
-        "conflict-resolution",
-        "team-health",
-        "directness",
-        "fairness",
-        "follow-through"
+        "act within days rather than hope it settles",
+        "talk to each person one to one",
+        "name the behaviour, not the personality",
+        "apply the same standard to both",
+        "check the team mood weeks later"
       ]
     }
   ]

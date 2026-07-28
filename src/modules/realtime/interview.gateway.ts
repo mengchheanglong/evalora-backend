@@ -9,6 +9,7 @@ import {
   WebSocketServer,
 } from "@nestjs/websockets";
 import type { Server, Socket } from "socket.io";
+import type { SessionStatus } from "../../domain/evalora.types";
 import { PrismaService } from "../../prisma/prisma.service";
 import { TOKEN_PURPOSES, tryExtractAuthUserFromToken } from "../auth/auth.guard";
 import {
@@ -396,7 +397,10 @@ export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     return {
       sessionId,
-      status: session?.status ?? "NOT_STARTED",
+      // Lowercased on the way out: the raw Prisma enum would be the only
+      // uppercase status a client ever sees, and screens compare it against the
+      // lowercase status the REST DTOs return.
+      status: session ? (session.status.toLowerCase() as SessionStatus) : "not_started",
       startedAt: session?.startedAt?.toISOString(),
       completedAt: session?.completedAt?.toISOString(),
       participants,

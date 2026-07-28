@@ -8,7 +8,9 @@
     "allowSyntheticDefaultImports": true,
     "target": "ES2022",
     "sourceMap": true,
-    "rootDir": "./src",
+    // No explicit rootDir: this config also type-checks test/, which sits outside
+    // src and would be rejected by a src rootDir. tsconfig.build.json excludes the
+    // tests, so the emitted build still infers src as its root and writes dist/main.js.
     "outDir": "./dist",
     "incremental": true,
     "skipLibCheck": true,
@@ -16,5 +18,5 @@
     "strictPropertyInitialization": false,
     "esModuleInterop": true
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts"]
 }

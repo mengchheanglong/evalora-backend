@@ -40,6 +40,7 @@ export class AiController {
       moduleTitle: body.moduleTitle,
       moduleType: body.moduleType ?? "ai_interview",
       responseText: body.responseText ?? "",
+      questionContext: body.questionContext,
       rubric: body.rubric,
       weight: body.weight,
     });

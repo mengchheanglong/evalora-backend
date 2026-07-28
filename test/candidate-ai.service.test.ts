@@ -126,9 +126,42 @@ test("adaptive answer saves update the same response on retry", async () => {
 
   assert.equal(savedResponses.length, 1);
   assert.equal(updates, 1);
-  assert.match(savedResponses[0].responseText, /My revised answer/);
+  // The answer column holds the candidate's words and nothing else; the question it
+  // answers is structured data, so no reader has to parse it back out.
+  assert.equal(savedResponses[0].responseText, "My revised answer.");
+  assert.equal(savedResponses[0].responseJson.question, question);
   assert.equal(savedResponses[0].responseJson.questionId, "ai-adaptive-0");
   assert.equal(messages.filter((message) => message.role === "candidate").length, 1);
+});
+
+test("a follow-up names the question it was generated from", async () => {
+  const messages: Array<{ role: string; content: string; metadata: Record<string, unknown> }> = [];
+  const prisma = {
+    interviewSession: { findFirst: async () => openSession },
+    aIMessage: {
+      findMany: async () => messages.map((message, index) => ({ id: `message-${index}`, createdAt: new Date(0), ...message })),
+      create: async ({ data }: any) => {
+        messages.push(data);
+        return data;
+      },
+    },
+    $transaction: async (operations: Array<Promise<unknown>>) => Promise.all(operations),
+  };
+  const aiService = {
+    generateFollowUp: async () => ({ question: "Which trade-off did that rollback cost you?", basedOn: "candidate_answer", provider: "deepseek" }),
+  };
+  const service = new CandidateAiService(prisma as any, aiService as any);
+
+  await service.followUp("ACCESS-1", { question: "Describe a hard deployment.", answer: "I rolled it back once the error budget burned." });
+  const conversation = await service.conversation("ACCESS-1");
+  const probe = conversation.find((message) => message.role === "assistant");
+
+  // The pairing lives on the message that asked the question, so the candidate app can
+  // restore the follow-up without the question being copied onto the saved answer.
+  assert.equal(probe?.content, "Which trade-off did that rollback cost you?");
+  assert.equal(probe?.basedOnQuestion, "Describe a hard deployment.");
+  // Nothing else from metadata reaches a candidate: it also carries scoring rubrics.
+  assert.deepEqual(Object.keys(probe ?? {}).sort(), ["basedOnQuestion", "content", "createdAt", "id", "role"]);
 });
 
 test("adaptive context compaction retains every authored response", () => {

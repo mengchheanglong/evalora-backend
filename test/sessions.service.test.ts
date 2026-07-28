@@ -13,7 +13,7 @@ const sessionRow = {
   templateId: "template-1",
   template: { title: "Backend Engineer Assessment", roleType: "Backend Engineer" },
   createdById: "interviewer-1",
-  createdBy: { id: "interviewer-1", name: "Ada Interviewer", role: "INTERVIEWER" },
+  createdBy: { id: "interviewer-1", name: "Ada Interviewer", role: "INTERVIEWER" as const },
   title: null,
   interviewType: null,
   interviewers: null,
@@ -26,7 +26,7 @@ const sessionRow = {
   timeZone: null,
   organizationId: "org-1",
   accessCode: "EV-123456",
-  status: "NOT_STARTED",
+  status: "NOT_STARTED" as const,
   startedAt: null,
   completedAt: null,
   expiresAt,
@@ -468,7 +468,7 @@ test("startSession and completeSession write status timestamps through Prisma", 
           calls.push(args);
           return {
             ...sessionRow,
-            status: calls.length === 1 ? "IN_PROGRESS" : "COMPLETED",
+            status: calls.length === 1 ? ("IN_PROGRESS" as const) : ("COMPLETED" as const),
             startedAt: now,
             completedAt: calls.length === 1 ? null : now,
           };
@@ -617,8 +617,8 @@ test("listSessions rejects an invalid status filter with 400 before querying (no
 test("listSessions and getSession map Prisma rows to API DTOs", async () => {
   const service = new SessionsService({
     interviewSession: {
-      findMany: async () => [{ ...sessionRow, status: "IN_PROGRESS", startedAt: now }],
-      findUnique: async () => ({ ...sessionRow, status: "COMPLETED", startedAt: now, completedAt: now }),
+      findMany: async () => [{ ...sessionRow, status: "IN_PROGRESS" as const, startedAt: now }],
+      findUnique: async () => ({ ...sessionRow, status: "COMPLETED" as const, startedAt: now, completedAt: now }),
     },
   });
 
@@ -677,16 +677,18 @@ test("staff start and complete broadcast session.updated once each, after the wr
   await service.completeSession("session-1");
 
   assert.deepEqual(recorder.order, ["write", "emit", "write", "emit"], "every broadcast follows its committed write");
+  // Status is lowercase on the wire, exactly like the REST DTOs and the re-join
+  // snapshot — the raw Prisma enum must never reach a client.
   assert.deepEqual(recorder.events, [
     {
       sessionId: "session-1",
       event: SESSION_UPDATED,
-      payload: { sessionId: "session-1", status: "IN_PROGRESS", startedAt: now.toISOString(), completedAt: undefined },
+      payload: { sessionId: "session-1", status: "in_progress", startedAt: now.toISOString(), completedAt: undefined },
     },
     {
       sessionId: "session-1",
       event: SESSION_UPDATED,
-      payload: { sessionId: "session-1", status: "COMPLETED", startedAt: now.toISOString(), completedAt: now.toISOString() },
+      payload: { sessionId: "session-1", status: "completed", startedAt: now.toISOString(), completedAt: now.toISOString() },
     },
   ]);
 });
@@ -724,9 +726,9 @@ test("candidate start, submit, and timeout each broadcast session.updated", asyn
   assert.deepEqual(
     recorder.events.map((entry) => [entry.event, entry.payload.status]),
     [
-      [SESSION_UPDATED, "IN_PROGRESS"],
-      [SESSION_UPDATED, "COMPLETED"],
-      [SESSION_UPDATED, "EXPIRED"],
+      [SESSION_UPDATED, "in_progress"],
+      [SESSION_UPDATED, "completed"],
+      [SESSION_UPDATED, "expired"],
     ],
   );
   assert.equal(recorder.events[2].payload.sessionId, "session-1");
@@ -759,7 +761,7 @@ test("lazy auto-expiry broadcasts session.updated only for the sessions it flipp
   assert.deepEqual(recorder.events[0], {
     sessionId: "timed-out",
     event: SESSION_UPDATED,
-    payload: { sessionId: "timed-out", status: "EXPIRED", startedAt: startedAt.toISOString(), completedAt: undefined },
+    payload: { sessionId: "timed-out", status: "expired", startedAt: startedAt.toISOString(), completedAt: undefined },
   });
 });
 
