@@ -6,6 +6,7 @@ import { INTERVIEW_EVENTS, type InterviewEventPublisher } from "../src/modules/r
 
 const ownerAccess: AccessContext = { userId: "owner-1", role: "organization", organizationId: "org-1" };
 const interviewerAccess: AccessContext = { userId: "int-1", role: "interviewer", organizationId: "org-1" };
+const unassignedInterviewerAccess: AccessContext = { userId: "int-2", role: "interviewer", organizationId: "org-1" };
 const otherOrgAccess: AccessContext = { userId: "out-1", role: "organization", organizationId: "org-2" };
 
 type Row = {
@@ -32,16 +33,23 @@ function createFakePrisma(options: { sessionStatus?: Row["status"] | "NOT_STARTE
   const rows: Row[] = [];
   const session = {
     id: "session-1",
+    createdById: "owner-1",
+    interviewers: [{ id: "int-1", name: "QA Interviewer" }],
     organizationId: "org-1",
     accessCode: "EV-123456",
     status: (options.sessionStatus ?? "IN_PROGRESS") as "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "EXPIRED",
     expiresAt: null as Date | null,
     template: {
       modules: [
-        { id: "module-1", questions: [{ id: "question-1" }, { id: "question-2" }] },
-        { id: "module-2", questions: [{ id: "question-3" }] },
+        { id: "module-1", moduleType: "BEHAVIORAL", questions: [{ id: "question-1" }, { id: "question-2" }] },
+        { id: "module-2", moduleType: "AI_INTERVIEW", questions: [{ id: "question-3" }] },
+        { id: "module-3", moduleType: "CODING", questions: [] },
       ],
     },
+    aiMessages: [
+      { role: "assistant", metadata: { questionId: "ai-follow-up:question-1", moduleId: "module-1" } },
+      { role: "assistant", metadata: { adaptive: true, questionId: "ai-adaptive-0" } },
+    ],
   };
 
   const matchesWhere = (row: Row, where: any) =>
@@ -124,7 +132,7 @@ function pendingRequired(prisma: ReturnType<typeof createFakePrisma>): number {
 
 const validQuestion = "What monitoring signal would make you stop the rollout?";
 
-test("owner and interviewer can send a follow-up to a session in their organization", async () => {
+test("owner and assigned interviewer can send a follow-up", async () => {
   const prisma = createFakePrisma();
   const service = createService(prisma);
 
@@ -136,6 +144,38 @@ test("owner and interviewer can send a follow-up to a session in their organizat
 
   const second = await service.send("session-1", { questionText: "Second question for the candidate." }, interviewerAccess);
   assert.equal(second.sequence, 2, "sequence increments per session");
+});
+
+test("an unassigned interviewer can read but cannot send or withdraw follow-ups", async () => {
+  const prisma = createFakePrisma();
+  const service = createService(prisma);
+  const sent = await service.send("session-1", { questionText: validQuestion }, ownerAccess);
+
+  const visible = await service.listForSession("session-1", unassignedInterviewerAccess);
+  assert.equal(visible.length, 1, "workspace viewing remains available");
+  await assert.rejects(
+    () => service.send("session-1", { questionText: "Should this be blocked?" }, unassignedInterviewerAccess),
+    /only assigned interviewers/i,
+  );
+  await assert.rejects(
+    () => service.cancel("session-1", sent.id, unassignedInterviewerAccess),
+    /only assigned interviewers/i,
+  );
+  assert.equal(prisma.rows[0]?.status, "SENT", "an unauthorized withdraw cannot change the question");
+});
+
+test("an empty assignment defaults follow-up permission to the session creator", async () => {
+  const prisma = createFakePrisma();
+  prisma.session.createdById = "int-1";
+  (prisma.session as { interviewers?: unknown }).interviewers = undefined;
+  const service = createService(prisma);
+
+  const sent = await service.send("session-1", { questionText: validQuestion }, interviewerAccess);
+  assert.equal(sent.status, "sent");
+  await assert.rejects(
+    () => service.send("session-1", { questionText: "Unassigned question." }, unassignedInterviewerAccess),
+    /only assigned interviewers/i,
+  );
 });
 
 test("a user from another organization cannot read or send follow-ups", async () => {
@@ -171,6 +211,31 @@ test("send validates question text and template membership", async () => {
     /does not belong to the selected module/i,
   );
   assert.equal(prisma.rows.length, 0);
+});
+
+test("interviewer can follow up on AI-generated and coding turns", async () => {
+  const prisma = createFakePrisma();
+  const service = createService(prisma);
+
+  const aiProbe = await service.send("session-1", {
+    questionText: "What changed after that additional detail?",
+    moduleId: "module-1",
+    parentQuestionId: "ai-follow-up:question-1",
+  }, interviewerAccess);
+  const adaptive = await service.send("session-1", {
+    questionText: "Can you quantify the result you just described?",
+    moduleId: "module-2",
+    parentQuestionId: "ai-adaptive-0",
+  }, interviewerAccess);
+  const coding = await service.send("session-1", {
+    questionText: "Why did you choose this implementation strategy?",
+    moduleId: "module-3",
+    parentQuestionId: "sum-two-numbers",
+  }, interviewerAccess);
+
+  assert.equal(aiProbe.parentQuestionId, "ai-follow-up:question-1");
+  assert.equal(adaptive.moduleId, "module-2");
+  assert.equal(coding.moduleId, "module-3");
 });
 
 test("questions cannot be sent to a session that is not in progress", async () => {

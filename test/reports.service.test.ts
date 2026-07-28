@@ -365,7 +365,14 @@ test("generateAndPersistReport folds adaptive AI-interview answers (no linked qu
           {
             id: "resp-a1",
             responseText: "AI interview — Tell me about a hard trade-off.\n\nResponse: I weighed latency vs cost and documented it.",
-            responseJson: { adaptive: true, question: "Tell me about a hard trade-off." },
+            responseJson: {
+              adaptive: true,
+              question: "Tell me about a hard trade-off.",
+              aiFollowUp: {
+                question: "What metric proved the trade-off worked?",
+                answer: "P95 latency fell by 35 percent while monthly cost stayed flat.",
+              },
+            },
             question: null,
           },
           {
@@ -421,10 +428,13 @@ test("generateAndPersistReport folds adaptive AI-interview answers (no linked qu
   // split back out into context so they are never scored as the candidate's words.
   assert.match(aiInputs[0].responseText, /I weighed latency vs cost and documented it\./);
   assert.match(aiInputs[0].responseText, /I aligned them with a short RFC and a demo\./);
+  assert.match(aiInputs[0].responseText, /P95 latency fell by 35 percent/);
   assert.doesNotMatch(aiInputs[0].responseText, /hard trade-off/i);
+  assert.doesNotMatch(aiInputs[0].responseText, /What metric proved/i);
   assert.doesNotMatch(aiInputs[0].responseText, /How did the team react/i);
   assert.deepEqual(aiInputs[0].questionContext, [
     "AI interview question: Tell me about a hard trade-off.",
+    "AI follow-up question: What metric proved the trade-off worked?",
     "AI interview question: How did the team react?",
   ]);
   // ...and the report is actually persisted (previously skipped: "no candidate responses").

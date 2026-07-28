@@ -382,14 +382,17 @@ function resolveWritableOrganizationId(requestedOrganizationId: string | undefin
 }
 
 function toPrismaModuleCreate(module: TemplateModuleInput) {
+  const aiInterview = module.type === "ai_interview";
   return {
     moduleType: toPrismaModuleType(module.type),
     title: requireNonEmpty(module.title, "Module title is required."),
     description: module.description,
     weight: module.weight ?? 1,
     orderIndex: module.orderIndex ?? 1,
-    settings: module.settings,
-    questions: { create: (module.questions ?? []).map(toPrismaQuestionCreate) },
+    settings: normalizeModuleSettings(module),
+    // AI interview openings are generated only after earlier evidence exists.
+    // Ignore authored questions at the API boundary as well as in the editor.
+    questions: { create: (aiInterview ? [] : (module.questions ?? [])).map(toPrismaQuestionCreate) },
   };
 }
 
@@ -513,4 +516,29 @@ function prebuiltToTemplateDto(template: PrebuiltAssessmentTemplateDefinition): 
       })),
     })),
   };
+}
+
+function normalizeModuleSettings(module: Pick<TemplateModuleInput, "type" | "settings">): JsonValue | undefined {
+  const existing = jsonRecord(module.settings);
+  if (module.type === "ai_interview") {
+    return {
+      ...existing,
+      aiFollowUpsEnabled: true,
+      adaptiveQuestionCount: normalizeAdaptiveQuestionCount(existing.adaptiveQuestionCount),
+    };
+  }
+  if (!Object.prototype.hasOwnProperty.call(existing, "aiFollowUpsEnabled")) return module.settings;
+  return { ...existing, aiFollowUpsEnabled: existing.aiFollowUpsEnabled === true };
+}
+
+function normalizeAdaptiveQuestionCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(5, Math.max(1, Math.trunc(value)))
+    : 3;
+}
+
+function jsonRecord(value: JsonValue | undefined): Record<string, JsonValue> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, JsonValue>
+    : {};
 }

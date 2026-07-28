@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable } from "@nestjs/common";
 import type { CandidateResponseDto, JsonValue } from "../../domain/evalora.types";
 import { DEFAULT_LIST_LIMIT } from "../../common/query.constants";
 import { buildSessionOwnershipWhere, forbiddenResourceError, mergeWhere, type AccessContext } from "../auth/access-control";
+import { INTERVIEW_EVENTS, type InterviewEventPublisher } from "../realtime/realtime.types";
 
 interface ResponseRow {
   id: string;
@@ -88,7 +89,10 @@ export interface SaveResponseInput {
 
 @Injectable()
 export class ResponsesService {
-  constructor(private readonly prisma: ResponsePrismaClient) {}
+  constructor(
+    private readonly prisma: ResponsePrismaClient,
+    private readonly events?: InterviewEventPublisher,
+  ) {}
 
   async saveResponse(input: SaveResponseInput, access?: AccessContext): Promise<CandidateResponseDto> {
     const sessionId = requireNonEmpty(input.sessionId, "Session id is required.");
@@ -111,6 +115,12 @@ export class ResponsesService {
     responseText: string,
     responseJson: JsonValue | undefined,
   ): Promise<CandidateResponseDto> {
+    const finish = (row: ResponseRow): CandidateResponseDto => {
+      const response = toResponseDto(row);
+      this.publishResponseSaved(sessionId, response);
+      return response;
+    };
+
     // Read for its stored snapshot only — the write below is still the atomic
     // upsert, so this never decides create-vs-update and never reintroduces the
     // old TOCTOU race.
@@ -126,23 +136,21 @@ export class ResponsesService {
         const privateContext = prepared.questionSnapshot
           ? { questionSnapshot: prepared.questionSnapshot }
           : {};
-        return toResponseDto(
-          await upsert({
-            where: { sessionId_questionId: { sessionId, questionId } },
-            create: {
-              sessionId,
-              questionId,
-              responseText,
-              responseJson: prepared.responseJson,
-              ...privateContext,
-            },
-            update: {
-              responseText,
-              responseJson: prepared.responseJson,
-              ...privateContext,
-            },
-          }),
-        );
+        return finish(await upsert({
+          where: { sessionId_questionId: { sessionId, questionId } },
+          create: {
+            sessionId,
+            questionId,
+            responseText,
+            responseJson: prepared.responseJson,
+            ...privateContext,
+          },
+          update: {
+            responseText,
+            responseJson: prepared.responseJson,
+            ...privateContext,
+          },
+        }));
       } catch (error) {
         // Lost a concurrent insert race: the DB unique constraint rejected the
         // second insert (P2002). The row now exists — update it instead of erroring.
@@ -151,13 +159,11 @@ export class ResponsesService {
           // The race winner's snapshot is the one that was captured first, so it
           // is the one that survives.
           if (raced) {
-            return toResponseDto(
-              await this.updateResponse(
-                raced.id,
-                responseText,
-                await this.prepareQuestionResponse(questionId, responseJson, raced),
-              ),
-            );
+            return finish(await this.updateResponse(
+              raced.id,
+              responseText,
+              await this.prepareQuestionResponse(questionId, responseJson, raced),
+            ));
           }
         }
         throw error;
@@ -165,7 +171,7 @@ export class ResponsesService {
     }
 
     // Fallback for clients/mocks without upsert (preserves the previous behavior).
-    return toResponseDto(
+    return finish(
       existing
         ? await this.updateResponse(existing.id, responseText, prepared)
         : await this.createResponse(
@@ -176,6 +182,19 @@ export class ResponsesService {
           prepared.questionSnapshot,
         ),
     );
+  }
+
+  /** Announce only that evidence changed; authorized viewers refetch the transcript. */
+  private publishResponseSaved(sessionId: string, response: CandidateResponseDto): void {
+    try {
+      this.events?.emitToSession(sessionId, INTERVIEW_EVENTS.responseSaved, {
+        sessionId,
+        questionId: response.questionId,
+        savedAt: response.savedAt,
+      });
+    } catch {
+      // The database write already succeeded. Reconnect and polling remain fallbacks.
+    }
   }
 
   /**

@@ -1,12 +1,17 @@
 import { ConflictException, GoneException, NotFoundException } from "@nestjs/common";
 import { CodeExecutionService } from "../../src/modules/code/code-execution.service";
 import { CODE_QUESTIONS } from "../../src/modules/code/constants/code.constants";
-import { calculatePercentageScore, CodeService } from "../../src/modules/code/code.service";
+import {
+  calculatePercentageScore,
+  CodeService,
+  selectTemplateQuestionIds,
+} from "../../src/modules/code/code.service";
 import { PrismaService } from "../../src/prisma/prisma.service";
 
 describe("CodeService", () => {
   const prismaMock = {
     interviewSession: {
+      findFirst: jest.fn(),
       findUnique: jest.fn(),
     },
     codeSubmission: {
@@ -56,6 +61,72 @@ describe("CodeService", () => {
       question.examples.map((example) => example.input),
     );
     expect(exposedInputs).not.toEqual(expect.arrayContaining(hiddenInputs));
+  });
+
+  it("uses configured template challenges and assigns stable fallbacks to legacy questions", () => {
+    const questions = service.getQuestions();
+    const assigned = selectTemplateQuestionIds(
+      questions,
+      [
+        {
+          id: "configured",
+          questionType: "CODING",
+          options: { codeQuestionId: "sum-two-numbers" },
+        },
+        {
+          id: "legacy",
+          questionType: "CODING",
+          options: null,
+        },
+      ],
+      "EV-TEST",
+    );
+
+    expect(assigned).toHaveLength(2);
+    expect(assigned[0]).toBe("sum-two-numbers");
+    expect(assigned[1]).not.toBe("sum-two-numbers");
+    expect(selectTemplateQuestionIds(questions, [
+      { id: "configured", questionType: "CODING", options: { codeQuestionId: "sum-two-numbers" } },
+      { id: "legacy", questionType: "CODING", options: null },
+    ], "EV-TEST")).toEqual(assigned);
+  });
+
+  it("returns only the challenges configured by the session template", async () => {
+    (prismaMock.interviewSession.findFirst as jest.Mock).mockResolvedValue({
+      id: "session-1",
+      status: "IN_PROGRESS",
+      expiresAt: null,
+      template: {
+        modules: [{
+          id: "coding-module",
+          questions: [{
+            id: "template-question",
+            questionType: "CODING",
+            options: { codeQuestionId: "palindrome" },
+          }],
+        }],
+      },
+    });
+
+    const questions = await service.getQuestionsByAccessCode("EV-TEST");
+
+    expect(questions.map((question) => question.id)).toEqual(["palindrome"]);
+  });
+
+  it("keeps legacy zero-question coding modules usable with three stable challenges", async () => {
+    (prismaMock.interviewSession.findFirst as jest.Mock).mockResolvedValue({
+      id: "session-1",
+      status: "IN_PROGRESS",
+      expiresAt: null,
+      template: {
+        modules: [{ id: "legacy-coding-module", questions: [] }],
+      },
+    });
+
+    const questions = await service.getQuestionsByAccessCode("EV-LEGACY");
+
+    expect(questions).toHaveLength(3);
+    expect(new Set(questions.map((question) => question.id))).toHaveProperty("size", 3);
   });
 
   it("runs code through the configured execution sandbox", async () => {
@@ -157,6 +228,32 @@ describe("CodeService", () => {
     expect(result.totalTestCases).toBe(3);
     expect(result.score).toBe(33);
     expect(result.testResults.filter((t) => t.passed)).toHaveLength(1);
+  });
+
+  it("starts independent hidden test executions without waiting for the previous case", async () => {
+    const resolvers: Array<() => void> = [];
+    (executionService.executeCode as jest.Mock).mockImplementation(() =>
+      new Promise((resolve) => {
+        resolvers.push(() => resolve({
+          stdout: "",
+          stderr: "",
+          compileOutput: "",
+          status: "Accepted",
+          executionTime: 0.01,
+        }));
+      }),
+    );
+
+    const grading = service.gradeCode({
+      questionId: "sum-two-numbers",
+      language: "javascript",
+      sourceCode: "console.log(0)",
+    });
+
+    await Promise.resolve();
+    expect(executionService.executeCode).toHaveBeenCalledTimes(3);
+    resolvers.forEach((resolve) => resolve());
+    await grading;
   });
 
   it("rejects submissions once the session's expiresAt is in the past", async () => {

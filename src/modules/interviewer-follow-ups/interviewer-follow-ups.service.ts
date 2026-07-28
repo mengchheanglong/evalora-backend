@@ -2,6 +2,8 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { DEFAULT_LIST_LIMIT } from "../../common/query.constants";
 import { buildSessionOwnershipWhere, forbiddenResourceError, mergeWhere, type AccessContext } from "../auth/access-control";
 import { INTERVIEW_EVENTS, type InterviewEventPublisher } from "../realtime/realtime.types";
+import { CODE_QUESTION_INDEX } from "../code/constants/code.constants";
+import { canManageSessionFollowUps } from "../sessions/interviewer-assignment";
 import {
   ANSWER_TEXT_MAX,
   QUESTION_TEXT_MAX,
@@ -18,11 +20,14 @@ type PrismaSessionStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "EXPIRE
 
 interface SessionRow {
   id: string;
+  createdById?: string | null;
+  interviewers?: unknown;
   status: PrismaSessionStatus;
   expiresAt?: Date | null;
   template?: {
-    modules?: Array<{ id: string; questions?: Array<{ id: string }> | null }> | null;
+    modules?: Array<{ id: string; moduleType: string; questions?: Array<{ id: string }> | null }> | null;
   } | null;
+  aiMessages?: Array<{ role: string; metadata?: unknown }> | null;
 }
 
 /** Narrow client surface so the service is unit-testable with a plain object. */
@@ -76,6 +81,7 @@ export class InterviewerFollowUpsService {
     if (!askedById) throw new ForbiddenException("A signed-in workspace user is required to send a follow-up.");
 
     const session = await this.loadAccessibleSession(sessionId, access, { withTemplate: true });
+    this.assertCanManageFollowUps(session, access);
     // Questions may only be sent while the candidate is actively working.
     if (session.status !== "IN_PROGRESS") {
       throw new ConflictException("This session no longer accepts questions.");
@@ -129,7 +135,8 @@ export class InterviewerFollowUpsService {
   }
 
   async cancel(sessionId: string, followUpId: string, access?: AccessContext): Promise<InterviewerFollowUpDto> {
-    await this.loadAccessibleSession(sessionId, access);
+    const session = await this.loadAccessibleSession(sessionId, access);
+    this.assertCanManageFollowUps(session, access);
     const followUp = await this.prisma.interviewerFollowUp.findFirst({
       where: { id: followUpId, sessionId },
       include: { askedBy: ASKED_BY_SELECT },
@@ -235,7 +242,14 @@ export class InterviewerFollowUpsService {
       ...(options.withTemplate
         ? {
             include: {
-              template: { select: { modules: { select: { id: true, questions: { select: { id: true } } } } } },
+              template: {
+                select: {
+                  modules: {
+                    select: { id: true, moduleType: true, questions: { select: { id: true } } },
+                  },
+                },
+              },
+              aiMessages: { select: { role: true, metadata: true } },
             },
           }
         : {}),
@@ -258,7 +272,12 @@ export class InterviewerFollowUpsService {
     return session;
   }
 
-  /** A follow-up may only reference a module/question from this session's template. */
+  private assertCanManageFollowUps(session: SessionRow, access?: AccessContext): void {
+    if (canManageSessionFollowUps(session, access)) return;
+    throw new ForbiddenException("Only assigned interviewers can send or withdraw live follow-up questions.");
+  }
+
+  /** A follow-up may reference an authored question or a generated interview turn. */
   private resolveParentRefs(session: SessionRow, input: SendInterviewerFollowUpInput) {
     const moduleId = optionalTrimmed(input.moduleId);
     const parentQuestionId = optionalTrimmed(input.parentQuestionId);
@@ -269,11 +288,26 @@ export class InterviewerFollowUpsService {
     }
     if (parentQuestionId) {
       const owner = modules.find((module) => (module.questions ?? []).some((question) => question.id === parentQuestionId));
-      if (!owner) throw new BadRequestException("That question does not belong to this session's assessment.");
-      if (moduleId && owner.id !== moduleId) {
+      const codeOwner = modules.find(
+        (module) => module.moduleType === "CODING" && CODE_QUESTION_INDEX.has(parentQuestionId),
+      );
+      const generatedOwner = modules.find((module) => {
+        if (moduleId && module.id !== moduleId) return false;
+        return (session.aiMessages ?? []).some((message) => {
+          if (message.role !== "assistant") return false;
+          const metadata = jsonRecord(message.metadata);
+          if (metadata.questionId !== parentQuestionId) return false;
+          return typeof metadata.moduleId === "string"
+            ? metadata.moduleId === module.id
+            : module.moduleType === "AI_INTERVIEW";
+        });
+      });
+      const resolvedOwner = owner ?? codeOwner ?? generatedOwner;
+      if (!resolvedOwner) throw new BadRequestException("That question does not belong to this session's assessment.");
+      if (moduleId && resolvedOwner.id !== moduleId) {
         throw new BadRequestException("That question does not belong to the selected module.");
       }
-      return { moduleId: moduleId ?? owner.id, parentQuestionId };
+      return { moduleId: moduleId ?? resolvedOwner.id, parentQuestionId };
     }
     return { moduleId, parentQuestionId };
   }
@@ -293,4 +327,10 @@ function optionalTrimmed(value?: string): string | undefined {
 
 function isUniqueViolation(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "P2002";
+}
+
+function jsonRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }

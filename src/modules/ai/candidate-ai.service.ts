@@ -2,9 +2,10 @@ import { BadRequestException, Inject, Injectable, Optional, ServiceUnavailableEx
 import type { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { forbiddenResourceError } from "../auth/access-control";
-import { AiService, type FollowUpInput, type GeneratedFollowUp } from "./ai.service";
+import { AiService, deterministicFollowUpDecision, type FollowUpInput, type GeneratedFollowUp } from "./ai.service";
 import { createDeepSeekProviderFromEnv, DeepSeekAiProvider, type DeepSeekDeltaHandler } from "./deepseek.provider";
 import { basedOnQuestionByAssistantId } from "../../common/ai-message-provenance";
+import { readStructuredAiFollowUp } from "../../common/embedded-follow-up";
 
 export interface FollowUpStreamHandler {
   /** Appends text to whatever the candidate is already reading. */
@@ -54,7 +55,7 @@ export class CandidateAiService {
 
   async interviewQuestion(accessCode: string, input: { conversationHistory?: string[]; rubric?: string[] }) {
     const session = await this.findOpenSession(accessCode);
-    const module = session.template.modules[0];
+    const module = session.template.modules.find((candidate) => candidate.moduleType === "AI_INTERVIEW");
     if (!module) throw forbiddenResourceError("AI interview module");
     const previous = await this.prisma.aIMessage.findMany({
       where: { sessionId: session.id },
@@ -75,17 +76,33 @@ export class CandidateAiService {
     return generated;
   }
 
-  async followUp(accessCode: string, input: { question?: string; answer?: string; rubric?: string[] }) {
+  async followUp(accessCode: string, input: { questionId?: string; moduleId?: string; question?: string; answer?: string; rubric?: string[] }) {
     const session = await this.findOpenSession(accessCode);
+    const provenance = this.resolveFollowUpProvenance(session, input);
     const question = requiredText(input.question, "Question is required.", 4_000);
     const answer = requiredText(input.answer, "Answer is required.", 12_000);
     const generated = await this.aiService.generateFollowUp({ question, answer, rubric: safeStringArray(input.rubric, 10) });
+    if (generated.shouldAsk === false || !generated.question.trim()) return generated;
+    const generatedQuestionId = generatedFollowUpId(provenance.questionId);
     await this.prisma.$transaction([
-      this.prisma.aIMessage.create({ data: { sessionId: session.id, role: "candidate", content: answer, metadata: { question } } }),
+      this.prisma.aIMessage.create({ data: { sessionId: session.id, role: "candidate", content: answer, metadata: { question, ...provenance } } }),
       // Both rows share the transaction timestamp, so the probe cannot be tied back to
       // the question it came from by ordering. Naming that question here is what lets a
       // reader pair them without the candidate app copying the probe onto the answer.
-      this.prisma.aIMessage.create({ data: { sessionId: session.id, role: "assistant", content: generated.question, metadata: { provider: generated.provider, basedOn: generated.basedOn, basedOnQuestion: question } } }),
+      this.prisma.aIMessage.create({
+        data: {
+          sessionId: session.id,
+          role: "assistant",
+          content: generated.question,
+          metadata: {
+            provider: generated.provider,
+            basedOn: generated.basedOn,
+            basedOnQuestion: question,
+            ...provenance,
+            ...(generatedQuestionId ? { questionId: generatedQuestionId } : {}),
+          },
+        },
+      }),
     ]);
     return generated;
   }
@@ -101,15 +118,17 @@ export class CandidateAiService {
    */
   async followUpStream(
     accessCode: string,
-    input: { question?: string; answer?: string; rubric?: string[] },
+    input: { questionId?: string; moduleId?: string; question?: string; answer?: string; rubric?: string[] },
     handler: FollowUpStreamHandler,
   ): Promise<GeneratedFollowUp> {
     const session = await this.findOpenSession(accessCode);
+    const provenance = this.resolveFollowUpProvenance(session, input);
     const question = requiredText(input.question, "Question is required.", 4_000);
     const answer = requiredText(input.answer, "Answer is required.", 12_000);
 
     const generated = await this.streamFollowUpQuestion({ question, answer, rubric: safeStringArray(input.rubric, 10) }, handler);
-    await this.persistStreamedFollowUp(session.id, { question, answer, generated });
+    if (!generated.shouldAsk) return generated;
+    await this.persistStreamedFollowUp(session.id, { question, answer, generated, provenance });
     return generated;
   }
 
@@ -121,19 +140,32 @@ export class CandidateAiService {
    */
   private async persistStreamedFollowUp(
     sessionId: string,
-    context: { question: string; answer: string; generated: GeneratedFollowUp },
+    context: {
+      question: string;
+      answer: string;
+      generated: GeneratedFollowUp;
+      provenance: { questionId?: string; moduleId?: string };
+    },
   ): Promise<void> {
-    const { question, answer, generated } = context;
+    const { question, answer, generated, provenance } = context;
+    const generatedQuestionId = generatedFollowUpId(provenance.questionId);
     for (let attempt = 1; attempt <= FOLLOW_UP_PERSIST_ATTEMPTS; attempt += 1) {
       try {
         await this.prisma.$transaction([
-          this.prisma.aIMessage.create({ data: { sessionId, role: "candidate", content: answer, metadata: { question } } }),
+          this.prisma.aIMessage.create({ data: { sessionId, role: "candidate", content: answer, metadata: { question, ...provenance } } }),
           this.prisma.aIMessage.create({
             data: {
               sessionId,
               role: "assistant",
               content: generated.question,
-              metadata: { provider: generated.provider, basedOn: generated.basedOn, basedOnQuestion: question, streamed: true },
+              metadata: {
+                provider: generated.provider,
+                basedOn: generated.basedOn,
+                basedOnQuestion: question,
+                streamed: true,
+                ...provenance,
+                ...(generatedQuestionId ? { questionId: generatedQuestionId } : {}),
+              },
             },
           }),
         ]);
@@ -152,34 +184,34 @@ export class CandidateAiService {
   private async streamFollowUpQuestion(input: FollowUpInput, handler: FollowUpStreamHandler): Promise<GeneratedFollowUp> {
     const basedOn = input.answer ? "candidate_answer" : "default_follow_up";
     let emitted = "";
+    const bufferedDeltas: string[] = [];
     const onDelta: DeepSeekDeltaHandler = (text) => {
       emitted += text;
-      handler.onDelta(text);
+      bufferedDeltas.push(text);
     };
 
     try {
       const streamed = await this.streamingProvider.streamFollowUp(input, onDelta);
+      if (streamed.text.trim().toUpperCase() === NO_FOLLOW_UP_SENTINEL) {
+        return { shouldAsk: false, question: "", basedOn, provider: "deepseek" };
+      }
       const usable = usableStreamedQuestion(streamed.text, streamed.truncated);
       if (usable) {
-        // A cut-off stream ends mid-clause, so the trimmed question replaces what is on
-        // screen. It is never patched by writing more text after the dangling words.
-        if (usable !== emitted.trim()) handler.onReplace(usable);
-        return { question: usable, basedOn, provider: "deepseek" };
+        if (usable === emitted.trim()) {
+          for (const delta of bufferedDeltas) handler.onDelta(delta);
+        } else {
+          handler.onReplace(usable);
+        }
+        return { shouldAsk: true, question: usable, basedOn, provider: "deepseek" };
       }
     } catch {
-      // Falls through to the deterministic question below.
+      // Falls through to the deterministic decision below.
     }
 
-    // A missing key or a failed upstream must never leave the candidate on a dead
-    // spinner, so the deterministic question is still delivered. Appending it to a
-    // half-written question is what produced "...between latency andWhat trade-off
-    // did you consider", so anything already on screen is replaced outright.
-    if (emitted.trim()) {
-      handler.onReplace(FALLBACK_FOLLOW_UP_QUESTION);
-    } else {
-      for (const delta of splitIntoDeltas(FALLBACK_FOLLOW_UP_QUESTION)) handler.onDelta(delta);
-    }
-    return { question: FALLBACK_FOLLOW_UP_QUESTION, basedOn, provider: "fallback" };
+    const fallback = deterministicFollowUpDecision(input);
+    if (!fallback.shouldAsk) return fallback;
+    for (const delta of splitIntoDeltas(fallback.question)) handler.onDelta(delta);
+    return fallback;
   }
 
   /**
@@ -204,21 +236,35 @@ export class CandidateAiService {
 
   async adaptiveQuestions(accessCode: string, count = 3): Promise<{ questions: string[]; provider: string }> {
     const session = await this.findOpenSession(accessCode);
-    const [responses, priorMessages] = await Promise.all([
+    const [responses, priorMessages, interviewerFollowUps, codeSubmissions] = await Promise.all([
       this.prisma.response.findMany({
         where: { sessionId: session.id },
         orderBy: { createdAt: "asc" },
-        select: { responseText: true, question: { select: { questionText: true } } },
+        select: { responseText: true, responseJson: true, question: { select: { questionText: true } } },
       }),
       this.prisma.aIMessage.findMany({
         where: { sessionId: session.id, role: "assistant" },
         orderBy: { createdAt: "asc" },
         select: { content: true, metadata: true },
       }),
+      this.prisma.interviewerFollowUp?.findMany?.({
+        where: { sessionId: session.id, status: "ANSWERED" },
+        orderBy: { sequence: "asc" },
+        select: { questionText: true, answerText: true, askedBy: { select: { name: true } } },
+      }) ?? Promise.resolve([]),
+      this.prisma.codeSubmission?.findMany?.({
+        where: { sessionId: session.id },
+        orderBy: { createdAt: "asc" },
+        select: { questionId: true, language: true, sourceCode: true, stdout: true, stderr: true, score: true },
+      }) ?? Promise.resolve([]),
     ]);
-    const history = compactAdaptiveHistory(responses);
+    const history = [
+      ...compactAdaptiveHistory(responses),
+      ...compactInterviewerHistory(interviewerFollowUps),
+      ...compactCodeHistory(codeSubmissions),
+    ];
 
-    const moduleTitle = session.template.modules[0]?.title ?? "Adaptive interview";
+    const moduleTitle = session.template.modules.find((module) => module.moduleType === "AI_INTERVIEW")?.title ?? "Adaptive interview";
     const target = Math.min(Math.max(1, Math.trunc(count) || 3), 5);
     const existing = priorMessages.filter((message) => isAdaptiveMetadata(message.metadata));
     const questions = existing.slice(0, target).map((message) => message.content);
@@ -265,19 +311,31 @@ export class CandidateAiService {
 
   /** Persists a candidate's answer to an adaptive (AI-generated) question as both
    *  an AI transcript message and a session response for the reviewer report. */
-  async saveAdaptiveAnswer(accessCode: string, input: { questionId?: string; question?: string; answer?: string }) {
+  async saveAdaptiveAnswer(
+    accessCode: string,
+    input: { questionId?: string; question?: string; answer?: string; followUpQuestion?: string; followUpAnswer?: string },
+  ) {
     const session = await this.findOpenSession(accessCode);
     const questionId = requiredAdaptiveQuestionId(input.questionId);
     const question = requiredText(input.question, "Question is required.", 4_000);
     const answer = requiredText(input.answer, "Answer is required.", 12_000);
+    const followUpQuestion = optionalText(input.followUpQuestion, 4_000);
+    const followUpAnswer = optionalText(input.followUpAnswer, 12_000);
+    if (followUpAnswer && !followUpQuestion) throw new BadRequestException("The AI follow-up question is required.");
 
     return this.withAdaptiveSaveLock(`${session.id}:${questionId}`, async () => {
-      await this.persistAdaptiveAnswer(session.id, questionId, question, answer);
+      await this.persistAdaptiveAnswer(session.id, questionId, question, answer, { followUpQuestion, followUpAnswer });
       return { saved: true };
     });
   }
 
-  private async persistAdaptiveAnswer(sessionId: string, questionId: string, question: string, answer: string): Promise<void> {
+  private async persistAdaptiveAnswer(
+    sessionId: string,
+    questionId: string,
+    question: string,
+    answer: string,
+    followUp: { followUpQuestion?: string; followUpAnswer?: string },
+  ): Promise<void> {
     const [generatedQuestions, adaptiveResponses] = await Promise.all([
       this.prisma.aIMessage.findMany({
         where: { sessionId, role: "assistant" },
@@ -300,7 +358,14 @@ export class CandidateAiService {
     // structured data on responseJson, and a reader cannot tell a model-authored
     // question from the candidate's answer once the two are glued into one string.
     const responseText = answer;
-    const responseJson = { adaptive: true, questionId, question } as Prisma.InputJsonValue;
+    const responseJson = {
+      adaptive: true,
+      questionId,
+      question,
+      ...(followUp.followUpQuestion
+        ? { aiFollowUp: { question: followUp.followUpQuestion, answer: followUp.followUpAnswer ?? "" } }
+        : {}),
+    } as Prisma.InputJsonValue;
     const matchingResponses = adaptiveResponses.filter((response) => adaptiveQuestionId(response.responseJson) === questionId);
     const existing = matchingResponses[0];
     if (existing) {
@@ -349,7 +414,16 @@ export class CandidateAiService {
           select: {
             title: true,
             roleType: true,
-            modules: { where: { moduleType: "AI_INTERVIEW" }, orderBy: { orderIndex: "asc" }, take: 1, select: { title: true } },
+            modules: {
+              orderBy: { orderIndex: "asc" },
+              select: {
+                id: true,
+                title: true,
+                moduleType: true,
+                settings: true,
+                questions: { select: { id: true, questionText: true } },
+              },
+            },
           },
         },
       },
@@ -359,10 +433,31 @@ export class CandidateAiService {
     }
     return session;
   }
+
+  private resolveFollowUpProvenance(
+    session: Awaited<ReturnType<CandidateAiService["findOpenSession"]>>,
+    input: { questionId?: string; moduleId?: string; question?: string },
+  ): { questionId?: string; moduleId?: string } {
+    const questionId = optionalText(input.questionId, 400);
+    const moduleId = optionalText(input.moduleId, 400);
+    if (!session.template.modules.some((candidate) => candidate.moduleType === "AI_INTERVIEW")) {
+      throw forbiddenResourceError("AI follow-up");
+    }
+    if (!moduleId) return { questionId };
+    const module = session.template.modules.find((candidate) => candidate.id === moduleId);
+    if (!module) throw forbiddenResourceError("Interview module");
+    if (
+      questionId
+      && !questionId.startsWith("ai-adaptive-")
+      && !module.questions.some((question) => question.id === questionId)
+    ) {
+      throw forbiddenResourceError("Interview question");
+    }
+    return { questionId, moduleId };
+  }
 }
 
-// Mirrors the deterministic follow-up AiService returns when no provider answers.
-const FALLBACK_FOLLOW_UP_QUESTION = "What trade-off did you consider, and how did you decide between options?";
+const NO_FOLLOW_UP_SENTINEL = "[NO_FOLLOW_UP]";
 const FALLBACK_DELTA_PARTS = 4;
 const FOLLOW_UP_PERSIST_ATTEMPTS = 3;
 const FOLLOW_UP_PERSIST_RETRY_MS = 100;
@@ -375,22 +470,66 @@ const ADAPTIVE_MIN_ENTRY_LENGTH = 160;
 
 interface AdaptiveResponseContext {
   responseText: string;
+  responseJson?: unknown;
   question?: { questionText: string } | null;
 }
 
 export function compactAdaptiveHistory(responses: AdaptiveResponseContext[]): string[] {
-  const entries = responses
-    .map((response) => {
-      const answer = response.responseText?.trim();
-      if (!answer) return "";
-      const question = response.question?.questionText?.trim();
-      return question ? `Q: ${question}\nA: ${answer}` : `A: ${answer}`;
-    })
-    .filter(Boolean);
+  const entries = responses.flatMap((response) => {
+    const answer = response.responseText?.trim();
+    const question = response.question?.questionText?.trim() ?? metadataString(response.responseJson, "question");
+    const followUp = readStructuredAiFollowUp(response.responseJson);
+    const history: string[] = [];
+    if (answer) history.push(question ? `Q: ${question}\nA: ${answer}` : `A: ${answer}`);
+    if (followUp?.questionText && followUp.answerText) {
+      history.push(`AI follow-up: ${followUp.questionText}\nCandidate: ${followUp.answerText}`);
+    }
+    return history;
+  });
   if (!entries.length) return [];
 
   const entryLimit = Math.max(ADAPTIVE_MIN_ENTRY_LENGTH, Math.floor(ADAPTIVE_CONTEXT_BUDGET / entries.length));
   return entries.map((entry) => truncateText(entry, entryLimit));
+}
+
+interface InterviewerHistoryContext {
+  questionText: string;
+  answerText?: string | null;
+  askedBy?: { name?: string | null } | null;
+}
+
+function compactInterviewerHistory(followUps: InterviewerHistoryContext[]): string[] {
+  return followUps
+    .map((followUp) => {
+      const question = followUp.questionText?.trim();
+      const answer = followUp.answerText?.trim();
+      if (!question || !answer) return "";
+      const interviewer = followUp.askedBy?.name?.trim() || "Interviewer";
+      return truncateText(`${interviewer} follow-up: ${question}\nCandidate: ${answer}`, 2_000);
+    })
+    .filter(Boolean);
+}
+
+interface CodeHistoryContext {
+  questionId: string;
+  language: string;
+  sourceCode: string;
+  stdout?: string | null;
+  stderr?: string | null;
+  score?: unknown;
+}
+
+function compactCodeHistory(submissions: CodeHistoryContext[]): string[] {
+  const latestByQuestion = new Map<string, CodeHistoryContext>();
+  for (const submission of submissions) latestByQuestion.set(submission.questionId, submission);
+  return [...latestByQuestion.values()].map((submission) => {
+    const output = submission.stderr?.trim() || submission.stdout?.trim() || "No output";
+    return truncateText(
+      `Coding submission ${submission.questionId} (${submission.language}, score ${String(submission.score ?? "unscored")}):\n`
+      + `${submission.sourceCode}\nResult: ${output}`,
+      3_000,
+    );
+  });
 }
 
 /**
@@ -489,6 +628,17 @@ function requiredText(value: string | undefined, message: string, maxLength: num
   if (!normalized) throw new BadRequestException(message);
   if (normalized.length > maxLength) throw new BadRequestException(`Text must be ${maxLength.toLocaleString()} characters or fewer.`);
   return normalized;
+}
+
+function optionalText(value: string | undefined, maxLength: number): string | undefined {
+  const normalized = value?.trim();
+  if (!normalized) return undefined;
+  if (normalized.length > maxLength) throw new BadRequestException(`Text must be ${maxLength.toLocaleString()} characters or fewer.`);
+  return normalized;
+}
+
+function generatedFollowUpId(parentQuestionId?: string): string | undefined {
+  return parentQuestionId ? `ai-follow-up:${parentQuestionId}` : undefined;
 }
 
 function safeStringArray(value: string[] | undefined, maxItems: number): string[] | undefined {

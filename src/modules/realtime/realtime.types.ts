@@ -60,6 +60,7 @@ export const INTERVIEW_EVENTS = {
   // server -> client
   presenceUpdated: "presence.updated",
   sessionUpdated: "session.updated",
+  responseSaved: "response.saved",
   questionSent: "interviewer-question.sent",
   questionAnswered: "interviewer-question.answered",
   questionCancelled: "interviewer-question.cancelled",

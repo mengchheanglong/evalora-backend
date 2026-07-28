@@ -3,6 +3,7 @@ import { readStructuredAiFollowUp, splitEmbeddedFollowUp } from "../../common/em
 import { basedOnQuestionByAssistantId } from "../../common/ai-message-provenance";
 import { DEFAULT_LIST_LIMIT } from "../../common/query.constants";
 import { buildSessionOwnershipWhere, forbiddenResourceError, mergeWhere, type AccessContext } from "../auth/access-control";
+import { canManageSessionFollowUps } from "../sessions/interviewer-assignment";
 import {
   buildTruncation,
   countByOrigin,
@@ -127,7 +128,10 @@ export class TranscriptService {
     });
     if (!session) throw forbiddenResourceError("Session");
 
-    return buildTranscript(session, await this.loadSourceTotals(session, where));
+    return {
+      ...buildTranscript(session, await this.loadSourceTotals(session, where)),
+      canManageFollowUps: canManageSessionFollowUps(session, access),
+    };
   }
 
   /**
@@ -165,7 +169,7 @@ export function buildTranscript(session: TranscriptSessionRow, totals?: Transcri
     codingModule: modules.map(toModuleRef).find((module) => module.moduleType === "coding"),
   };
 
-  const embeddedFollowUps = collectEmbeddedFollowUps(responses);
+  const embeddedFollowUps = collectEmbeddedFollowUps(responses, context);
   const basedOnQuestion = basedOnQuestionByAssistantId(session.aiMessages ?? []);
   const drafts = [
     ...buildTemplateEntries(responses),
@@ -220,6 +224,7 @@ function buildTemplateEntries(responses: TranscriptResponseRow[]): TranscriptEnt
     drafts.push({
       id: response.id,
       origin: "template",
+      questionId: question.id,
       moduleId: module?.id,
       moduleTitle: module?.title,
       moduleType: module?.moduleType,
@@ -343,6 +348,7 @@ function buildAdaptiveEntries(
         ...moduleFields(context.aiModule),
         id: answer.id,
         origin: "ai_adaptive",
+        questionId: metadataString(message.metadata, "questionId"),
         questionText: message.content,
         answerText: optionalString(answer.content),
         askedAt: isoString(message.createdAt),
@@ -393,6 +399,7 @@ function buildAdaptiveEntries(
       ...moduleFields(context.aiModule),
       id: message.id,
       origin: "ai_adaptive",
+      questionId: metadataString(message.metadata, "questionId"),
       questionText: message.content,
       askedAt: isoString(message.createdAt),
       isEvidence: false,
@@ -408,6 +415,7 @@ function buildAdaptiveEntries(
       ...moduleFields(context.aiModule),
       id: message.id,
       origin: "ai_adaptive",
+      questionId: metadataString(message.metadata, "questionId"),
       questionText: questionText ?? "AI interview question",
       answerText: optionalString(message.content),
       answeredAt: isoString(message.createdAt),
@@ -456,6 +464,7 @@ function buildAdaptiveEntries(
       ...moduleFields(context.aiModule),
       id: response.id,
       origin: "ai_adaptive",
+      questionId: metadataString(response.responseJson, "questionId"),
       questionText: questionText ?? "AI interview question",
       answerText: adaptiveAnswerText(response.responseText),
       answeredAt: isoString(response.createdAt),
@@ -488,6 +497,8 @@ function embeddedFollowUpDraft(
     // The answer has no row of its own: it lives inside the parent response.
     id: `${followUp.responseId}:ai-follow-up`,
     origin: "ai_adaptive",
+    questionId: metadataString(message?.metadata, "questionId")
+      ?? (followUp.parentQuestionId ? `ai-follow-up:${followUp.parentQuestionId}` : undefined),
     questionText: followUp.questionText ?? "AI follow-up question",
     answerText: followUp.answerText,
     askedAt: isoString(message?.createdAt),
@@ -515,6 +526,7 @@ function buildFollowUpEntries(followUps: TranscriptFollowUpRow[], context: Trans
     return {
       id: followUp.id,
       origin: "interviewer_follow_up" as const,
+      parentQuestionId,
       moduleId: module?.id ?? moduleId,
       moduleTitle: module?.title,
       moduleType: module?.moduleType,
@@ -551,6 +563,7 @@ function buildCodeEntries(submissions: TranscriptCodeSubmissionRow[], context: T
       ...moduleFields(module),
       id: submission.id,
       origin: "code_submission" as const,
+      questionId: submission.questionId,
       questionText: question?.questionText ?? "Coding challenge",
       answeredAt: isoString(submission.createdAt),
       code: {
@@ -638,6 +651,7 @@ function toModuleRef(module: { id: string; title: string; moduleType: string }):
 /** An AI follow-up recovered from the parent response it was stored inside. */
 interface EmbeddedFollowUp {
   responseId: string;
+  parentQuestionId?: string;
   questionText?: string;
   parentQuestionText?: string;
   /** Absent while the candidate has been asked but has not written anything yet. */
@@ -646,22 +660,26 @@ interface EmbeddedFollowUp {
   answeredAt?: Date | null;
 }
 
-function collectEmbeddedFollowUps(responses: TranscriptResponseRow[]): EmbeddedFollowUp[] {
+function collectEmbeddedFollowUps(responses: TranscriptResponseRow[], context: TranscriptContext): EmbeddedFollowUp[] {
   const followUps: EmbeddedFollowUp[] = [];
 
   for (const response of responses) {
     const question = response.question;
-    if (!question) continue;
     const legacy = splitEmbeddedFollowUp(response.responseText).followUp;
     const structured = readStructuredAiFollowUp(response.responseJson);
     const followUp = legacy ?? structured;
     if (!followUp) continue;
+    const adaptive = isAdaptive(response.responseJson);
+    if (!question && !adaptive) continue;
     followUps.push({
       responseId: response.id,
+      parentQuestionId: question?.id ?? metadataString(response.responseJson, "questionId"),
       questionText: followUp.questionText,
       answerText: followUp.answerText,
-      parentQuestionText: snapshotQuestionText(response) ?? question.questionText,
-      module: question.module ? toModuleRef(question.module) : undefined,
+      parentQuestionText: snapshotQuestionText(response)
+        ?? question?.questionText
+        ?? metadataString(response.responseJson, "question"),
+      module: question?.module ? toModuleRef(question.module) : (adaptive ? context.aiModule : undefined),
       answeredAt: response.createdAt,
     });
   }

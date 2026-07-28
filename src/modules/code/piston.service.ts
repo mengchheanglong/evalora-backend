@@ -43,6 +43,7 @@ const LANGUAGE_RUNTIMES: Record<CodeLanguage, { pistonLanguage: string; fileName
 @Injectable()
 export class PistonService {
   private readonly versionCache = new Map<string, string>();
+  private readonly versionRequests = new Map<string, Promise<string>>();
 
   async executeCode(sourceCode: string, stdin = "", language: CodeLanguage = "javascript"): Promise<{
     stdout: string;
@@ -92,6 +93,21 @@ export class PistonService {
     const cached = this.versionCache.get(language);
     if (cached) return cached;
 
+    const pending = this.versionRequests.get(language);
+    if (pending) return pending;
+
+    const request = this.loadRuntimeVersion(language, runtimePreference);
+    this.versionRequests.set(language, request);
+    try {
+      const version = await request;
+      this.versionCache.set(language, version);
+      return version;
+    } finally {
+      this.versionRequests.delete(language);
+    }
+  }
+
+  private async loadRuntimeVersion(language: string, runtimePreference?: string[]): Promise<string> {
     const runtimes = await this.requestJson<PistonRuntime[]>("/runtimes", {
       method: "GET",
       headers: {
@@ -118,7 +134,6 @@ export class PistonService {
       throw new ServiceUnavailableException(`No Piston runtime found for ${language}.`);
     }
 
-    this.versionCache.set(language, runtime.version);
     return runtime.version;
   }
 

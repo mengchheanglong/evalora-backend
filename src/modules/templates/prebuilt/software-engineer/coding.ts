@@ -15,19 +15,11 @@ export const softwareCodingModule: PrebuiltModuleDefinition = {
   "questions": [
     {
       "id": "prebuilt-se-coding-normalize-scores",
-      "questionText": "Implement normalizeScores(scores) that accepts an array of numbers and returns values normalized from 0 to 100 while handling empty arrays, equal values, negative numbers, and invalid inputs.",
+      "questionText": "Read a line of space-separated integers and print them sorted in ascending order, space-separated.",
       "questionType": "coding",
       "options": {
-        "language": "typescript",
-        "examples": [
-          "normalizeScores([10, 20, 30]) -> [0, 50, 100]",
-          "normalizeScores([5, 5]) -> [100, 100]"
-        ],
-        "constraints": [
-          "Do not mutate the input array",
-          "Return [] for empty input",
-          "Throw or clearly handle non-number values"
-        ]
+        "codeQuestionId": "sort-ascending",
+        "language": "typescript"
       },
       "rubric": [
         "correctness",
@@ -39,80 +31,76 @@ export const softwareCodingModule: PrebuiltModuleDefinition = {
     },
     {
       "id": "prebuilt-se-coding-frequency",
-      "questionText": "Implement mostFrequentWord(text) that returns the most common normalized word while ignoring punctuation and handling ties deterministically.",
+      "questionText": "Read a string (ignoring spaces) and print the character that appears most often. If several tie, print the alphabetically smallest.",
       "questionType": "coding",
       "options": {
-        "language": "typescript",
-        "constraints": [
-          "Case-insensitive",
-          "Ignore punctuation",
-          "Document tie behavior"
-        ]
+        "codeQuestionId": "most-frequent-char",
+        "language": "typescript"
       },
       "rubric": [
-        "string-processing",
+        "correctness",
         "edge cases",
-        "deterministic-behavior",
         "readability",
-        "tests"
+        "complexity"
       ]
     },
     {
       "id": "prebuilt-se-coding-availability",
-      "questionText": "Implement hasScheduleConflict(intervals) to detect overlapping time ranges and explain its time complexity.",
+      "questionText": "Read a string of brackets ( ) [ ] { } and print \"Yes\" if they are balanced and correctly nested, otherwise \"No\".",
       "questionType": "coding",
       "options": {
-        "language": "typescript",
-        "examples": [
-          "[[9,10],[10,11]] -> false",
-          "[[9,11],[10,12]] -> true"
-        ]
+        "codeQuestionId": "balanced-parentheses",
+        "language": "typescript"
       },
       "rubric": [
-        "algorithm-choice",
         "correctness",
-        "complexity",
-        "edge cases"
+        "edge cases",
+        "readability",
+        "complexity"
       ]
     },
     {
       "id": "prebuilt-se-coding-validation",
-      "questionText": "Write a validateAssessmentPayload(payload) function that checks required template, module, and question fields without mutating input.",
+      "questionText": "Read a word and print \"Yes\" if it reads the same forwards and backwards, otherwise \"No\".",
       "questionType": "coding",
       "options": {
-        "language": "typescript"
-      },
-      "rubric": [
-        "input-validation",
-        "error-handling",
-        "maintainability",
-        "test-coverage"
-      ]
-    },
-    {
-      "id": "prebuilt-se-coding-transform",
-      "questionText": "Transform a flat list of question rows into modules with ordered questions. Explain how you handle missing modules or duplicate order indexes.",
-      "questionType": "coding",
-      "rubric": [
-        "data-transformation",
-        "defensive-programming",
-        "ordering",
-        "clarity"
-      ]
-    },
-    {
-      "id": "prebuilt-se-coding-cache",
-      "questionText": "Implement a simple in-memory cache with get, set, and TTL expiration. Describe one limitation of this design.",
-      "questionType": "coding",
-      "options": {
+        "codeQuestionId": "palindrome",
         "language": "typescript"
       },
       "rubric": [
         "correctness",
-        "time-handling",
-        "simplicity",
-        "limitation-awareness",
-        "tests"
+        "edge cases",
+        "readability",
+        "complexity"
+      ]
+    },
+    {
+      "id": "prebuilt-se-coding-transform",
+      "questionText": "Read a line of space-separated integers and print the second largest distinct value.",
+      "questionType": "coding",
+      "options": {
+        "codeQuestionId": "second-largest"
+      },
+      "rubric": [
+        "correctness",
+        "edge cases",
+        "readability",
+        "complexity"
+      ]
+    },
+    {
+      "id": "prebuilt-se-coding-cache",
+      "questionText": "Line 1 is the target. Line 2 is an array of space-separated integers. Print the two 0-based indices of the numbers that add up to the target. Exactly one solution exists.",
+      "questionType": "coding",
+      "options": {
+        "codeQuestionId": "two-sum",
+        "language": "typescript"
+      },
+      "rubric": [
+        "correctness",
+        "edge cases",
+        "readability",
+        "complexity"
       ]
     }
   ]

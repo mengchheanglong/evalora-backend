@@ -6,6 +6,7 @@ import { TranscriptService } from "../src/modules/transcript/transcript.service"
 import type { TranscriptEntry, TranscriptSessionRow } from "../src/modules/transcript/transcript.types";
 
 const interviewerAccess: AccessContext = { userId: "interviewer-1", role: "interviewer", organizationId: "org-1" };
+const unassignedInterviewerAccess: AccessContext = { userId: "interviewer-2", role: "interviewer", organizationId: "org-1" };
 const otherOrgAccess: AccessContext = { userId: "outsider-1", role: "organization", organizationId: "org-2" };
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 6, 28, 9, minutes, 0));
@@ -13,6 +14,8 @@ const at = (minutes: number) => new Date(Date.UTC(2026, 6, 28, 9, minutes, 0));
 const sessionRow: TranscriptSessionRow = {
   id: "session-1",
   candidateId: "candidate-1",
+  createdById: "owner-1",
+  interviewers: [{ id: "interviewer-1", name: "Ada Interviewer" }],
   status: "COMPLETED",
   startedAt: at(0),
   completedAt: at(50),
@@ -149,7 +152,12 @@ test("getTranscript scopes the read to the caller's workspace and denies a forei
 
   const transcript = await service.getTranscript("session-1", interviewerAccess);
   assert.equal(transcript.sessionId, "session-1");
+  assert.equal(transcript.canManageFollowUps, true);
   assert.deepEqual(prisma.calls[1].where, { id: "session-1", organizationId: "org-1" });
+
+  const readOnlyTranscript = await service.getTranscript("session-1", unassignedInterviewerAccess);
+  assert.equal(readOnlyTranscript.sessionId, "session-1");
+  assert.equal(readOnlyTranscript.canManageFollowUps, false);
 });
 
 test("getTranscript returns all four origins with structural provenance", async () => {
@@ -174,6 +182,7 @@ test("getTranscript returns all four origins with structural provenance", async 
   ]);
 
   const [templateEntry] = byOrigin(transcript.entries, "template");
+  assert.equal(templateEntry.questionId, "question-1");
   assert.equal(templateEntry.questionText, "Describe a system you scaled.");
   assert.equal(templateEntry.answerText, "I sharded the write path and added a read replica.");
   assert.equal(templateEntry.moduleTitle, "AI Interview");
@@ -181,12 +190,14 @@ test("getTranscript returns all four origins with structural provenance", async 
   assert.equal(templateEntry.isEvidence, true);
 
   const [adaptiveEntry] = byOrigin(transcript.entries, "ai_adaptive");
+  assert.equal(adaptiveEntry.questionId, "ai-adaptive-0");
   assert.equal(adaptiveEntry.questionText, "How did you validate the shard key?");
   assert.equal(adaptiveEntry.answerText, "I replayed a week of production traffic.");
   assert.equal(adaptiveEntry.askedAt, at(18).toISOString());
   assert.equal(adaptiveEntry.isEvidence, true);
 
   const codeEntries = byOrigin(transcript.entries, "code_submission");
+  assert.equal(codeEntries[0].questionId, "question-2");
   assert.equal(codeEntries[0].questionText, "Reverse a linked list.");
   assert.equal(codeEntries[0].code?.language, "python");
   // Only the latest submission per question reaches the scorer.
@@ -546,6 +557,7 @@ test("getTranscript does not claim an interviewer follow-up on a removed module 
   assert.equal(followUps[0].moduleTitle, undefined);
   // A parent question still resolves through the answer the candidate saved.
   assert.equal(followUps[1].moduleId, "module-ai");
+  assert.equal(followUps[1].parentQuestionId, "question-1");
   assert.equal(followUps[1].isEvidence, true);
 });
 

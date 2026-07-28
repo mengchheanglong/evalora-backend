@@ -619,10 +619,12 @@ function buildAdaptiveInterviewEvidence(responses: EvaluationResponseRow[]): Mod
   for (const response of responses) {
     if (response.question || !isAdaptiveResponse(response)) continue;
     const answer = adaptiveAnswerText(response);
-    if (!answer) continue;
-    answers.push(answer);
+    if (answer) answers.push(answer);
     const question = adaptiveQuestionText(response);
     if (question) questionContext.push(`AI interview question: ${question}`);
+    const followUp = readStructuredAiFollowUp(response.responseJson);
+    if (followUp?.questionText) questionContext.push(`AI follow-up question: ${followUp.questionText}`);
+    if (followUp?.answerText) answers.push(followUp.answerText);
   }
 
   return { responseText: answers.join("\n\n"), questionContext };

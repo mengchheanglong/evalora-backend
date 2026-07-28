@@ -33,7 +33,7 @@ const templateRow = {
   ],
 };
 
-test("createTemplate maps nested modules and questions to Prisma create input", async () => {
+test("createTemplate keeps the AI interview generated-only at the write boundary", async () => {
   const calls: unknown[] = [];
   const service = new TemplatesService({
     assessmentTemplate: {
@@ -92,16 +92,13 @@ test("createTemplate maps nested modules and questions to Prisma create input", 
             description: "Scenario questions",
             weight: 1.25,
             orderIndex: 1,
-            settings: { followUps: true },
+            settings: {
+              followUps: true,
+              aiFollowUpsEnabled: true,
+              adaptiveQuestionCount: 3,
+            },
             questions: {
-              create: [
-                {
-                  questionText: "Tell us about a production incident.",
-                  questionType: "SCENARIO",
-                  options: undefined,
-                  rubric: ["clarity", "ownership"],
-                },
-              ],
+              create: [],
             },
           },
         ],

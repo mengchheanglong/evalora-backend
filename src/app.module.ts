@@ -101,8 +101,8 @@ import { PrismaModule } from "./prisma/prisma.module";
     },
     {
       provide: ResponsesService,
-      useFactory: (prisma: PrismaService) => new ResponsesService(prisma),
-      inject: [PrismaService],
+      useFactory: (prisma: PrismaService, gateway: InterviewGateway) => new ResponsesService(prisma, gateway),
+      inject: [PrismaService, InterviewGateway],
     },
     {
       provide: TranscriptService,

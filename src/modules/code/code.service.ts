@@ -39,6 +39,21 @@ interface GradedRun {
   executionTime: number;
 }
 
+interface CandidateCodingQuestionRow {
+  id: string;
+  questionType: string;
+  options: Prisma.JsonValue | null;
+}
+
+interface CandidateCodingSession extends SessionSnapshot {
+  template: {
+    modules: Array<{
+      id: string;
+      questions: CandidateCodingQuestionRow[];
+    }>;
+  };
+}
+
 @Injectable()
 export class CodeService {
   constructor(
@@ -110,10 +125,18 @@ export class CodeService {
     this.assertQuestionSupportsLanguage(question, dto.language);
 
     const graded = await this.gradeAgainstTestCases(question, dto.sourceCode, dto.language as CodeLanguage);
+    return this.storeSubmission(session.id, question, dto, graded);
+  }
 
+  private async storeSubmission(
+    sessionId: string,
+    question: CodeQuestion,
+    dto: Pick<SubmitCodeDto, "language" | "sourceCode">,
+    graded: GradedRun,
+  ): Promise<CodeSubmitResult> {
     const submission = await this.prisma.codeSubmission.create({
       data: {
-        sessionId: session.id,
+        sessionId,
         questionId: question.id,
         language: dto.language,
         sourceCode: dto.sourceCode,
@@ -133,7 +156,7 @@ export class CodeService {
 
     return {
       submissionId: submission.id,
-      sessionId: session.id,
+      sessionId,
       questionId: question.id,
       stdout: graded.stdout,
       stderr: graded.stderr,
@@ -162,8 +185,8 @@ export class CodeService {
   }
 
   async getQuestionsByAccessCode(accessCode: string): Promise<CodeQuestionSummary[]> {
-    await this.findOpenSessionByAccessCode(accessCode);
-    return selectCandidateQuestions(this.getQuestions(), accessCode, 3);
+    const session = await this.findOpenSessionByAccessCode(accessCode);
+    return this.assignedQuestionSummaries(session, accessCode);
   }
 
   async runCodeByAccessCode(accessCode: string, dto: RunCodeDto): Promise<CodeRunResult> {
@@ -172,15 +195,30 @@ export class CodeService {
   }
 
   async gradeCodeByAccessCode(accessCode: string, dto: GradeCodeDto) {
-    await this.findOpenSessionByAccessCode(accessCode);
-    this.assertQuestionAssignedToCandidate(accessCode, dto.questionId);
-    return sanitizeCandidateGrade(await this.gradeCode(dto));
+    const session = await this.findOpenSessionByAccessCode(accessCode);
+    const question = this.findAssignedQuestionOrFail(session, accessCode, dto.questionId);
+    this.assertSupportedLanguage(dto.language);
+    const graded = await this.gradeAgainstTestCases(question, dto.sourceCode, dto.language as CodeLanguage);
+    return sanitizeCandidateGrade({
+      questionId: question.id,
+      passed: graded.passed,
+      score: graded.score,
+      totalTestCases: graded.totalTestCases,
+      passedTestCases: graded.passedTestCases,
+      status: graded.status,
+      stdout: graded.stdout,
+      stderr: graded.stderr,
+      compileOutput: graded.compileOutput,
+      testResults: graded.testResults,
+    });
   }
 
   async submitCodeByAccessCode(accessCode: string, dto: CandidateSubmitCodeDto) {
     const session = await this.findOpenSessionByAccessCode(accessCode);
-    this.assertQuestionAssignedToCandidate(accessCode, dto.questionId);
-    return sanitizeCandidateGrade(await this.submitCode({ ...dto, sessionId: session.id }));
+    const question = this.findAssignedQuestionOrFail(session, accessCode, dto.questionId);
+    this.assertSupportedLanguage(dto.language);
+    const graded = await this.gradeAgainstTestCases(question, dto.sourceCode, dto.language as CodeLanguage);
+    return sanitizeCandidateGrade(await this.storeSubmission(session.id, question, dto, graded));
   }
 
   async listSubmissionsByAccessCode(accessCode: string) {
@@ -204,17 +242,13 @@ export class CodeService {
   }
 
   private async gradeAgainstTestCases(question: CodeQuestion, sourceCode: string, language: CodeLanguage = "javascript"): Promise<GradedRun> {
-    const testResults: CodeTestCaseResult[] = [];
-    let firstError: CodeExecutionStatus | null = null;
-    // Capture diagnostics from the first non-passing execution so a failing
-    // submission surfaces the actual compiler/runtime error instead of "".
-    let failureStdout: string | null = null;
-    let failureStderr = "";
-    let failureCompileOutput = "";
-    let maxExecutionTime = 0;
-
-    for (const testCase of question.testCases) {
-      const execution = await this.executionService.executeCode(sourceCode, testCase.stdin, language);
+    // Test cases are independent. Running them concurrently avoids making the
+    // candidate wait for one complete remote sandbox round trip per case.
+    const executions = await Promise.all(question.testCases.map((testCase) =>
+      this.executionService.executeCode(sourceCode, testCase.stdin, language),
+    ));
+    const testResults: CodeTestCaseResult[] = question.testCases.map((testCase, index) => {
+      const execution = executions[index];
       const passed =
         execution.status === "Accepted" &&
         this.normalizeOutput(execution.stdout) === this.normalizeOutput(testCase.expectedOutput);
@@ -225,36 +259,25 @@ export class CodeService {
           ? "Wrong Answer"
           : execution.status;
 
-      if (!passed) {
-        if (!firstError && status !== "Wrong Answer") {
-          firstError = status;
-        }
-
-        if (failureStdout === null) {
-          failureStdout = execution.stdout;
-          failureStderr = execution.stderr;
-          failureCompileOutput = execution.compileOutput;
-        }
-      }
-
-      maxExecutionTime = Math.max(maxExecutionTime, execution.executionTime);
-
-      testResults.push({
+      return {
         stdin: testCase.stdin,
         expectedOutput: testCase.expectedOutput,
         actualOutput: execution.stdout,
         passed,
         status,
         executionTime: execution.executionTime,
-      });
-    }
+      };
+    });
 
     const passedTestCases = testResults.filter(({ passed }) => passed).length;
     const totalTestCases = testResults.length;
     const score = calculatePercentageScore(passedTestCases, totalTestCases);
     const passed = totalTestCases > 0 && passedTestCases === totalTestCases;
-    const overallStatus: CodeExecutionStatus = passed ? "Accepted" : (firstError ?? "Wrong Answer");
+    const firstRuntimeFailure = testResults.find(({ status }) => status !== "Accepted" && status !== "Wrong Answer");
+    const overallStatus: CodeExecutionStatus = passed ? "Accepted" : (firstRuntimeFailure?.status ?? "Wrong Answer");
     const first = testResults[0];
+    const firstFailureIndex = testResults.findIndex(({ passed: testPassed }) => !testPassed);
+    const firstFailureExecution = firstFailureIndex >= 0 ? executions[firstFailureIndex] : undefined;
 
     return {
       testResults,
@@ -265,10 +288,10 @@ export class CodeService {
       status: overallStatus,
       // On success show the first passing output; on failure surface the failing
       // run's stdout/stderr/compile output so the result is debuggable.
-      stdout: passed ? (first?.actualOutput ?? "") : (failureStdout ?? first?.actualOutput ?? ""),
-      stderr: failureStderr,
-      compileOutput: failureCompileOutput,
-      executionTime: maxExecutionTime,
+      stdout: passed ? (first?.actualOutput ?? "") : (firstFailureExecution?.stdout ?? first?.actualOutput ?? ""),
+      stderr: firstFailureExecution?.stderr ?? "",
+      compileOutput: firstFailureExecution?.compileOutput ?? "",
+      executionTime: executions.reduce((maximum, execution) => Math.max(maximum, execution.executionTime), 0),
     };
   }
 
@@ -316,13 +339,28 @@ export class CodeService {
     return session;
   }
 
-  private async findOpenSessionByAccessCode(accessCode: string): Promise<SessionSnapshot> {
+  private async findOpenSessionByAccessCode(accessCode: string): Promise<CandidateCodingSession> {
     const session = await this.prisma.interviewSession.findFirst({
       where: { accessCode: normalizeAccessCode(accessCode) },
       select: {
         id: true,
         status: true,
         expiresAt: true,
+        template: {
+          select: {
+            modules: {
+              where: { moduleType: "CODING" },
+              orderBy: { orderIndex: "asc" },
+              select: {
+                id: true,
+                questions: {
+                  where: { questionType: "CODING" },
+                  select: { id: true, questionType: true, options: true },
+                },
+              },
+            },
+          },
+        },
       },
     });
 
@@ -335,7 +373,7 @@ export class CodeService {
       throw new ConflictException("Start the assessment before opening the coding workspace.");
     }
 
-    return session;
+    return session as CandidateCodingSession;
   }
 
   private assertSessionNotExpired(session: SessionSnapshot): void {
@@ -348,11 +386,35 @@ export class CodeService {
     }
   }
 
-  private assertQuestionAssignedToCandidate(accessCode: string, questionId: string): void {
-    const assigned = selectCandidateQuestions(this.getQuestions(), accessCode, 3);
-    if (!assigned.some((question) => question.id === questionId)) {
+  private assignedQuestionSummaries(session: CandidateCodingSession, accessCode: string): CodeQuestionSummary[] {
+    const authoredQuestions = session.template.modules.flatMap((module) => module.questions);
+    const templateQuestions = authoredQuestions.length
+      ? authoredQuestions
+      : session.template.modules.slice(0, 1).flatMap((module) =>
+          [0, 1, 2].map((index) => ({
+            id: `${module.id}:legacy-slot-${index}`,
+            questionType: "CODING",
+            options: null,
+          })),
+        );
+    const assignedIds = selectTemplateQuestionIds(
+      this.getQuestions(),
+      templateQuestions,
+      accessCode,
+    );
+    const summaries = new Map(this.getQuestions().map((question) => [question.id, question]));
+    return assignedIds.map((id) => summaries.get(id)).filter((question): question is CodeQuestionSummary => Boolean(question));
+  }
+
+  private findAssignedQuestionOrFail(
+    session: CandidateCodingSession,
+    accessCode: string,
+    questionId: string,
+  ): CodeQuestion {
+    if (!this.assignedQuestionSummaries(session, accessCode).some((question) => question.id === questionId)) {
       throw new BadRequestException("Coding question is not assigned to this session.");
     }
+    return this.findQuestionOrFail(questionId);
   }
 
   private findQuestionOrFail(questionId: string): CodeQuestion {
@@ -370,29 +432,38 @@ export class CodeService {
   }
 }
 
-function selectCandidateQuestions(
+export function selectTemplateQuestionIds(
   questions: CodeQuestionSummary[],
+  templateQuestions: CandidateCodingQuestionRow[],
   accessCode: string,
-  limit: number,
-): CodeQuestionSummary[] {
-  if (questions.length <= limit) return questions;
-  const selected: CodeQuestionSummary[] = [];
+): string[] {
+  const availableIds = new Set(questions.map((question) => question.id));
+  const selected: string[] = [];
 
-  for (const difficulty of ["easy", "medium", "hard"] as const) {
-    const candidates = questions.filter((question) => question.difficulty === difficulty);
-    if (!candidates.length || selected.length >= limit) continue;
-    selected.push(candidates[stableIndex(`${accessCode}:${difficulty}`, candidates.length)]);
-  }
+  for (const [index, templateQuestion] of templateQuestions.entries()) {
+    const configuredId = readCodeQuestionId(templateQuestion.options);
+    if (configuredId && availableIds.has(configuredId) && !selected.includes(configuredId)) {
+      selected.push(configuredId);
+      continue;
+    }
 
-  const remaining = questions.filter(
-    (question) => !selected.some((candidate) => candidate.id === question.id),
-  );
-  const offset = stableIndex(accessCode, Math.max(remaining.length, 1));
-  for (let index = 0; selected.length < limit && index < remaining.length; index += 1) {
-    selected.push(remaining[(offset + index) % remaining.length]);
+    // Templates created before challenge selection existed still receive a
+    // stable, unique executable challenge for each coding question.
+    const remaining = questions.filter((question) => !selected.includes(question.id));
+    if (!remaining.length) break;
+    const difficulty = (["easy", "medium", "hard"] as const)[index % 3];
+    const preferred = remaining.filter((question) => question.difficulty === difficulty);
+    const pool = preferred.length ? preferred : remaining;
+    selected.push(pool[stableIndex(`${accessCode}:${templateQuestion.id}`, pool.length)].id);
   }
 
   return selected;
+}
+
+function readCodeQuestionId(options: Prisma.JsonValue | null): string | undefined {
+  if (!options || typeof options !== "object" || Array.isArray(options)) return undefined;
+  const value = (options as Prisma.JsonObject).codeQuestionId;
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function stableIndex(seed: string, length: number): number {

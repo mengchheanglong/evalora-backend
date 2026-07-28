@@ -122,7 +122,12 @@ export class CandidateAiController {
         },
       });
       openStream();
-      writeStreamFrame(response, { done: true, question: generated.question, provider: generated.provider });
+      writeStreamFrame(response, {
+        done: true,
+        shouldAsk: generated.shouldAsk,
+        question: generated.question,
+        provider: generated.provider,
+      });
       response.end();
     } catch (error) {
       // Nothing written yet means access or validation failed, so the normal HTTP

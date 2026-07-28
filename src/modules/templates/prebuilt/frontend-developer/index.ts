@@ -11,21 +11,24 @@ const coding: PrebuiltModuleDefinition = {
   questions: [
     {
       id: "prebuilt-fe-code-normalize",
-      questionText: "Implement a function that normalizes a list of display names: trim, drop blanks, title-case words, and preserve order.",
+      questionText: "Read a line of space-separated integers and print them sorted in ascending order, space-separated.",
       questionType: "coding",
-      rubric: ["correctness", "edge-cases", "readability", "pure-functions"],
+      options: { codeQuestionId: "sort-ascending" },
+      rubric: ["correctness", "edge-cases", "readability", "complexity"],
     },
     {
       id: "prebuilt-fe-code-group",
-      questionText: "Given an array of UI events with { type, timestamp }, return counts grouped by type sorted by frequency descending.",
+      questionText: "Read a string (ignoring spaces) and print the character that appears most often. If several tie, print the alphabetically smallest.",
       questionType: "coding",
-      rubric: ["data-transforms", "sorting", "clarity", "performance-awareness"],
+      options: { codeQuestionId: "most-frequent-char" },
+      rubric: ["correctness", "edge-cases", "readability", "complexity"],
     },
     {
       id: "prebuilt-fe-code-debounce-explain",
-      questionText: "Explain how you would implement a debounce utility for a search input and what bugs you would test for.",
-      questionType: "short_answer",
-      rubric: ["async-thinking", "ux", "testing", "api-design"],
+      questionText: "Read a single word and print it reversed.",
+      questionType: "coding",
+      options: { codeQuestionId: "reverse-string" },
+      rubric: ["correctness", "edge-cases", "readability", "complexity"],
     },
   ],
 };

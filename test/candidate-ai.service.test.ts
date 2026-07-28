@@ -9,7 +9,13 @@ const openSession = {
   template: {
     title: "Frontend Developer Assessment",
     roleType: "Frontend Developer",
-    modules: [{ title: "Frontend Interview" }],
+    modules: [{
+      id: "module-ai",
+      title: "AI Interview",
+      moduleType: "AI_INTERVIEW",
+      settings: { adaptiveQuestionCount: 3 },
+      questions: [],
+    }],
   },
 };
 
@@ -17,6 +23,9 @@ test("adaptive question generation includes every saved answer and is idempotent
   const assistantMessages: Array<{ role: string; content: string; metadata: Record<string, unknown> }> = [];
   const authoredResponses = Array.from({ length: 21 }, (_, index) => ({
     responseText: `Candidate answer ${index + 1} with concrete evidence and result.`,
+    responseJson: index === 0
+      ? { aiFollowUp: { question: "What changed after launch?", answer: "Support tickets fell by 40 percent." } }
+      : undefined,
     question: { questionText: `Authored question ${index + 1}` },
   }));
   const capturedHistory: string[][] = [];
@@ -33,6 +42,23 @@ test("adaptive question generation includes every saved answer and is idempotent
         assistantMessages.push(data);
         return data;
       },
+    },
+    interviewerFollowUp: {
+      findMany: async () => [{
+        questionText: "Which stakeholder challenged that decision?",
+        answerText: "The security lead challenged it, so I added a threat-model review.",
+        askedBy: { name: "Kaze" },
+      }],
+    },
+    codeSubmission: {
+      findMany: async () => [{
+        questionId: "sum-two-numbers",
+        language: "typescript",
+        sourceCode: "console.log(2 + 3);",
+        stdout: "5",
+        stderr: null,
+        score: 100,
+      }],
     },
   };
   const aiService = {
@@ -62,6 +88,9 @@ test("adaptive question generation includes every saved answer and is idempotent
     assert.ok(capturedHistory[0].some((entry) => entry.includes(`Candidate answer ${index}`)));
   }
   assert.ok(capturedHistory[0].some((entry) => entry.includes("Adaptive question slot 1")));
+  assert.ok(capturedHistory[0].some((entry) => entry.includes("Support tickets fell by 40 percent")));
+  assert.ok(capturedHistory[0].some((entry) => entry.includes("security lead challenged it")));
+  assert.ok(capturedHistory[0].some((entry) => entry.includes("console.log(2 + 3)")));
   assert.ok(capturedHistory[1].some((entry) => entry.includes("Adaptive question slot 2")));
   assert.ok(capturedHistory[2].some((entry) => entry.includes("Adaptive question slot 3")));
 });

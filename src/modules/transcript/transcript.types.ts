@@ -21,6 +21,10 @@ export interface TranscriptCodeArtifact {
 export interface TranscriptEntry {
   id: string;
   origin: TranscriptOrigin;
+  /** Template question this answer belongs to; used for live interviewer follow-ups. */
+  questionId?: string;
+  /** Interviewer follow-ups only: the template question that prompted this thread. */
+  parentQuestionId?: string;
   moduleId?: string;
   moduleTitle?: string;
   moduleType?: string;
@@ -91,6 +95,7 @@ export interface TranscriptTruncation {
 export interface SessionTranscriptDto {
   sessionId: string;
   status: SessionStatus;
+  canManageFollowUps?: boolean;
   startedAt?: string;
   completedAt?: string;
   candidate: { id: string; name: string; email: string };
@@ -170,6 +175,8 @@ export interface TranscriptFollowUpRow {
 export interface TranscriptSessionRow {
   id: string;
   candidateId: string;
+  createdById?: string | null;
+  interviewers?: unknown;
   status: PrismaSessionStatus;
   startedAt?: Date | null;
   completedAt?: Date | null;

@@ -88,7 +88,7 @@ const STREAM_TIMED_OUT = Symbol("deepseek-stream-timed-out");
 const QUESTION_CONTEXT_INSTRUCTION =
   "questionContext holds the question, interviewer follow-up, or problem wording the candidate was replying to. It is background only: never score it, never credit the candidate for words that appear only there, and never quote it in evidence. Score and quote responseText only.";
 const STREAM_SYSTEM_PROMPT =
-  "You are Evalora's interview assistant. Reply with plain text only: one concise question, with no JSON, no markdown, no quotes, and no preamble. Use only the candidate's answer as evidence. Do not score the candidate, reveal evaluation criteria, or make hiring decisions.";
+  "You are Evalora's interview assistant. Decide whether the candidate's answer needs one useful follow-up. If the answer is already clear, specific, and sufficient, reply with exactly [NO_FOLLOW_UP]. Otherwise reply with one concise question in plain text, with no JSON, markdown, quotes, or preamble. Ask only to clarify a material gap, test an important claim, or explore a strong answer further. Never force a question merely because follow-ups are enabled. Use only the candidate's answer as evidence. Do not score the candidate, reveal evaluation criteria, or make hiring decisions.";
 
 export class DeepSeekAiProvider {
   private readonly baseUrl: string;
@@ -119,8 +119,10 @@ export class DeepSeekAiProvider {
   }
 
   async generateFollowUp(input: FollowUpInput): Promise<Partial<GeneratedFollowUp>> {
-    return this.chatJson("Generate one concise follow-up interview question for Evalora.", {
-      outputShape: { question: "string" },
+    return this.chatJson("Decide whether this answer warrants a follow-up interview question.", {
+      outputShape: { shouldAsk: "boolean", question: "string; empty when shouldAsk is false" },
+      instructions:
+        "Set shouldAsk to true only when a concise probe would clarify a material gap, test an important claim, or usefully deepen the evidence. A complete, specific answer must return false. Do not force a follow-up for every question or module.",
       originalQuestion: input.question,
       candidateAnswer: input.answer,
       rubric: input.rubric ?? [],
@@ -130,7 +132,7 @@ export class DeepSeekAiProvider {
   /** Streams a follow-up question so the candidate sees it written token by token. */
   async streamFollowUp(input: FollowUpInput, onDelta: DeepSeekDeltaHandler): Promise<DeepSeekStreamResult> {
     return this.streamChat(
-      "Generate one concise follow-up interview question for Evalora.",
+      "Decide whether this answer warrants a follow-up. Return exactly [NO_FOLLOW_UP] when it does not; otherwise return one concise question.",
       {
         originalQuestion: input.question,
         candidateAnswer: input.answer,

@@ -82,6 +82,9 @@ test("createSession generates an access code and maps candidate/template assignm
   assert.equal(result.status, "not_started");
   assert.equal(result.accessCode, "EV-123456");
   assert.equal(result.expiresAt, expiresAt.toISOString());
+  assert.equal(result.interviewerName, "Ada Interviewer");
+  assert.equal(result.interviewerRole, "Interviewer");
+  assert.equal(result.interviewers, undefined);
 
   assert.deepEqual(calls[0], {
     data: {
@@ -121,6 +124,10 @@ test("createSession stores frontend workspace metadata and maps interviewer labe
       },
       user: {
         findUnique: async () => ({ id: "candidate-1", role: "CANDIDATE", organizationId: "org-1" }),
+        findMany: async () => [
+          { id: "interviewer-2", name: "Sophia Kim", role: "INTERVIEWER", organizationId: "org-1" },
+          { id: "interviewer-3", name: "Michael Chen", role: "INTERVIEWER", organizationId: "org-1" },
+        ],
       },
       interviewSession: {
         create: async (args: any) => {
@@ -152,6 +159,7 @@ test("createSession stores frontend workspace metadata and maps interviewer labe
       title: "Final Round with Dara",
       interviewType: "Technical Interview",
       interviewers: ["Sophia Kim", "Michael Chen"],
+      interviewerIds: ["interviewer-2", "interviewer-3"],
       notes: "Focus on system design.",
       targetRole: "Backend Engineer",
       department: "Engineering",
@@ -178,7 +186,42 @@ test("createSession stores frontend workspace metadata and maps interviewer labe
   assert.equal(result.timeZone, "GMT+07:00 Phnom Penh");
   assert.equal(result.createdById, "interviewer-1");
   assert.equal(calls[0].data.createdById, "interviewer-1");
-  assert.deepEqual(calls[0].data.interviewers, ["Sophia Kim", "Michael Chen"]);
+  assert.deepEqual(calls[0].data.interviewers, [
+    { id: "interviewer-2", name: "Sophia Kim" },
+    { id: "interviewer-3", name: "Michael Chen" },
+  ]);
+});
+
+test("createSession rejects interviewer ids outside the workspace", async () => {
+  let created = false;
+  const service = new SessionsService({
+    assessmentTemplate: {
+      findFirst: async () => ({ id: "template-1", organizationId: "org-1" }),
+    },
+    user: {
+      findUnique: async () => ({ id: "candidate-1", role: "CANDIDATE", organizationId: "org-1" }),
+      findMany: async () => [],
+    },
+    interviewSession: {
+      create: async () => {
+        created = true;
+        return sessionRow;
+      },
+    },
+  } as any);
+
+  await assert.rejects(
+    () => service.createSession(
+      {
+        candidateId: "candidate-1",
+        templateId: "template-1",
+        interviewerIds: ["member-from-another-workspace"],
+      },
+      interviewerAccess,
+    ),
+    /not members of this workspace/i,
+  );
+  assert.equal(created, false, "an invalid assignment must be rejected before session creation");
 });
 
 test("createSession can create an invite-only candidate record from name and email", async () => {
@@ -277,7 +320,7 @@ test("candidate invite access code opens, starts, and completes only the assigne
   assert.deepEqual(calls[0].args.where, { accessCode: "EV-123456" });
 });
 
-test("candidate access delivers every authored question from every prebuilt template", async () => {
+test("candidate access delivers authored questions except generated-only AI interview seeds", async () => {
   for (const definition of PREBUILT_ASSESSMENT_TEMPLATES) {
     const seeded = buildPrebuiltTemplateCreateData(definition, { createdById: "seed-user", organizationId: "org-1" });
     const template = {
@@ -291,7 +334,9 @@ test("candidate access delivers every authored question from every prebuilt temp
     } as any);
 
     const opened = await service.getSessionByAccessCode(`access-${definition.id}`);
-    const expectedQuestionIds = definition.modules.flatMap((module) => module.questions.map((question) => question.id));
+    const expectedQuestionIds = definition.modules.flatMap((module) => (
+      module.type === "ai_interview" ? [] : module.questions.map((question) => question.id)
+    ));
     const deliveredQuestionIds = opened.template.modules.flatMap((module) => (module.questions ?? []).map((question) => question.id));
 
     assert.deepEqual(opened.template.modules.map((module) => module.id), definition.modules.map((module) => module.id), `${definition.title} module order changed`);

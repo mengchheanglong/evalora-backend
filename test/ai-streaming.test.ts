@@ -10,7 +10,13 @@ const openSession = {
   template: {
     title: "Frontend Developer Assessment",
     roleType: "Frontend Developer",
-    modules: [{ title: "Frontend Interview" }],
+    modules: [{
+      id: "module-ai",
+      title: "AI Interview",
+      moduleType: "AI_INTERVIEW",
+      settings: { adaptiveQuestionCount: 3 },
+      questions: [],
+    }],
   },
 };
 
@@ -313,7 +319,7 @@ test("a stream cut after a complete question keeps that question instead of appe
   assert.equal(prisma.messages.filter((message) => message.role === "assistant")[0].content, expected);
 });
 
-test("a stream cut mid-clause replaces the fragment rather than running two questions together", async () => {
+test("a stream cut mid-clause never exposes the fragment before falling back", async () => {
   const prisma = createPrisma();
   const body = sseFrames(deltaFrame("Which trade-off between latency and"));
   const provider = new DeepSeekAiProvider(
@@ -333,13 +339,56 @@ test("a stream cut mid-clause replaces the fragment rather than running two ques
 
   assert.equal(generated.provider, "fallback");
   assert.equal(generated.question, FALLBACK_QUESTION);
-  assert.deepEqual(deltas, ["Which trade-off between latency and"]);
-  assert.deepEqual(replacements, [FALLBACK_QUESTION]);
-  // The regression: the fallback used to arrive as deltas welded onto the fragment.
-  assert.ok(!deltas.some((delta) => delta.includes("What trade-off did you consider")));
-  assert.ok(!renderedText(deltas, replacements).startsWith("Which trade-off between latency and"));
+  assert.deepEqual(replacements, []);
+  assert.ok(!deltas.join("").includes("Which trade-off between latency and"));
   assert.equal(renderedText(deltas, replacements), FALLBACK_QUESTION);
   assert.equal(prisma.messages.filter((message) => message.role === "assistant")[0].content, FALLBACK_QUESTION);
+});
+
+test("a complete answer can finish without creating a forced follow-up", async () => {
+  const prisma = createPrisma();
+  const body = sseFrames(deltaFrame("[NO_FOLLOW_UP]"), "[DONE]");
+  const provider = new DeepSeekAiProvider(
+    { baseUrl: "https://api.deepseek.com/v1", model: "deepseek-v4-flash", apiKey: "test-key" },
+    streamingFetch(byteChunks(body, 8)),
+  );
+  const service = new CandidateAiService(prisma.client as any, {} as any, provider);
+  const { deltas, replacements, handler } = createHandler();
+
+  const generated = await service.followUpStream(
+    "ACCESS-1",
+    {
+      question: "Describe a project and its outcome.",
+      answer: "I led the checkout rewrite, chose a staged migration to reduce risk, and measured a 32% reduction in failed payments after launch.",
+    },
+    handler,
+  );
+
+  assert.equal(generated.shouldAsk, false);
+  assert.equal(generated.question, "");
+  assert.deepEqual(deltas, []);
+  assert.deepEqual(replacements, []);
+  assert.equal(prisma.messages.length, 0);
+});
+
+test("provider failure does not force a probe after a complete answer", async () => {
+  const prisma = createPrisma();
+  const provider = new DeepSeekAiProvider({ baseUrl: "https://api.deepseek.com/v1", model: "deepseek-v4-flash" });
+  const service = new CandidateAiService(prisma.client as any, {} as any, provider);
+  const { deltas, handler } = createHandler();
+
+  const generated = await service.followUpStream(
+    "ACCESS-1",
+    {
+      question: "Describe a project and its outcome.",
+      answer: "I led the checkout rewrite, chose a staged migration because it reduced release risk, and measured a 32% reduction in failed payments after launch.",
+    },
+    handler,
+  );
+
+  assert.equal(generated.shouldAsk, false);
+  assert.equal(deltas.length, 0);
+  assert.equal(prisma.messages.length, 0);
 });
 
 test("a stream that never starts falls back with animated deltas and no replacement", async () => {

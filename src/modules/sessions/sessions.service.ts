@@ -8,6 +8,7 @@ import type { EmailDeliveryResult, EmailService } from "../email/email.service";
 // The publisher contract belongs to the realtime transport, so every service
 // fans out through one shared shape instead of look-alike interfaces that drift.
 import { INTERVIEW_EVENTS, type InterviewEventPublisher } from "../realtime/realtime.types";
+import { storedInterviewerNames, type StoredInterviewerAssignment } from "./interviewer-assignment";
 
 type PrismaSessionStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "EXPIRED";
 type PrismaRole = "ADMIN" | "ORGANIZATION" | "INTERVIEWER" | "CANDIDATE";
@@ -102,6 +103,7 @@ interface CandidateSessionRow extends Omit<SessionRow, "template"> {
 interface CandidateUserRow {
   id: string;
   role: PrismaRole;
+  name?: string;
   organizationId?: string | null;
 }
 
@@ -111,11 +113,13 @@ type SessionFindUniqueFn = (args: any) => Promise<SessionRow | null>;
 type SessionFindFirstFn = (args: any) => Promise<SessionRow | CandidateSessionRow | null>;
 type SessionUpdateFn = (args: any) => Promise<SessionRow | CandidateSessionRow>;
 type UserFindUniqueFn = (args: any) => Promise<CandidateUserRow | null>;
+type UserFindManyFn = (args: any) => Promise<CandidateUserRow[]>;
 type UserCreateFn = (args: any) => Promise<CandidateUserRow>;
 
 interface SessionPrismaClient {
   user?: {
     findUnique?: UserFindUniqueFn;
+    findMany?: UserFindManyFn;
     create?: UserCreateFn;
   };
   organization?: {
@@ -151,6 +155,8 @@ export interface CreateSessionInput {
   interviewType?: string;
   /** Named interviewers (string array). Empty/invalid values are ignored. */
   interviewers?: string[] | string;
+  /** Stable workspace user ids used to enforce live follow-up permissions. */
+  interviewerIds?: string[];
   notes?: string;
   /** Candidate position/role for this session. */
   targetRole?: string;
@@ -281,7 +287,8 @@ export class SessionsService {
     const templateId = requireNonEmpty(input.templateId, "Template id is required.");
     await this.assertTemplateAssignment(templateId, organizationId, access);
     const candidateId = await this.resolveCandidateId(input, organizationId, access);
-    const metadata = normalizeSessionMetadata(input, this.now());
+    const assignedInterviewers = await this.resolveAssignedInterviewers(input.interviewerIds, organizationId);
+    const metadata = normalizeSessionMetadata(input, this.now(), assignedInterviewers);
     const session = await create({
       data: {
         candidateId,
@@ -641,6 +648,33 @@ export class SessionsService {
     });
     if (!template) throw forbiddenResourceError("Template");
   }
+
+  private async resolveAssignedInterviewers(
+    value: CreateSessionInput["interviewerIds"],
+    organizationId: string | undefined,
+  ): Promise<StoredInterviewerAssignment[] | undefined> {
+    const ids = normalizeInterviewerIds(value);
+    if (!ids.length) return undefined;
+    if (!organizationId) throw new BadRequestException("An organization is required to assign interviewers.");
+
+    const findMany = requireMethod(this.prisma.user?.findMany, "user.findMany");
+    const members = await findMany({
+      where: {
+        id: { in: ids },
+        organizationId,
+        role: { in: ["ORGANIZATION", "INTERVIEWER"] },
+      },
+      select: { id: true, name: true },
+    });
+    const byId = new Map(members.map((member) => [member.id, member]));
+    if (ids.some((id) => !byId.has(id))) {
+      throw new BadRequestException("One or more selected interviewers are not members of this workspace.");
+    }
+    return ids.map((id) => {
+      const member = byId.get(id)!;
+      return { id: member.id, name: member.name ?? "Workspace member" };
+    });
+  }
 }
 
 function buildSessionWhere(filter: ListSessionsFilter) {
@@ -658,7 +692,7 @@ function resolveWritableOrganizationId(requestedOrganizationId: string | undefin
 }
 
 function toSessionDto(session: SessionRow): InterviewSessionDto {
-  const interviewers = parseInterviewers(session.interviewers);
+  const interviewers = storedInterviewerNames(session.interviewers);
   const interviewerName = interviewers[0] ?? session.createdBy?.name;
   const interviewerRole = interviewers[0]
     ? "Interviewer"
@@ -702,10 +736,11 @@ function toSessionDto(session: SessionRow): InterviewSessionDto {
 function normalizeSessionMetadata(
   input: CreateSessionInput,
   now: Date,
+  assignedInterviewers?: StoredInterviewerAssignment[],
 ): {
   title?: string;
   interviewType?: string;
-  interviewers?: string[];
+  interviewers?: JsonValue;
   notes?: string;
   targetRole?: string;
   department?: string;
@@ -714,7 +749,7 @@ function normalizeSessionMetadata(
   language?: string;
   timeZone?: string;
 } {
-  const interviewers = normalizeInterviewers(input.interviewers);
+  const interviewers = assignedInterviewers?.length ? assignedInterviewers : normalizeInterviewers(input.interviewers);
   const durationMin = normalizeDurationMin(input.durationMin);
   const scheduledAt = resolveScheduledAt(input.scheduledAt, input.sessionDate, input.startTime, now);
 
@@ -753,17 +788,18 @@ function normalizeInterviewers(value: CreateSessionInput["interviewers"]): strin
   return result;
 }
 
-function parseInterviewers(value: JsonValue | null | undefined): string[] {
-  if (value == null) return [];
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => String(item ?? "").trim())
-      .filter(Boolean);
+function normalizeInterviewerIds(value: CreateSessionInput["interviewerIds"]): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const item of value) {
+    const id = String(item ?? "").trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+    if (ids.length >= 20) break;
   }
-  if (typeof value === "string") {
-    return normalizeInterviewers(value);
-  }
-  return [];
+  return ids;
 }
 
 function normalizeDurationMin(value: number | string | undefined): number | undefined {
@@ -854,7 +890,10 @@ function toCandidateTemplateDto(template: CandidateTemplateRow | null | undefine
       weight: module.weight,
       orderIndex: module.orderIndex,
       settings: module.settings ?? undefined,
-      questions: (module.questions ?? []).map((question) => ({
+      // The final AI interview is generated from the candidate's completed
+      // assessment context. Legacy authored seed questions must never leak into
+      // the candidate flow or become a second, competing opening question.
+      questions: (module.moduleType === "AI_INTERVIEW" ? [] : (module.questions ?? [])).map((question) => ({
         id: question.id,
         questionText: question.questionText,
         questionType: fromPrismaQuestionType(question.questionType),

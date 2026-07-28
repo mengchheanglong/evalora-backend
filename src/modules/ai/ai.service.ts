@@ -30,6 +30,7 @@ export interface FollowUpInput {
 }
 
 export interface GeneratedFollowUp {
+  shouldAsk: boolean;
   question: string;
   basedOn: "candidate_answer" | "default_follow_up";
   provider: "deepseek" | "fallback";
@@ -76,13 +77,19 @@ export class AiService {
   }
 
   async generateFollowUp(input: FollowUpInput): Promise<GeneratedFollowUp> {
-    const fallback = fallbackFollowUp(input);
+    const fallback = deterministicFollowUpDecision(input);
     if (!this.provider?.generateFollowUp) return fallback;
 
     try {
       const generated = await this.provider.generateFollowUp(input);
+      const question = generated.question?.trim() ?? "";
+      // Providers written against the previous contract returned only a question.
+      // Keep those adapters compatible while the first-party provider sends the
+      // explicit decision.
+      const shouldAsk = (generated.shouldAsk === true || (generated.shouldAsk === undefined && Boolean(question))) && Boolean(question);
       return {
-        question: nonEmpty(generated.question, fallback.question),
+        shouldAsk,
+        question: shouldAsk ? question : "",
         basedOn: input.answer ? "candidate_answer" : "default_follow_up",
         provider: "deepseek",
       };
@@ -204,8 +211,24 @@ function fallbackInterviewQuestion(input: InterviewQuestionInput): GeneratedInte
   };
 }
 
-function fallbackFollowUp(input: FollowUpInput): GeneratedFollowUp {
+export function deterministicFollowUpDecision(input: FollowUpInput): GeneratedFollowUp {
+  const answer = input.answer?.trim() ?? "";
+  const words = answer.match(/\b[\p{L}\p{N}'-]+\b/gu) ?? [];
+  const isVague = /^(?:i\s+)?(?:do(?:n't| not)\s+know|not sure|no idea|yes|no|maybe|n\/a|none)[.!?]*$/i.test(answer);
+  const hasConcreteDetail = /\d|%|\b(?:because|result|outcome|measured|increased|reduced|improved|delivered|launched|resolved|learned|decided|chose|implemented)\b/i.test(answer);
+  const shouldAsk = isVague || words.length < 18 || (words.length < 35 && !hasConcreteDetail);
+
+  if (!shouldAsk) {
+    return {
+      shouldAsk: false,
+      question: "",
+      basedOn: input.answer ? "candidate_answer" : "default_follow_up",
+      provider: "fallback",
+    };
+  }
+
   return {
+    shouldAsk: true,
     question: "What trade-off did you consider, and how did you decide between options?",
     basedOn: input.answer ? "candidate_answer" : "default_follow_up",
     provider: "fallback",

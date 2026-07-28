@@ -133,6 +133,22 @@ describe("PistonService", () => {
     expect(runtimeCalls).toHaveLength(1);
   });
 
+  it("shares one runtime lookup across concurrent executions", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(RUNTIMES))
+      .mockResolvedValueOnce(jsonResponse(executeBody({ stdout: "a\n", stderr: "", output: "a\n", code: 0, signal: null })))
+      .mockResolvedValueOnce(jsonResponse(executeBody({ stdout: "b\n", stderr: "", output: "b\n", code: 0, signal: null })));
+
+    const service = new PistonService();
+    await Promise.all([
+      service.executeCode("1", ""),
+      service.executeCode("2", ""),
+    ]);
+
+    const runtimeCalls = fetchMock.mock.calls.filter((call) => /\/runtimes$/.test(String(call[0])));
+    expect(runtimeCalls).toHaveLength(1);
+  });
+
   it("surfaces a network failure as ServiceUnavailable", async () => {
     fetchMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
 

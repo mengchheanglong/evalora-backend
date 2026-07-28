@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { ResponsesService } from "../src/modules/responses/responses.service";
+import { INTERVIEW_EVENTS } from "../src/modules/realtime/realtime.types";
 
 const createdAt = new Date("2026-07-06T14:00:00.000Z");
 
@@ -448,6 +449,43 @@ test("a failed question lookup still saves the candidate's answer", async () => 
 
   assert.equal(result.responseText, "Answer that must not be lost");
   assert.deepEqual(result.responseJson, { confidence: 4 }, "no snapshot, but nothing is dropped either");
+});
+
+test("saving an answer notifies live reviewers without broadcasting its contents", async () => {
+  const events: Array<{ sessionId: string; event: string; payload: unknown }> = [];
+  const service = new ResponsesService(
+    {
+      interviewSession: {
+        findFirst: async () => assignedSessionRow(),
+      },
+      response: {
+        findFirst: async () => null,
+        create: async () => responseRow,
+      },
+    },
+    {
+      emitToSession: (sessionId, event, payload) => {
+        events.push({ sessionId, event, payload });
+      },
+    },
+  );
+
+  await service.saveResponse({
+    sessionId: "session-1",
+    questionId: "question-1",
+    responseText: "Private candidate answer",
+  });
+
+  assert.deepEqual(events, [{
+    sessionId: "session-1",
+    event: INTERVIEW_EVENTS.responseSaved,
+    payload: {
+      sessionId: "session-1",
+      questionId: "question-1",
+      savedAt: createdAt.toISOString(),
+    },
+  }]);
+  assert.doesNotMatch(JSON.stringify(events[0].payload), /Private candidate answer/);
 });
 
 test("candidate-supplied snapshots are stripped when the server lookup fails", async () => {

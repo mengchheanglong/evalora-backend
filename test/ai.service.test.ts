@@ -117,6 +117,27 @@ test("AiService sends module-specific default rubrics to the provider when calle
   assert.equal(result.moduleTitle, "Problem Solving");
 });
 
+test("AiService treats no follow-up as a valid provider decision", async () => {
+  const provider: AiProviderClient = {
+    async generateFollowUp() {
+      return { shouldAsk: false, question: "" };
+    },
+    async evaluateResponse() {
+      return {};
+    },
+  };
+  const service = new AiService(provider);
+
+  const result = await service.generateFollowUp({
+    question: "Describe a project and its outcome.",
+    answer: "I led a staged migration, reduced release risk, and measured a 32% reduction in failed payments.",
+  });
+
+  assert.equal(result.shouldAsk, false);
+  assert.equal(result.question, "");
+  assert.equal(result.provider, "deepseek");
+});
+
 test("DeepSeekAiProvider posts OpenAI-compatible chat completions and parses JSON output", async () => {
   const requests: Array<{ url: string; init: RequestInit }> = [];
   const fetchImpl: DeepSeekFetch = async (url, init) => {

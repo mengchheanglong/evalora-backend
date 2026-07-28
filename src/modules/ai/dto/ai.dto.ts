@@ -65,6 +65,8 @@ export class CandidateInterviewQuestionDto {
 }
 
 export class CandidateFollowUpDto {
+  @IsOptional() @IsString() @MaxLength(SHORT_MAX) questionId?: string;
+  @IsOptional() @IsString() @MaxLength(SHORT_MAX) moduleId?: string;
   @IsOptional() @IsString() @MaxLength(TEXT_MAX) question?: string;
   @IsOptional() @IsString() @MaxLength(TEXT_MAX) answer?: string;
   @IsOptional() @IsArray() @ArrayMaxSize(ARRAY_MAX) @IsString({ each: true }) @MaxLength(ITEM_MAX, { each: true }) rubric?: string[];
@@ -78,4 +80,6 @@ export class AdaptiveAnswerDto {
   @IsOptional() @IsString() @MaxLength(SHORT_MAX) questionId?: string;
   @IsOptional() @IsString() @MaxLength(TEXT_MAX) question?: string;
   @IsOptional() @IsString() @MaxLength(TEXT_MAX) answer?: string;
+  @IsOptional() @IsString() @MaxLength(TEXT_MAX) followUpQuestion?: string;
+  @IsOptional() @IsString() @MaxLength(TEXT_MAX) followUpAnswer?: string;
 }
