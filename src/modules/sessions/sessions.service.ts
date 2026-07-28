@@ -130,6 +130,10 @@ interface SessionPrismaClient {
     updateMany?: (args: any) => Promise<{ count: number }>;
     deleteMany?: (args: any) => Promise<{ count: number }>;
   };
+  /** Optional so existing mocks keep working; present on the real client. */
+  interviewerFollowUp?: {
+    count?: (args: any) => Promise<number>;
+  };
 }
 
 export interface CreateSessionInput {
@@ -376,6 +380,26 @@ export class SessionsService {
     return toSessionDto(session as SessionRow);
   }
 
+  /**
+   * A session cannot be submitted while a required interviewer follow-up is still
+   * unanswered. Enforced server-side (not just in the UI) because a question can
+   * be sent while the candidate is already on the review screen. Cancelled and
+   * optional questions never block.
+   */
+  private async assertNoPendingRequiredFollowUps(sessionId: string): Promise<void> {
+    const count = this.prisma.interviewerFollowUp?.count;
+    if (!count) return;
+    const pending = await count({ where: { sessionId, required: true, status: "SENT" } });
+    if (pending > 0) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: "INTERVIEWER_FOLLOW_UP_REQUIRED",
+        message: "Answer the required interviewer questions before submitting.",
+        pending,
+      });
+    }
+  }
+
   async startSessionByAccessCode(accessCode: string): Promise<CandidateAccessSessionDto> {
     const current = await this.findCandidateSessionByAccessCode(accessCode);
     assertCandidateAccessOpen(current);
@@ -410,6 +434,8 @@ export class SessionsService {
       if (current.status !== "in_progress") throw new ConflictException("Start the session before completing it.");
     }
 
+    await this.assertNoPendingRequiredFollowUps(id);
+
     const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
     const session = await update({
       where: { id },
@@ -424,6 +450,7 @@ export class SessionsService {
     const current = await this.findCandidateSessionByAccessCode(accessCode);
     assertCandidateAccessOpen(current);
     if (current.status !== "IN_PROGRESS") throw forbiddenResourceError("Start the session before completing it");
+    await this.assertNoPendingRequiredFollowUps(current.id);
     const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
     const session = await update({
       where: { id: current.id },

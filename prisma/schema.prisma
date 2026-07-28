@@ -63,21 +63,22 @@ model Organization {
 }
 
 model User {
-  id                String               @id @default(uuid())
-  name              String
-  email             String               @unique
-  emailVerified     Boolean              @default(false) @map("email_verified")
-  passwordHash      String               @map("password_hash")
-  role              UserRole
-  organizationId    String?              @map("organization_id")
-  organization      Organization?        @relation(fields: [organizationId], references: [id])
-  createdTemplates  AssessmentTemplate[] @relation("TemplateCreator")
-  candidateSessions InterviewSession[]   @relation("CandidateSessions")
-  createdSessions   InterviewSession[]   @relation("SessionCreator")
-  reviewerNotes     ReviewerNote[]
-  sentInvites       OrganizationInvite[] @relation("InviteSender")
-  createdAt         DateTime             @default(now()) @map("created_at")
-  updatedAt         DateTime             @updatedAt @map("updated_at")
+  id                   String                @id @default(uuid())
+  name                 String
+  email                String                @unique
+  emailVerified        Boolean               @default(false) @map("email_verified")
+  passwordHash         String                @map("password_hash")
+  role                 UserRole
+  organizationId       String?               @map("organization_id")
+  organization         Organization?         @relation(fields: [organizationId], references: [id])
+  createdTemplates     AssessmentTemplate[]  @relation("TemplateCreator")
+  candidateSessions    InterviewSession[]    @relation("CandidateSessions")
+  createdSessions      InterviewSession[]    @relation("SessionCreator")
+  reviewerNotes        ReviewerNote[]
+  interviewerFollowUps InterviewerFollowUp[] @relation("InterviewerFollowUpAuthor")
+  sentInvites          OrganizationInvite[]  @relation("InviteSender")
+  createdAt            DateTime              @default(now()) @map("created_at")
+  updatedAt            DateTime              @updatedAt @map("updated_at")
 
   @@map("users")
 }
@@ -158,41 +159,42 @@ model Question {
 }
 
 model InterviewSession {
-  id              String             @id @default(uuid())
-  candidateId     String             @map("candidate_id")
-  candidate       User               @relation("CandidateSessions", fields: [candidateId], references: [id])
-  templateId      String             @map("template_id")
-  template        AssessmentTemplate @relation(fields: [templateId], references: [id])
-  organizationId  String?            @map("organization_id")
-  organization    Organization?      @relation(fields: [organizationId], references: [id])
-  createdById     String?            @map("created_by_id")
-  createdBy       User?              @relation("SessionCreator", fields: [createdById], references: [id])
+  id                   String                @id @default(uuid())
+  candidateId          String                @map("candidate_id")
+  candidate            User                  @relation("CandidateSessions", fields: [candidateId], references: [id])
+  templateId           String                @map("template_id")
+  template             AssessmentTemplate    @relation(fields: [templateId], references: [id])
+  organizationId       String?               @map("organization_id")
+  organization         Organization?         @relation(fields: [organizationId], references: [id])
+  createdById          String?               @map("created_by_id")
+  createdBy            User?                 @relation("SessionCreator", fields: [createdById], references: [id])
   /// Workspace label from the create-session form (optional).
-  title           String?
-  interviewType   String?            @map("interview_type")
+  title                String?
+  interviewType        String?               @map("interview_type")
   /// Named interviewers assigned on the workspace form (string array JSON).
-  interviewers    Json?
-  notes           String?
+  interviewers         Json?
+  notes                String?
   /// Role/position for this session; falls back to template.roleType when unset.
-  targetRole      String?            @map("target_role")
-  department      String?
-  scheduledAt     DateTime?          @map("scheduled_at")
-  durationMin     Int?               @map("duration_min")
-  language        String?
-  timeZone        String?            @map("time_zone")
-  accessCode      String             @unique @map("access_code")
-  status          SessionStatus      @default(NOT_STARTED)
-  startedAt       DateTime?          @map("started_at")
-  completedAt     DateTime?          @map("completed_at")
-  expiresAt       DateTime?          @map("expires_at")
-  responses       Response[]
-  aiMessages      AIMessage[]
-  codeSubmissions CodeSubmission[]
-  evaluations     Evaluation[]
-  report          CandidateReport?
-  reviewerNotes   ReviewerNote[]
-  createdAt       DateTime           @default(now()) @map("created_at")
-  updatedAt       DateTime           @updatedAt @map("updated_at")
+  targetRole           String?               @map("target_role")
+  department           String?
+  scheduledAt          DateTime?             @map("scheduled_at")
+  durationMin          Int?                  @map("duration_min")
+  language             String?
+  timeZone             String?               @map("time_zone")
+  accessCode           String                @unique @map("access_code")
+  status               SessionStatus         @default(NOT_STARTED)
+  startedAt            DateTime?             @map("started_at")
+  completedAt          DateTime?             @map("completed_at")
+  expiresAt            DateTime?             @map("expires_at")
+  responses            Response[]
+  aiMessages           AIMessage[]
+  codeSubmissions      CodeSubmission[]
+  evaluations          Evaluation[]
+  report               CandidateReport?
+  reviewerNotes        ReviewerNote[]
+  interviewerFollowUps InterviewerFollowUp[]
+  createdAt            DateTime              @default(now()) @map("created_at")
+  updatedAt            DateTime              @updatedAt @map("updated_at")
 
   @@index([organizationId, status])
   @@index([organizationId, status, expiresAt])
@@ -286,6 +288,44 @@ model CandidateReport {
   updatedAt        DateTime         @updatedAt @map("updated_at")
 
   @@map("candidate_reports")
+}
+
+enum InterviewerFollowUpStatus {
+  SENT
+  ANSWERED
+  CANCELLED
+}
+
+/// A follow-up question a human interviewer sends to one candidate during an
+/// active session. Runtime-only session evidence: never written back to the
+/// template, so future sessions from the same template are unaffected.
+model InterviewerFollowUp {
+  id               String                    @id @default(uuid())
+  sessionId        String                    @map("session_id")
+  session          InterviewSession          @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  moduleId         String?                   @map("module_id")
+  parentQuestionId String?                   @map("parent_question_id")
+  askedById        String                    @map("asked_by_id")
+  askedBy          User                      @relation("InterviewerFollowUpAuthor", fields: [askedById], references: [id])
+  questionText     String                    @map("question_text")
+  answerText       String?                   @map("answer_text")
+  required         Boolean                   @default(true)
+  sequence         Int
+  status           InterviewerFollowUpStatus @default(SENT)
+  /// Client-supplied key so a retried send returns the original record.
+  idempotencyKey   String?                   @map("idempotency_key")
+  sentAt           DateTime                  @default(now()) @map("sent_at")
+  answerSavedAt    DateTime?                 @map("answer_saved_at")
+  answeredAt       DateTime?                 @map("answered_at")
+  cancelledAt      DateTime?                 @map("cancelled_at")
+  createdAt        DateTime                  @default(now()) @map("created_at")
+  updatedAt        DateTime                  @updatedAt @map("updated_at")
+
+  @@unique([sessionId, idempotencyKey])
+  @@index([sessionId, status, sequence])
+  @@index([sessionId, parentQuestionId])
+  @@index([askedById])
+  @@map("interviewer_follow_ups")
 }
 
 model ReviewerNote {

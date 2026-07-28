@@ -10,7 +10,7 @@ import { Prisma } from "@prisma/client";
 import { buildSessionOwnershipWhere, type AccessContext } from "../auth/access-control";
 import { DEFAULT_LIST_LIMIT } from "../../common/query.constants";
 import { CodeExecutionService } from "./code-execution.service";
-import { CODE_QUESTION_INDEX, CODE_QUESTIONS } from "./constants/code.constants";
+import { CODE_QUESTION_INDEX, CODE_QUESTIONS, SUPPORTED_CODE_LANGUAGES } from "./constants/code.constants";
 import type { CodeQuestion, SessionSnapshot } from "./interfaces/code.interfaces";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { GradeCodeDto } from "./dto/grade-code.dto";
@@ -19,6 +19,7 @@ import type { CandidateSubmitCodeDto, SubmitCodeDto } from "./dto/submit-code.dt
 import type {
   CodeExecutionStatus,
   CodeGradeResult,
+  CodeLanguage,
   CodeQuestionSummary,
   CodeRunResult,
   CodeSubmitResult,
@@ -70,7 +71,7 @@ export class CodeService {
   async runCode(dto: RunCodeDto): Promise<CodeRunResult> {
     this.assertSupportedLanguage(dto.language);
 
-    return this.executionService.executeCode(dto.sourceCode, dto.stdin ?? "");
+    return this.executionService.executeCode(dto.sourceCode, dto.stdin ?? "", dto.language as CodeLanguage);
   }
 
   async gradeCode(dto: GradeCodeDto): Promise<CodeGradeResult> {
@@ -79,7 +80,7 @@ export class CodeService {
     const question = this.findQuestionOrFail(dto.questionId);
     this.assertQuestionSupportsLanguage(question, dto.language);
 
-    const graded = await this.gradeAgainstTestCases(question, dto.sourceCode);
+    const graded = await this.gradeAgainstTestCases(question, dto.sourceCode, dto.language as CodeLanguage);
 
     return {
       questionId: question.id,
@@ -108,7 +109,7 @@ export class CodeService {
     const question = this.findQuestionOrFail(dto.questionId);
     this.assertQuestionSupportsLanguage(question, dto.language);
 
-    const graded = await this.gradeAgainstTestCases(question, dto.sourceCode);
+    const graded = await this.gradeAgainstTestCases(question, dto.sourceCode, dto.language as CodeLanguage);
 
     const submission = await this.prisma.codeSubmission.create({
       data: {
@@ -202,7 +203,7 @@ export class CodeService {
     }));
   }
 
-  private async gradeAgainstTestCases(question: CodeQuestion, sourceCode: string): Promise<GradedRun> {
+  private async gradeAgainstTestCases(question: CodeQuestion, sourceCode: string, language: CodeLanguage = "javascript"): Promise<GradedRun> {
     const testResults: CodeTestCaseResult[] = [];
     let firstError: CodeExecutionStatus | null = null;
     // Capture diagnostics from the first non-passing execution so a failing
@@ -213,7 +214,7 @@ export class CodeService {
     let maxExecutionTime = 0;
 
     for (const testCase of question.testCases) {
-      const execution = await this.executionService.executeCode(sourceCode, testCase.stdin);
+      const execution = await this.executionService.executeCode(sourceCode, testCase.stdin, language);
       const passed =
         execution.status === "Accepted" &&
         this.normalizeOutput(execution.stdout) === this.normalizeOutput(testCase.expectedOutput);
@@ -272,15 +273,20 @@ export class CodeService {
   }
 
   private assertSupportedLanguage(language: string): void {
-    if (language !== "javascript") {
-      throw new BadRequestException(`Unsupported language: ${language}`);
+    if (!(SUPPORTED_CODE_LANGUAGES as readonly string[]).includes(language)) {
+      throw new BadRequestException(
+        `Unsupported language: ${language}. Supported: ${SUPPORTED_CODE_LANGUAGES.join(", ")}.`,
+      );
     }
   }
 
-  private assertQuestionSupportsLanguage(question: CodeQuestion, language: string): void {
-    if (question.language !== language) {
-      throw new BadRequestException("The selected question does not support the requested language.");
-    }
+  /**
+   * Grading compares stdout against fixed expected output, so a candidate may
+   * solve in any language the sandbox supports — the question's own `language`
+   * only decides which starter template is offered.
+   */
+  private assertQuestionSupportsLanguage(_question: CodeQuestion, language: string): void {
+    this.assertSupportedLanguage(language);
   }
 
   private async findSessionOrFail(sessionId: string, access?: AccessContext): Promise<SessionSnapshot> {

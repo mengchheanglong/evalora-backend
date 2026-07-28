@@ -2,7 +2,7 @@ export const CODE_DIFFICULTIES = ["easy", "medium", "hard"] as const;
 
 export type CodeDifficulty = (typeof CODE_DIFFICULTIES)[number];
 
-export type CodeLanguage = "javascript";
+export type CodeLanguage = "javascript" | "typescript" | "python" | "java";
 
 export type CodeExecutionStatus =
   | "Accepted"

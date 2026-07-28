@@ -22,7 +22,7 @@ describe("CodeExecutionService", () => {
   it("defaults to Judge0 when Piston is not explicitly configured", async () => {
     (judge0.executeCode as jest.Mock).mockResolvedValue({ status: "Accepted" });
     await new CodeExecutionService(judge0, piston).executeCode("source", "stdin");
-    expect(judge0.executeCode).toHaveBeenCalledWith("source", "stdin");
+    expect(judge0.executeCode).toHaveBeenCalledWith("source", "stdin", "javascript");
     expect(piston.executeCode).not.toHaveBeenCalled();
   });
 

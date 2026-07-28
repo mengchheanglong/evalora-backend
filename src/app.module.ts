@@ -12,6 +12,13 @@ import { JwtAuthGuard, RolesGuard } from "./modules/auth/auth.guard";
 import { AuthRateLimitGuard } from "./modules/auth/auth-rate-limit.guard";
 import { AuthService, PrismaAuthRepository } from "./modules/auth/auth.service";
 import { CodeModule } from "./modules/code/code.module";
+import {
+  CandidateInterviewerFollowUpsController,
+  InterviewerFollowUpsController,
+} from "./modules/interviewer-follow-ups/interviewer-follow-ups.controller";
+import { InterviewerFollowUpsService } from "./modules/interviewer-follow-ups/interviewer-follow-ups.service";
+import { InterviewGateway } from "./modules/realtime/interview.gateway";
+import { RealtimeModule } from "./modules/realtime/realtime.module";
 import { ReportsController } from "./modules/reports/reports.controller";
 import { ReportsService } from "./modules/reports/reports.service";
 import { CandidateResponsesAccessController, ResponsesController } from "./modules/responses/responses.controller";
@@ -28,7 +35,7 @@ import { PrismaService } from "./prisma/prisma.service";
 import { PrismaModule } from "./prisma/prisma.module";
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, CodeModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, RealtimeModule, CodeModule],
   controllers: [
     AppController,
     AuthController,
@@ -40,6 +47,8 @@ import { PrismaModule } from "./prisma/prisma.module";
     CandidateResponsesAccessController,
     AiController,
     CandidateAiController,
+    InterviewerFollowUpsController,
+    CandidateInterviewerFollowUpsController,
     ReportsController,
     AnalyticsController,
   ],
@@ -88,6 +97,11 @@ import { PrismaModule } from "./prisma/prisma.module";
       provide: ResponsesService,
       useFactory: (prisma: PrismaService) => new ResponsesService(prisma),
       inject: [PrismaService],
+    },
+    {
+      provide: InterviewerFollowUpsService,
+      useFactory: (prisma: PrismaService, gateway: InterviewGateway) => new InterviewerFollowUpsService(prisma, gateway),
+      inject: [PrismaService, InterviewGateway],
     },
   ],
 })

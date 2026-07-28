@@ -147,6 +147,8 @@ export interface PasswordResetConfirmResult {
 }
 
 const PASSWORD_RESET_PURPOSE = "password_reset";
+export const REALTIME_TICKET_PURPOSE = "realtime";
+const REALTIME_TICKET_TTL = "60s";
 const PASSWORD_RESET_TTL = "1h";
 const EMAIL_VERIFICATION_PURPOSE = "email_verification";
 const EMAIL_VERIFICATION_TTL = "15m";
@@ -595,6 +597,20 @@ export class AuthService {
       this.jwtSecret,
       { expiresIn: EMAIL_VERIFICATION_TTL },
     );
+  }
+
+  /**
+   * Short-lived, purpose-scoped ticket for the WebSocket handshake. The session
+   * JWT lives in an httpOnly cookie that browser JS cannot read, so the client
+   * exchanges its cookie for this ticket and presents it to the gateway.
+   */
+  issueRealtimeTicket(user: { id: string; email: string; role: string; organizationId?: string }): { ticket: string; expiresInSeconds: number } {
+    const ticket = jwt.sign(
+      { sub: user.id, email: user.email, role: user.role, organizationId: user.organizationId, purpose: REALTIME_TICKET_PURPOSE },
+      this.jwtSecret,
+      { expiresIn: REALTIME_TICKET_TTL },
+    );
+    return { ticket, expiresInSeconds: 60 };
   }
 
   private signPasswordResetToken(user: AuthUserRecord): string {

@@ -119,6 +119,15 @@ export class AuthController {
     }
   }
 
+  /** Exchanges the httpOnly session cookie for a 60s WebSocket ticket. */
+  @Post("realtime-ticket")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("organization", "interviewer", "admin")
+  realtimeTicket(@Req() request: AuthenticatedRequest) {
+    if (!request.user) throw new UnauthorizedException("Authentication required.");
+    return this.authService.issueRealtimeTicket(request.user);
+  }
+
   @Put("me")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("organization", "interviewer", "admin")

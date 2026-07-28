@@ -1,7 +1,7 @@
 import { BadRequestException, Inject, Injectable } from "@nestjs/common";
 import { Judge0Service } from "./judge0.service";
 import { PistonService } from "./piston.service";
-import type { CodeRunResult } from "./types/code.types";
+import type { CodeLanguage, CodeRunResult } from "./types/code.types";
 
 type ExecutionProvider = "judge0" | "piston";
 
@@ -12,10 +12,10 @@ export class CodeExecutionService {
     @Inject(PistonService) private readonly piston: PistonService,
   ) {}
 
-  executeCode(sourceCode: string, stdin = ""): Promise<CodeRunResult> {
+  executeCode(sourceCode: string, stdin = "", language: CodeLanguage = "javascript"): Promise<CodeRunResult> {
     return this.getProvider() === "piston"
-      ? this.piston.executeCode(sourceCode, stdin)
-      : this.judge0.executeCode(sourceCode, stdin);
+      ? this.piston.executeCode(sourceCode, stdin, language)
+      : this.judge0.executeCode(sourceCode, stdin, language);
   }
 
   private getProvider(): ExecutionProvider {

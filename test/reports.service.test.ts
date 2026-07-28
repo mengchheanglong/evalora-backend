@@ -303,6 +303,18 @@ test("generateAndPersistReport evaluates saved responses by module and persists 
           },
           orderBy: { createdAt: "asc" },
         },
+        interviewerFollowUps: {
+          where: { status: "ANSWERED" },
+          select: {
+            moduleId: true,
+            parentQuestionId: true,
+            questionText: true,
+            answerText: true,
+            sequence: true,
+            askedBy: { select: { name: true } },
+          },
+          orderBy: { sequence: "asc" },
+        },
       },
     },
   });
@@ -445,6 +457,73 @@ test("coding report keeps exact objective 0, 25, 50, 80, and 100 percent scores"
     assert.equal(evaluation.score, percent / 20);
     assert.equal(Math.round(evaluation.score * 20), percent);
   }
+});
+
+test("an answered interviewer follow-up becomes evidence in its parent module without adding weight", async () => {
+  const aiInputs: any[] = [];
+  const fakePrisma = {
+    interviewSession: {
+      findFirst: async () => ({
+        id: "session-ifu",
+        organizationId: "org-1",
+        completedAt: new Date("2026-07-20T09:00:00.000Z"),
+        candidate: { name: "Follow-up Candidate" },
+        template: {
+          title: "SE Assessment",
+          modules: [{ id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1.5 }],
+        },
+        responses: [
+          {
+            id: "response-1",
+            responseText: "I rolled back the release after error rates spiked.",
+            question: {
+              id: "question-1",
+              questionText: "Describe a rollout that went wrong.",
+              rubric: ["ownership"],
+              module: { id: "module-1", title: "Behavioral", moduleType: "BEHAVIORAL", weight: 1.5 },
+            },
+          },
+        ],
+        interviewerFollowUps: [
+          {
+            moduleId: "module-1",
+            parentQuestionId: "question-1",
+            questionText: "What signal would make you stop the rollout?",
+            answerText: "If p95 latency doubles I stop immediately.",
+            askedBy: { name: "Dana Interviewer" },
+          },
+          // Resolves its module from the parent question when moduleId is absent.
+          {
+            parentQuestionId: "question-1",
+            questionText: "Who did you tell first?",
+            answerText: "The on-call engineer and the product owner.",
+            askedBy: { name: "Dana Interviewer" },
+          },
+        ],
+      }),
+    },
+    evaluation: { deleteMany: async () => ({ count: 0 }), createMany: async () => ({ count: 1 }) },
+    candidateReport: { upsert: async () => ({ id: "report-ifu" }) },
+    $transaction: async <T>(operations: Array<Promise<T>>) => Promise.all(operations),
+  };
+  const fakeAi = {
+    evaluateResponse: async (input: any) => {
+      aiInputs.push(input);
+      return sampleEvaluation({ moduleId: input.moduleId, moduleTitle: input.moduleTitle, moduleType: input.moduleType, weight: input.weight });
+    },
+  };
+  const service = new ReportsService(fakePrisma as any, fakeAi as any);
+
+  await service.generateAndPersistReport("session-ifu", organizationAccess);
+
+  assert.equal(aiInputs.length, 1, "the follow-up must not create a second weighted module");
+  const behavioral = aiInputs[0];
+  assert.equal(behavioral.moduleId, "module-1");
+  assert.equal(behavioral.weight, 1.5, "module weight is unchanged by follow-ups");
+  assert.match(behavioral.responseText, /I rolled back the release/, "original answer is still evidence");
+  assert.match(behavioral.responseText, /p95 latency doubles/, "follow-up answer is added as evidence");
+  assert.match(behavioral.responseText, /on-call engineer/, "follow-up without moduleId resolves via its parent question");
+  assert.match(behavioral.responseText, /context, not candidate evidence/, "the interviewer question is labelled as context");
 });
 
 test("generateAndPersistDemoReport checks organization ownership before writing report data", async () => {

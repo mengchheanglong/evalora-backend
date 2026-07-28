@@ -1,5 +1,5 @@
 import { Injectable, ServiceUnavailableException } from "@nestjs/common";
-import type { CodeExecutionStatus } from "./types/code.types";
+import type { CodeExecutionStatus, CodeLanguage } from "./types/code.types";
 
 interface PistonRuntime {
   language: string;
@@ -27,18 +27,32 @@ interface PistonExecutionResult {
 
 const PISTON_REQUEST_TIMEOUT_MS = 15_000;
 
+/**
+ * How each supported language maps onto a Piston runtime. `runtimePreference`
+ * disambiguates when Piston exposes several runtimes for one language (e.g.
+ * node vs deno for JavaScript).
+ */
+const LANGUAGE_RUNTIMES: Record<CodeLanguage, { pistonLanguage: string; fileName: string; runtimePreference?: string[] }> = {
+  javascript: { pistonLanguage: "javascript", fileName: "main.js", runtimePreference: ["node"] },
+  typescript: { pistonLanguage: "typescript", fileName: "main.ts" },
+  python: { pistonLanguage: "python", fileName: "main.py" },
+  // Piston compiles a single file; the public class must match the file name.
+  java: { pistonLanguage: "java", fileName: "Main.java" },
+};
+
 @Injectable()
 export class PistonService {
-  private cachedVersion: string | null = null;
+  private readonly versionCache = new Map<string, string>();
 
-  async executeCode(sourceCode: string, stdin = ""): Promise<{
+  async executeCode(sourceCode: string, stdin = "", language: CodeLanguage = "javascript"): Promise<{
     stdout: string;
     stderr: string;
     compileOutput: string;
     status: CodeExecutionStatus;
     executionTime: number;
   }> {
-    const version = await this.getRuntimeVersion("javascript");
+    const runtime = LANGUAGE_RUNTIMES[language] ?? LANGUAGE_RUNTIMES.javascript;
+    const version = await this.getRuntimeVersion(runtime.pistonLanguage, runtime.runtimePreference);
     const response = await this.requestJson<PistonExecutionResult>("/execute", {
       method: "POST",
       headers: {
@@ -46,11 +60,11 @@ export class PistonService {
         Accept: "application/json",
       },
       body: JSON.stringify({
-        language: "javascript",
+        language: runtime.pistonLanguage,
         version,
         files: [
           {
-            name: "main.js",
+            name: runtime.fileName,
             content: sourceCode,
           },
         ],
@@ -74,10 +88,9 @@ export class PistonService {
     };
   }
 
-  private async getRuntimeVersion(language: string): Promise<string> {
-    if (this.cachedVersion) {
-      return this.cachedVersion;
-    }
+  private async getRuntimeVersion(language: string, runtimePreference?: string[]): Promise<string> {
+    const cached = this.versionCache.get(language);
+    if (cached) return cached;
 
     const runtimes = await this.requestJson<PistonRuntime[]>("/runtimes", {
       method: "GET",
@@ -87,23 +100,25 @@ export class PistonService {
     });
 
     const candidates = runtimes.filter(
-      (entry) =>
-        entry.language === language ||
-        entry.aliases.includes(language) ||
-        entry.aliases.includes("js"),
+      (entry) => entry.language === language || entry.aliases.includes(language),
     );
 
-    // Prefer the Node runtime: the starter code uses require('fs'), which Deno does not support the same way.
+    // Some languages expose several runtimes (e.g. node vs deno for JavaScript);
+    // pick the preferred one so behaviour stays consistent between submissions.
     const runtime =
-      candidates.find(
-        (entry) => entry.runtime === "node" || entry.aliases.some((alias) => alias.startsWith("node")),
-      ) ?? candidates[0];
+      (runtimePreference?.length
+        ? candidates.find(
+            (entry) =>
+              runtimePreference.includes(entry.runtime ?? "") ||
+              entry.aliases.some((alias) => runtimePreference.some((preferred) => alias.startsWith(preferred))),
+          )
+        : undefined) ?? candidates[0];
 
     if (!runtime?.version) {
       throw new ServiceUnavailableException(`No Piston runtime found for ${language}.`);
     }
 
-    this.cachedVersion = runtime.version;
+    this.versionCache.set(language, runtime.version);
     return runtime.version;
   }
 

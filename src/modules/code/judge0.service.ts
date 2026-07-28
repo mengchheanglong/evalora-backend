@@ -1,5 +1,5 @@
 import { Injectable, ServiceUnavailableException } from "@nestjs/common";
-import type { CodeRunResult } from "./types/code.types";
+import type { CodeLanguage, CodeRunResult } from "./types/code.types";
 
 interface Judge0Result {
   stdout?: string | null;
@@ -14,11 +14,21 @@ interface Judge0Result {
 }
 
 const JUDGE0_REQUEST_TIMEOUT_MS = 20_000;
-const DEFAULT_JAVASCRIPT_LANGUAGE_ID = 102;
+
+/**
+ * Judge0 CE language ids. Each is overridable by env because a self-hosted
+ * Judge0 can expose different runtime versions (and therefore different ids).
+ */
+const LANGUAGE_IDS: Record<CodeLanguage, { envVar: string; defaultId: number }> = {
+  javascript: { envVar: "JUDGE0_JAVASCRIPT_LANGUAGE_ID", defaultId: 102 }, // Node.js 22
+  typescript: { envVar: "JUDGE0_TYPESCRIPT_LANGUAGE_ID", defaultId: 101 }, // TypeScript 5
+  python: { envVar: "JUDGE0_PYTHON_LANGUAGE_ID", defaultId: 71 }, // Python 3.8
+  java: { envVar: "JUDGE0_JAVA_LANGUAGE_ID", defaultId: 62 }, // OpenJDK 13
+};
 
 @Injectable()
 export class Judge0Service {
-  async executeCode(sourceCode: string, stdin = ""): Promise<CodeRunResult> {
+  async executeCode(sourceCode: string, stdin = "", language: CodeLanguage = "javascript"): Promise<CodeRunResult> {
     const response = await this.requestJson<Judge0Result>(
       "/submissions?base64_encoded=true&wait=true",
       {
@@ -26,7 +36,7 @@ export class Judge0Service {
         body: JSON.stringify({
           source_code: encodeBase64(sourceCode),
           stdin: encodeBase64(stdin),
-          language_id: this.getJavascriptLanguageId(),
+          language_id: this.getLanguageId(language),
           cpu_time_limit: 3,
           wall_time_limit: 5,
           memory_limit: 128_000,
@@ -44,11 +54,10 @@ export class Judge0Service {
     };
   }
 
-  private getJavascriptLanguageId(): number {
-    const configured = Number(process.env.JUDGE0_JAVASCRIPT_LANGUAGE_ID);
-    return Number.isInteger(configured) && configured > 0
-      ? configured
-      : DEFAULT_JAVASCRIPT_LANGUAGE_ID;
+  private getLanguageId(language: CodeLanguage): number {
+    const mapping = LANGUAGE_IDS[language] ?? LANGUAGE_IDS.javascript;
+    const configured = Number(process.env[mapping.envVar]);
+    return Number.isInteger(configured) && configured > 0 ? configured : mapping.defaultId;
   }
 
   private getBaseUrl(): string {

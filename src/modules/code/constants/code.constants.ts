@@ -1,7 +1,7 @@
 import type { CodeQuestion } from "../interfaces/code.interfaces";
 import type { CodeLanguage } from "../types/code.types";
 
-export const SUPPORTED_CODE_LANGUAGES = ["javascript"] as const satisfies readonly CodeLanguage[];
+export const SUPPORTED_CODE_LANGUAGES = ["javascript", "typescript", "python", "java"] as const satisfies readonly CodeLanguage[];
 
 // Guardrails for untrusted candidate input submitted to the execution sandbox.
 // Source is capped well below Express' default 100kb JSON body limit; stdin is

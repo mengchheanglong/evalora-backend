@@ -67,6 +67,15 @@ interface EvaluationSessionRow {
   template?: { title?: unknown; modules?: EvaluationModuleRow[] | null } | null;
   responses?: EvaluationResponseRow[] | null;
   codeSubmissions?: EvaluationCodeSubmissionRow[] | null;
+  interviewerFollowUps?: EvaluationInterviewerFollowUpRow[] | null;
+}
+
+interface EvaluationInterviewerFollowUpRow {
+  moduleId?: unknown;
+  parentQuestionId?: unknown;
+  questionText?: unknown;
+  answerText?: unknown;
+  askedBy?: { name?: unknown } | null;
 }
 
 interface EvaluationCodeSubmissionRow {
@@ -144,6 +153,20 @@ const REPORT_EVALUATION_SESSION_INCLUDE = {
       createdAt: true,
     },
     orderBy: { createdAt: "asc" },
+  },
+  // Answered human follow-ups are extra evidence for their parent module; the
+  // where-clause drops cancelled and still-unanswered questions.
+  interviewerFollowUps: {
+    where: { status: "ANSWERED" },
+    select: {
+      moduleId: true,
+      parentQuestionId: true,
+      questionText: true,
+      answerText: true,
+      sequence: true,
+      askedBy: { select: { name: true } },
+    },
+    orderBy: { sequence: "asc" },
   },
 };
 
@@ -398,6 +421,29 @@ export class ReportsService {
       }
     }
 
+    // Answered interviewer follow-ups are folded into their parent module as
+    // extra evidence. They never create a new weighted module, so the overall
+    // score formula is unchanged; only that module's evidence grows.
+    const followUpsByModule = groupFollowUpsByModule(session.interviewerFollowUps ?? [], session.responses ?? []);
+    for (const [moduleId, followUps] of followUpsByModule) {
+      const text = buildInterviewerFollowUpText(followUps);
+      if (!text) continue;
+      const module = templateModules.find((candidate) => optionalString(candidate.id) === moduleId);
+      const existing = inputs.find((input) => input.moduleId === moduleId);
+      if (existing) {
+        existing.responseText = [existing.responseText, text].filter(Boolean).join("\n\n");
+      } else if (module) {
+        inputs.push({
+          moduleId,
+          moduleTitle: optionalString(module.title),
+          moduleType: fromPrismaModuleType(module.moduleType),
+          responseText: text,
+          rubric: [],
+          weight: numberValue(module.weight, 1),
+        });
+      }
+    }
+
     const codingModule = session.template?.modules?.find(
       (module) => fromPrismaModuleType(module.moduleType) === "coding",
     );
@@ -518,6 +564,54 @@ function buildAdaptiveInterviewText(responses: EvaluationResponseRow[]): string 
 function isAdaptiveResponse(response: EvaluationResponseRow): boolean {
   const json = response.responseJson;
   return typeof json === "object" && json !== null && !Array.isArray(json) && (json as Record<string, unknown>).adaptive === true;
+}
+
+/**
+ * Buckets answered follow-ups by the module they belong to. When a follow-up
+ * stored only a parent question, the module is resolved from that question's
+ * saved response so the evidence still lands in the right module.
+ */
+function groupFollowUpsByModule(
+  followUps: EvaluationInterviewerFollowUpRow[],
+  responses: EvaluationResponseRow[],
+): Map<string, EvaluationInterviewerFollowUpRow[]> {
+  const moduleByQuestion = new Map<string, string>();
+  for (const response of responses) {
+    const questionId = optionalString(response.question?.id);
+    const moduleId = optionalString(response.question?.module?.id);
+    if (questionId && moduleId) moduleByQuestion.set(questionId, moduleId);
+  }
+
+  const grouped = new Map<string, EvaluationInterviewerFollowUpRow[]>();
+  for (const followUp of followUps) {
+    const parentQuestionId = optionalString(followUp.parentQuestionId);
+    const moduleId = optionalString(followUp.moduleId) ?? (parentQuestionId ? moduleByQuestion.get(parentQuestionId) : undefined);
+    if (!moduleId) continue;
+    const bucket = grouped.get(moduleId) ?? [];
+    bucket.push(followUp);
+    grouped.set(moduleId, bucket);
+  }
+  return grouped;
+}
+
+/**
+ * The interviewer's question is labelled as context; only the candidate's answer
+ * is presented as evidence, so a follow-up existing can never by itself earn points.
+ */
+function buildInterviewerFollowUpText(followUps: EvaluationInterviewerFollowUpRow[]): string {
+  return followUps
+    .map((followUp) => {
+      const answer = optionalString(followUp.answerText);
+      if (!answer) return "";
+      const asker = optionalString(followUp.askedBy?.name);
+      const question = stringValue(followUp.questionText, "Interviewer follow-up");
+      return [
+        `Interviewer follow-up (context, not candidate evidence)${asker ? ` by ${asker}` : ""}: ${question}`,
+        `Candidate follow-up answer: ${answer}`,
+      ].join("\n");
+    })
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function buildModuleResponseText(entries: GroupedResponseEntry[]): string {

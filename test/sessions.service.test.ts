@@ -510,6 +510,54 @@ test("startSession and completeSession write status timestamps through Prisma", 
   ]);
 });
 
+test("completion is blocked while a required interviewer follow-up is unanswered", async () => {
+  let updated = false;
+  const prisma = {
+    interviewSession: {
+      findFirst: async () => ({ ...sessionRow, status: "IN_PROGRESS", startedAt: now }),
+      update: async () => {
+        updated = true;
+        return { ...sessionRow, status: "COMPLETED" };
+      },
+    },
+    interviewerFollowUp: {
+      count: async (args: any) => {
+        // Only required + still-sent questions may block submission.
+        assert.deepEqual(args.where, { sessionId: "session-1", required: true, status: "SENT" });
+        return 1;
+      },
+    },
+  } as any;
+
+  const service = new SessionsService(prisma, { generateAccessCode: () => "EV-123456", now: () => now });
+
+  await assert.rejects(
+    () => service.completeSession("session-1", interviewerAccess),
+    (err: any) => {
+      assert.equal(err.getStatus(), 409);
+      assert.equal(err.getResponse().code, "INTERVIEWER_FOLLOW_UP_REQUIRED");
+      return true;
+    },
+  );
+  await assert.rejects(() => service.completeSessionByAccessCode("EV-123456"), (err: any) => err.getStatus() === 409);
+  assert.equal(updated, false, "the session must not be completed while a required question is pending");
+});
+
+test("completion proceeds when no required interviewer follow-up is pending", async () => {
+  const prisma = {
+    interviewSession: {
+      findFirst: async () => ({ ...sessionRow, status: "IN_PROGRESS", startedAt: now }),
+      update: async (args: any) => ({ ...sessionRow, status: args.data.status, completedAt: now }),
+    },
+    // Optional or already-answered questions leave the count at zero.
+    interviewerFollowUp: { count: async () => 0 },
+  } as any;
+
+  const service = new SessionsService(prisma, { generateAccessCode: () => "EV-123456", now: () => now });
+  const completed = await service.completeSession("session-1", interviewerAccess);
+  assert.equal(completed.status, "completed");
+});
+
 test("completeSession rejects a not-started session with 409 Conflict (not a 500)", async () => {
   const service = new SessionsService({
     interviewSession: {

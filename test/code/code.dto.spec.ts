@@ -17,8 +17,8 @@ describe("Code DTO validation", () => {
 
   it("rejects an unsupported language", () => {
     const dto = plainToInstance(RunCodeDto, {
-      language: "python",
-      sourceCode: "print('Hello')",
+      language: "brainfuck",
+      sourceCode: "+[----->+++<]>+.",
     });
 
     const errors = validateSync(dto);

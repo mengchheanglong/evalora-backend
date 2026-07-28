@@ -73,8 +73,27 @@ describe("CodeService", () => {
       stdin: "",
     });
 
-    expect(executionService.executeCode).toHaveBeenCalledWith("console.log('hello')", "");
+    expect(executionService.executeCode).toHaveBeenCalledWith("console.log('hello')", "", "javascript");
     expect(result.status).toBe("Accepted");
+  });
+
+  it("runs and grades a candidate solution written in another supported language", async () => {
+    (executionService.executeCode as jest.Mock).mockImplementation((_source: string, stdin: string) => {
+      const [a, b] = stdin.split(" ").map(Number);
+      return Promise.resolve({ stdout: `${a + b}
+`, stderr: "", compileOutput: "", status: "Accepted", executionTime: 0.03 });
+    });
+
+    // The question ships a JavaScript starter, but grading compares stdout — so a
+    // Python solution must be accepted and executed with the Python runtime.
+    const result = await service.gradeCode({
+      questionId: "sum-two-numbers",
+      language: "python",
+      sourceCode: "a,b=input().split(); print(int(a)+int(b))",
+    });
+
+    expect(result.score).toBe(100);
+    expect(executionService.executeCode).toHaveBeenCalledWith(expect.any(String), expect.any(String), "python");
   });
 
   it("stores a submission after evaluating test cases", async () => {
