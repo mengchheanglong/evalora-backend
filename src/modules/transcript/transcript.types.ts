@@ -47,7 +47,7 @@ export interface TranscriptEntry {
   liveQuestionText?: string;
   answerText?: string;
   /** Interviewer follow-ups only: the human who asked. */
-  askedBy?: { name: string };
+  askedBy?: { id?: string; name: string };
   askedAt?: string;
   answeredAt?: string;
   /** Interviewer follow-ups only. */
@@ -169,7 +169,7 @@ export interface TranscriptFollowUpRow {
   status: PrismaInterviewerFollowUpStatus;
   sentAt?: Date | null;
   answeredAt?: Date | null;
-  askedBy?: { name?: string | null } | null;
+  askedBy?: { id?: string | null; name?: string | null } | null;
 }
 
 export interface TranscriptSessionRow {

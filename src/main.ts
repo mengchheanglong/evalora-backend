@@ -7,6 +7,9 @@ import { PrismaExceptionFilter } from "./common/filters/prisma-exception.filter"
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // Profile photos are resized in the browser before upload. Raise the JSON cap
+  // above Express's default so the compressed data URL reaches validation.
+  app.useBodyParser("json", { limit: "512kb" });
   const allowedOrigins = (process.env.FRONTEND_URL ?? "")
     .split(",")
     .map((origin) => origin.trim())

@@ -11,6 +11,7 @@ const NAME_MAX = 200;
 const PASSWORD_MAX = 128;
 const TOKEN_MAX = 4000;
 const CREDENTIAL_MAX = 8000;
+const PROFILE_PHOTO_MAX = 350_000;
 
 export class RegisterDto {
   @IsString()
@@ -101,8 +102,14 @@ export class ResetPasswordDto {
 }
 
 export class UpdateProfileDto {
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @MaxLength(NAME_MAX)
-  name!: string;
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(PROFILE_PHOTO_MAX)
+  profilePhoto?: string | null;
 }

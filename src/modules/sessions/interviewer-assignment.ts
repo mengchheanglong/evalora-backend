@@ -47,18 +47,25 @@ export function storedInterviewerNames(value: unknown): string[] {
 }
 
 /**
- * Owners can supervise every session. Interviewers can change the live
- * interview only when explicitly assigned; sessions without an explicit list
- * belong to their creator.
+ * A session's live questioning belongs to its explicitly assigned interviewers.
+ * When no assignment is made, it falls back to the session creator. Workspace
+ * membership grants visibility, not the ability to intervene in a live session.
  */
 export function canManageSessionFollowUps(session: AssignedSession, access?: AccessContext): boolean {
   if (!access) return false;
-  if (access.role === "admin" || access.role === "organization") return true;
-  if (access.role !== "interviewer") return false;
+  if (access.role === "admin") return true;
+  if (access.role !== "organization" && access.role !== "interviewer") return false;
 
   const assignments = storedInterviewerAssignments(session.interviewers);
-  if (assignments.length) return assignments.some((assignment) => assignment.id === access.userId);
+  if (hasExplicitInterviewerList(session.interviewers)) return assignments.some((assignment) => assignment.id === access.userId);
   return session.createdById === access.userId;
+}
+
+function hasExplicitInterviewerList(value: unknown): boolean {
+  return Array.isArray(value) && value.some((item) => {
+    if (typeof item === "string") return Boolean(item.trim());
+    return isRecord(item) && Boolean(optionalString(item.id) || optionalString(item.name));
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

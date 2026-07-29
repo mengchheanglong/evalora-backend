@@ -142,6 +142,9 @@ export class InterviewerFollowUpsService {
       include: { askedBy: ASKED_BY_SELECT },
     });
     if (!followUp) throw new NotFoundException("Follow-up question not found.");
+    if (access?.role !== "admin" && followUp.askedById !== access?.userId) {
+      throw new ForbiddenException("Only the interviewer who asked this question can withdraw it.");
+    }
     if (followUp.status === "CANCELLED") return toInterviewerFollowUpDto(followUp);
     // An answered question is evidence — it stays in the record.
     if (followUp.status === "ANSWERED") {

@@ -6,6 +6,7 @@ import { INTERVIEW_EVENTS, type InterviewEventPublisher } from "../src/modules/r
 
 const ownerAccess: AccessContext = { userId: "owner-1", role: "organization", organizationId: "org-1" };
 const interviewerAccess: AccessContext = { userId: "int-1", role: "interviewer", organizationId: "org-1" };
+const secondAssignedInterviewerAccess: AccessContext = { userId: "int-2", role: "interviewer", organizationId: "org-1" };
 const unassignedInterviewerAccess: AccessContext = { userId: "int-2", role: "interviewer", organizationId: "org-1" };
 const otherOrgAccess: AccessContext = { userId: "out-1", role: "organization", organizationId: "org-2" };
 
@@ -132,24 +133,26 @@ function pendingRequired(prisma: ReturnType<typeof createFakePrisma>): number {
 
 const validQuestion = "What monitoring signal would make you stop the rollout?";
 
-test("owner and assigned interviewer can send a follow-up", async () => {
+test("only an explicitly assigned interviewer can send a follow-up", async () => {
   const prisma = createFakePrisma();
   const service = createService(prisma);
 
-  const owned = await service.send("session-1", { questionText: validQuestion, parentQuestionId: "question-1" }, ownerAccess);
-  assert.equal(owned.status, "sent");
-  assert.equal(owned.sequence, 1);
-  assert.equal(owned.required, true, "questions are required unless explicitly optional");
-  assert.equal(owned.moduleId, "module-1", "module is inferred from the parent question");
+  await assert.rejects(
+    () => service.send("session-1", { questionText: validQuestion }, ownerAccess),
+    /only assigned interviewers/i,
+  );
 
-  const second = await service.send("session-1", { questionText: "Second question for the candidate." }, interviewerAccess);
-  assert.equal(second.sequence, 2, "sequence increments per session");
+  const assigned = await service.send("session-1", { questionText: validQuestion, parentQuestionId: "question-1" }, interviewerAccess);
+  assert.equal(assigned.status, "sent");
+  assert.equal(assigned.sequence, 1);
+  assert.equal(assigned.required, true, "questions are required unless explicitly optional");
+  assert.equal(assigned.moduleId, "module-1", "module is inferred from the parent question");
 });
 
 test("an unassigned interviewer can read but cannot send or withdraw follow-ups", async () => {
   const prisma = createFakePrisma();
   const service = createService(prisma);
-  const sent = await service.send("session-1", { questionText: validQuestion }, ownerAccess);
+  const sent = await service.send("session-1", { questionText: validQuestion }, interviewerAccess);
 
   const visible = await service.listForSession("session-1", unassignedInterviewerAccess);
   assert.equal(visible.length, 1, "workspace viewing remains available");
@@ -164,6 +167,25 @@ test("an unassigned interviewer can read but cannot send or withdraw follow-ups"
   assert.equal(prisma.rows[0]?.status, "SENT", "an unauthorized withdraw cannot change the question");
 });
 
+test("an assigned interviewer cannot withdraw another interviewer's question", async () => {
+  const prisma = createFakePrisma();
+  prisma.session.interviewers = [
+    { id: "int-1", name: "QA Interviewer" },
+    { id: "int-2", name: "Second Interviewer" },
+  ];
+  const service = createService(prisma);
+  const sent = await service.send("session-1", { questionText: validQuestion }, interviewerAccess);
+
+  await assert.rejects(
+    () => service.cancel("session-1", sent.id, secondAssignedInterviewerAccess),
+    /only the interviewer who asked/i,
+  );
+  assert.equal(prisma.rows[0]?.status, "SENT");
+
+  await service.cancel("session-1", sent.id, interviewerAccess);
+  assert.equal(prisma.rows[0]?.status, "CANCELLED");
+});
+
 test("an empty assignment defaults follow-up permission to the session creator", async () => {
   const prisma = createFakePrisma();
   prisma.session.createdById = "int-1";
@@ -174,6 +196,17 @@ test("an empty assignment defaults follow-up permission to the session creator",
   assert.equal(sent.status, "sent");
   await assert.rejects(
     () => service.send("session-1", { questionText: "Unassigned question." }, unassignedInterviewerAccess),
+    /only assigned interviewers/i,
+  );
+});
+
+test("a legacy name-only assignment does not grant the creator live controls", async () => {
+  const prisma = createFakePrisma();
+  (prisma.session as { interviewers?: unknown }).interviewers = ["QA Interviewer"];
+  const service = createService(prisma);
+
+  await assert.rejects(
+    () => service.send("session-1", { questionText: validQuestion }, ownerAccess),
     /only assigned interviewers/i,
   );
 });
@@ -191,23 +224,23 @@ test("send validates question text and template membership", async () => {
   const prisma = createFakePrisma();
   const service = createService(prisma);
 
-  await assert.rejects(() => service.send("session-1", { questionText: "  " }, ownerAccess), /write a follow-up question/i);
-  await assert.rejects(() => service.send("session-1", { questionText: "hi" }, ownerAccess), /write a follow-up question/i);
+  await assert.rejects(() => service.send("session-1", { questionText: "  " }, interviewerAccess), /write a follow-up question/i);
+  await assert.rejects(() => service.send("session-1", { questionText: "hi" }, interviewerAccess), /write a follow-up question/i);
   await assert.rejects(
-    () => service.send("session-1", { questionText: "x".repeat(2_001) }, ownerAccess),
+    () => service.send("session-1", { questionText: "x".repeat(2_001) }, interviewerAccess),
     /under 2000 characters/i,
   );
   await assert.rejects(
-    () => service.send("session-1", { questionText: validQuestion, parentQuestionId: "question-from-other-template" }, ownerAccess),
+    () => service.send("session-1", { questionText: validQuestion, parentQuestionId: "question-from-other-template" }, interviewerAccess),
     /does not belong to this session/i,
   );
   await assert.rejects(
-    () => service.send("session-1", { questionText: validQuestion, moduleId: "module-from-other-template" }, ownerAccess),
+    () => service.send("session-1", { questionText: validQuestion, moduleId: "module-from-other-template" }, interviewerAccess),
     /module does not belong/i,
   );
   // question-3 lives in module-2, so pairing it with module-1 is rejected
   await assert.rejects(
-    () => service.send("session-1", { questionText: validQuestion, moduleId: "module-1", parentQuestionId: "question-3" }, ownerAccess),
+    () => service.send("session-1", { questionText: validQuestion, moduleId: "module-1", parentQuestionId: "question-3" }, interviewerAccess),
     /does not belong to the selected module/i,
   );
   assert.equal(prisma.rows.length, 0);
@@ -242,7 +275,7 @@ test("questions cannot be sent to a session that is not in progress", async () =
   for (const status of ["NOT_STARTED", "COMPLETED", "EXPIRED"] as const) {
     const service = createService(createFakePrisma({ sessionStatus: status }));
     await assert.rejects(
-      () => service.send("session-1", { questionText: validQuestion }, ownerAccess),
+      () => service.send("session-1", { questionText: validQuestion }, interviewerAccess),
       /no longer accepts questions/i,
       `status ${status} must be rejected`,
     );
@@ -253,8 +286,8 @@ test("a repeated idempotency key returns the original question instead of duplic
   const prisma = createFakePrisma();
   const service = createService(prisma);
 
-  const first = await service.send("session-1", { questionText: validQuestion, idempotencyKey: "key-1" }, ownerAccess);
-  const retry = await service.send("session-1", { questionText: validQuestion, idempotencyKey: "key-1" }, ownerAccess);
+  const first = await service.send("session-1", { questionText: validQuestion, idempotencyKey: "key-1" }, interviewerAccess);
+  const retry = await service.send("session-1", { questionText: validQuestion, idempotencyKey: "key-1" }, interviewerAccess);
 
   assert.equal(retry.id, first.id);
   assert.equal(prisma.rows.length, 1, "only one question is queued for the candidate");
@@ -263,7 +296,7 @@ test("a repeated idempotency key returns the original question instead of duplic
 test("candidate autosave keeps the question pending; submitting marks it answered", async () => {
   const prisma = createFakePrisma();
   const service = createService(prisma);
-  const sent = await service.send("session-1", { questionText: validQuestion }, ownerAccess);
+  const sent = await service.send("session-1", { questionText: validQuestion }, interviewerAccess);
 
   const draft = await service.answerByAccessCode("EV-123456", sent.id, { answerText: "partial thought", submit: false });
   assert.equal(draft.status, "sent", "an autosaved draft must not count as answered");
@@ -279,14 +312,14 @@ test("candidate autosave keeps the question pending; submitting marks it answere
 test("a blank final answer is rejected and cancelled questions cannot be answered", async () => {
   const prisma = createFakePrisma();
   const service = createService(prisma);
-  const sent = await service.send("session-1", { questionText: validQuestion }, ownerAccess);
+  const sent = await service.send("session-1", { questionText: validQuestion }, interviewerAccess);
 
   await assert.rejects(
     () => service.answerByAccessCode("EV-123456", sent.id, { answerText: "   ", submit: true }),
     /write an answer/i,
   );
 
-  await service.cancel("session-1", sent.id, ownerAccess);
+  await service.cancel("session-1", sent.id, interviewerAccess);
   await assert.rejects(
     () => service.answerByAccessCode("EV-123456", sent.id, { answerText: "too late", submit: true }),
     /withdrawn by the interviewer/i,
@@ -296,25 +329,25 @@ test("a blank final answer is rejected and cancelled questions cannot be answere
 
 test("an answered question cannot be cancelled", async () => {
   const service = createService(createFakePrisma());
-  const sent = await service.send("session-1", { questionText: validQuestion }, ownerAccess);
+  const sent = await service.send("session-1", { questionText: validQuestion }, interviewerAccess);
   await service.answerByAccessCode("EV-123456", sent.id, { answerText: "Answered already.", submit: true });
 
-  await assert.rejects(() => service.cancel("session-1", sent.id, ownerAccess), /already answered/i);
+  await assert.rejects(() => service.cancel("session-1", sent.id, interviewerAccess), /already answered/i);
 });
 
 test("optional questions never block completion; required pending ones do", async () => {
   const prisma = createFakePrisma();
   const service = createService(prisma);
-  await service.send("session-1", { questionText: "Optional extra question?", required: false }, ownerAccess);
+  await service.send("session-1", { questionText: "Optional extra question?", required: false }, interviewerAccess);
   assert.equal(pendingRequired(prisma), 0);
 
-  await service.send("session-1", { questionText: validQuestion, required: true }, ownerAccess);
+  await service.send("session-1", { questionText: validQuestion, required: true }, interviewerAccess);
   assert.equal(pendingRequired(prisma), 1);
 });
 
 test("the candidate projection hides interviewer identity beyond the display name", async () => {
   const service = createService(createFakePrisma());
-  await service.send("session-1", { questionText: validQuestion }, ownerAccess);
+  await service.send("session-1", { questionText: validQuestion }, interviewerAccess);
 
   const [candidateView] = await service.listByAccessCode("EV-123456");
   assert.equal(candidateView.askedBy.name, "QA Interviewer");
@@ -337,7 +370,7 @@ test("questions and submitted answers fan out through the shared realtime publis
   };
   const service = new InterviewerFollowUpsService(createFakePrisma() as never, events);
 
-  const sent = await service.send("session-1", { questionText: validQuestion }, ownerAccess);
+  const sent = await service.send("session-1", { questionText: validQuestion }, interviewerAccess);
   await service.answerByAccessCode("EV-123456", sent.id, { answerText: "Draft only", submit: false });
   await service.answerByAccessCode("EV-123456", sent.id, { answerText: "Final answer.", submit: true });
 

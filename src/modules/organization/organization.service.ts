@@ -32,6 +32,7 @@ export interface WorkspaceMemberDto {
   organizationId?: string;
   createdAt?: string;
   isCurrentUser?: boolean;
+  profilePhoto?: string;
 }
 
 export interface WorkspaceInviteDto {
@@ -398,6 +399,7 @@ export class OrganizationService {
         id: true,
         name: true,
         email: true,
+        profilePhoto: true,
         role: true,
         organizationId: true,
         createdAt: true,
@@ -413,6 +415,7 @@ export class OrganizationService {
       organizationId: user.organizationId ?? undefined,
       createdAt: user.createdAt.toISOString(),
       isCurrentUser: currentUserId ? user.id === currentUserId : false,
+      ...(user.profilePhoto ? { profilePhoto: user.profilePhoto } : {}),
     }));
 
     return members.sort((a, b) => {

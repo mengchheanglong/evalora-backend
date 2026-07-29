@@ -15,6 +15,7 @@ export interface AuthUserRecord {
   email: string;
   emailVerified: boolean;
   passwordHash: string;
+  profilePhoto?: string;
   role: UserRole;
   organizationId?: string;
 }
@@ -30,6 +31,7 @@ export interface AuthUserRepository {
   ensureUserWorkspace?(user: AuthUserRecord, workspaceName: string): Promise<AuthUserRecord>;
   updatePasswordHash?(userId: string, passwordHash: string): Promise<AuthUserRecord>;
   updateName?(userId: string, name: string): Promise<AuthUserRecord>;
+  updateProfile?(userId: string, input: { name?: string; profilePhoto?: string | null }): Promise<AuthUserRecord>;
   markEmailVerified?(userId: string): Promise<AuthUserRecord>;
 }
 
@@ -92,6 +94,7 @@ interface PrismaUserRow {
   email: string;
   emailVerified: boolean;
   passwordHash: string;
+  profilePhoto?: string | null;
   role: PrismaRole;
   organizationId?: string | null;
 }
@@ -123,7 +126,7 @@ interface PrismaUserClient {
     }): Promise<PrismaUserRow>;
     update(args: {
       where: { id: string };
-      data: { organizationId?: string; passwordHash?: string; name?: string; emailVerified?: boolean };
+      data: { organizationId?: string; passwordHash?: string; name?: string; profilePhoto?: string | null; emailVerified?: boolean };
       select: Record<keyof PrismaUserRow, true>;
     }): Promise<PrismaUserRow>;
   };
@@ -165,6 +168,7 @@ const USER_SELECT: Record<keyof PrismaUserRow, true> = {
   email: true,
   emailVerified: true,
   passwordHash: true,
+  profilePhoto: true,
   role: true,
   organizationId: true,
 };
@@ -256,6 +260,15 @@ export class PrismaAuthRepository implements AuthUserRepository {
     const user = await this.prisma.user.update({
       where: { id: userId },
       data: { name },
+      select: USER_SELECT,
+    });
+    return toAuthUserRecord(user);
+  }
+
+  async updateProfile(userId: string, input: { name?: string; profilePhoto?: string | null }): Promise<AuthUserRecord> {
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: input,
       select: USER_SELECT,
     });
     return toAuthUserRecord(user);
@@ -387,10 +400,21 @@ export class AuthService {
     return stripPasswordHash(user);
   }
 
-  async updateCurrentUser(id: string, input: { name?: string }): Promise<Omit<AuthUserRecord, "passwordHash">> {
-    if (!this.users.updateName) throw new Error("Profile updates are unavailable.");
-    const name = requireNonEmpty(input.name, "Name is required.", NAME_MAX_LENGTH);
-    const user = await this.users.updateName(id, name);
+  async updateCurrentUser(id: string, input: { name?: string; profilePhoto?: string | null }): Promise<Omit<AuthUserRecord, "passwordHash">> {
+    const hasName = input.name !== undefined;
+    const hasPhoto = Object.prototype.hasOwnProperty.call(input, "profilePhoto");
+    if (!hasName && !hasPhoto) throw new Error("Provide a profile change.");
+
+    const name = hasName ? requireNonEmpty(input.name, "Name is required.", NAME_MAX_LENGTH) : undefined;
+    const profilePhoto = hasPhoto ? normalizeProfilePhoto(input.profilePhoto) : undefined;
+    let user: AuthUserRecord;
+    if (this.users.updateProfile) {
+      user = await this.users.updateProfile(id, { name, profilePhoto });
+    } else if (name !== undefined && profilePhoto === undefined && this.users.updateName) {
+      user = await this.users.updateName(id, name);
+    } else {
+      throw new Error("Profile updates are unavailable.");
+    }
     if (user.role === "candidate") throw new Error("User account is unavailable.");
     return stripPasswordHash(user);
   }
@@ -737,6 +761,7 @@ function stripPasswordHash(user: AuthUserRecord): Omit<AuthUserRecord, "password
     emailVerified: user.emailVerified,
     role: user.role,
     organizationId: user.organizationId,
+    ...(user.profilePhoto ? { profilePhoto: user.profilePhoto } : {}),
   };
 }
 
@@ -764,9 +789,21 @@ function toAuthUserRecord(user: PrismaUserRow): AuthUserRecord {
     email: user.email,
     emailVerified: user.emailVerified,
     passwordHash: user.passwordHash,
+    ...(user.profilePhoto ? { profilePhoto: user.profilePhoto } : {}),
     role: fromPrismaRole(user.role),
     organizationId: user.organizationId ?? undefined,
   };
+}
+
+function normalizeProfilePhoto(value: string | null | undefined): string | null {
+  if (value === null || value === "") return null;
+  if (typeof value !== "string") throw new Error("Profile photo must be an image.");
+  const photo = value.trim();
+  if (photo.length > 350_000) throw new Error("Profile photo is too large.");
+  if (!/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(photo)) {
+    throw new Error("Profile photo must be a JPG, PNG, or WebP image.");
+  }
+  return photo;
 }
 
 export function createGoogleTokenVerifierFromEnv(): GoogleTokenVerifier | null {
