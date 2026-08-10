@@ -74,6 +74,13 @@ interface StreamDeadlines {
 }
 
 const DEFAULT_TIMEOUT_MS = 20_000;
+// Designing a whole assessment emits far more tokens than a single evaluation
+// JSON, and the model spends a long reasoning pass before the first byte of
+// output. 20 seconds reliably expired mid-generation and silently downgraded
+// every draft to the prebuilt fallback, so this one call gets a budget sized
+// to what it actually produces. Nobody is kept waiting behind it: draft
+// generation is an explicit, rate-limited, "this takes a moment" request.
+const TEMPLATE_DRAFT_TIMEOUT_MS = 120_000;
 // A streamed answer is slow on purpose, so the two failure modes get separate budgets.
 // An upstream that never starts writing has to fail fast, while a healthy model writing
 // a long answer must be allowed to finish: one whole-body timeout cut working answers
@@ -244,10 +251,16 @@ export class DeepSeekAiProvider {
         ],
       },
       TEMPLATE_DRAFT_SYSTEM_PROMPT,
+      TEMPLATE_DRAFT_TIMEOUT_MS,
     );
   }
 
-  private async chatJson<T>(task: string, payload: unknown, systemPrompt: string = EVALUATOR_SYSTEM_PROMPT): Promise<T> {
+  private async chatJson<T>(
+    task: string,
+    payload: unknown,
+    systemPrompt: string = EVALUATOR_SYSTEM_PROMPT,
+    timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  ): Promise<T> {
     if (!this.apiKey) throw new Error("DeepSeek API key is not configured.");
 
     const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
@@ -267,7 +280,7 @@ export class DeepSeekAiProvider {
           },
         ],
       }),
-      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
 
     if (!response.ok) {
