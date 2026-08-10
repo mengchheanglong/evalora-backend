@@ -1,4 +1,8 @@
 import { Injectable } from "@nestjs/common";
+import type {
+  GeneratedTemplateDraft,
+  TemplateDraftGenerationInput,
+} from "../templates/drafts/template-draft.types";
 import {
   evaluateResponse as deterministicEvaluateResponse,
   generateCandidateReport as deterministicGenerateCandidateReport,
@@ -47,9 +51,17 @@ export interface CodeSubmissionEvaluationInput {
   weight?: number;
 }
 
+export interface TemplateDraftProposal {
+  /** Absent when no provider is configured or the call failed; the caller then
+   *  falls back to a prebuilt blueprint rather than showing the user nothing. */
+  proposal?: GeneratedTemplateDraft;
+  provider: "deepseek" | "fallback";
+}
+
 export interface AiProviderClient {
   generateInterviewQuestion?(input: InterviewQuestionInput): Promise<Partial<GeneratedInterviewQuestion>>;
   generateFollowUp?(input: FollowUpInput): Promise<Partial<GeneratedFollowUp>>;
+  generateTemplateDraft?(input: TemplateDraftGenerationInput): Promise<Partial<GeneratedTemplateDraft>>;
   evaluateResponse(input: EvaluateResponseInput): Promise<Partial<EvaluationResultDto>>;
   evaluateCodeSubmission?(input: CodeSubmissionEvaluationInput): Promise<Partial<EvaluationResultDto>>;
 }
@@ -95,6 +107,28 @@ export class AiService {
       };
     } catch {
       return fallback;
+    }
+  }
+
+  /**
+   * Propose an assessment template from a job description or a written idea.
+   *
+   * Unlike the evaluation calls, there is no deterministic substitute worth
+   * inventing here, so a missing or failing provider returns no proposal at all
+   * and the caller supplies a prebuilt blueprint instead. Nothing this returns is
+   * trusted: the proposal is validated and re-weighted before it becomes a draft.
+   */
+  async generateTemplateDraft(input: TemplateDraftGenerationInput): Promise<TemplateDraftProposal> {
+    if (!this.provider?.generateTemplateDraft) return { provider: "fallback" };
+
+    try {
+      const proposal = await this.provider.generateTemplateDraft(input);
+      if (!proposal || !Array.isArray(proposal.modules) || proposal.modules.length === 0) {
+        return { provider: "fallback" };
+      }
+      return { proposal, provider: "deepseek" };
+    } catch {
+      return { provider: "fallback" };
     }
   }
 

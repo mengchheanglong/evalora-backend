@@ -170,6 +170,63 @@ Clone request:
 
 The backend derives `createdById` and organization ownership from the JWT. A template contains title, description, target role, time limit, scoring rules, ordered modules, weights, settings, and questions.
 
+## AI-assisted template drafts
+
+All draft routes require workspace authentication and are scoped to the JWT organization. They are registered ahead of `/templates/:id` so `drafts` is never read as a template id.
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| POST | `/templates/drafts` | Generate a draft from an uploaded job description or a written idea. Rate limited per user. |
+| GET | `/templates/drafts` | List draft summaries for the workspace. |
+| GET | `/templates/drafts/:id` | Read one draft plus the original AI proposal. |
+| PATCH | `/templates/drafts/:id` | Replace the editable draft. Re-validated and re-weighted. |
+| POST | `/templates/drafts/:id/confirm` | Create the real template from the stored draft. |
+| DELETE | `/templates/drafts/:id` | Discard a draft. |
+
+**A draft is not an assessment.** Generation writes only an `AssessmentTemplateDraft`; no template, module, or question row exists until a workspace user calls `confirm`. That endpoint is the only path from generated content to an assignable template.
+
+`POST /templates/drafts` accepts either `multipart/form-data` with a `document` file (PDF, DOCX, or plain text, max 5 MB) plus optional `idea` and `roleType` fields, or JSON:
+
+```json
+{ "idea": "Backend engineer owning our payments service", "roleType": "Backend Engineer" }
+```
+
+The response carries the draft, the untouched AI proposal for comparison, and `provider` (`"deepseek"`, or `"fallback"` when the model was unavailable and Evalora started from its closest prebuilt blueprint):
+
+```json
+{
+  "id": "…",
+  "status": "draft",
+  "source": "document",
+  "sourceFileName": "backend-engineer.pdf",
+  "provider": "deepseek",
+  "draft": {
+    "title": "Backend Engineer Assessment",
+    "roleType": "Backend Engineer",
+    "timeLimitMin": 90,
+    "modules": [
+      {
+        "key": "module-1",
+        "type": "coding",
+        "title": "Coding Assessment",
+        "weight": 40,
+        "weightRationale": "Service implementation is the core of this role.",
+        "weightSignals": { "roleImportance": 5, "riskIfWeak": 5, "evidenceVolume": 4, "difficulty": 4, "essential": true },
+        "questions": [{ "key": "module-1-question-1", "questionText": "…", "questionType": "coding", "rubric": ["correctness"] }]
+      }
+    ],
+    "warnings": []
+  },
+  "aiProposal": { "…": "the proposal as generated, before any edit" }
+}
+```
+
+Module weights are **integer percentages that always total exactly 100**. The model rates each module on the five `weightSignals` (1-5) and explains the rating; the backend converts those ratings into percentages, applies minimum weights, and rounds so the total is exact. Weights sent in a request are treated as relative intent and rebalanced — a client cannot store a set that misses 100. `warnings` reports what validation changed (dropped modules, clamped limits, rebalanced weights) so a reviewer sees every silent edit.
+
+Uploaded documents are untrusted. The file type is decided by inspecting its bytes rather than the declared MIME type, extracted text is capped, and everything the model returns is validated against the supported module and question types before it becomes draft content.
+
+Errors: `400` for an unreadable or unsupported file and for a draft with no modules; `409` when a draft has already been published or discarded; `429` when the per-user generation limit is hit (`DRAFT_RATE_LIMIT_MAX`, default 10 per hour).
+
 ## Sessions
 
 | Method | Endpoint | Access | Description |

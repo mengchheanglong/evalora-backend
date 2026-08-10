@@ -29,6 +29,10 @@ import { SessionsService } from "./modules/sessions/sessions.service";
 import { CandidateAccessRateLimitGuard } from "./modules/sessions/access-rate-limit.guard";
 import { TemplatesController } from "./modules/templates/templates.controller";
 import { TemplatesService } from "./modules/templates/templates.service";
+import { DocumentExtractionService } from "./modules/templates/drafts/document-extraction.service";
+import { DraftRateLimitGuard } from "./modules/templates/drafts/draft-rate-limit.guard";
+import { TemplateDraftsController } from "./modules/templates/drafts/template-drafts.controller";
+import { TemplateDraftsService } from "./modules/templates/drafts/template-drafts.service";
 import { TranscriptController } from "./modules/transcript/transcript.controller";
 import { TranscriptService } from "./modules/transcript/transcript.service";
 import { OrganizationController } from "./modules/organization/organization.controller";
@@ -43,6 +47,9 @@ import { PrismaModule } from "./prisma/prisma.module";
     AppController,
     AuthController,
     OrganizationController,
+    // Registered ahead of TemplatesController: its @Get(":id") route would
+    // otherwise match /templates/drafts before this controller ever sees it.
+    TemplateDraftsController,
     TemplatesController,
     SessionsController,
     CandidateSessionAccessController,
@@ -62,6 +69,8 @@ import { PrismaModule } from "./prisma/prisma.module";
     AuthRateLimitGuard,
     CandidateAccessRateLimitGuard,
     CandidateAiService,
+    DocumentExtractionService,
+    DraftRateLimitGuard,
     JwtAuthGuard,
     RolesGuard,
     {
@@ -92,6 +101,12 @@ import { PrismaModule } from "./prisma/prisma.module";
       provide: TemplatesService,
       useFactory: (prisma: PrismaService) => new TemplatesService(prisma),
       inject: [PrismaService],
+    },
+    {
+      provide: TemplateDraftsService,
+      useFactory: (prisma: PrismaService, aiService: AiService, templatesService: TemplatesService) =>
+        new TemplateDraftsService(prisma, aiService, templatesService),
+      inject: [PrismaService, AiService, TemplatesService],
     },
     {
       provide: SessionsService,
