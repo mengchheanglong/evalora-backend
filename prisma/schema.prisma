@@ -195,7 +195,8 @@ model InterviewSession {
   reviewerNotes        ReviewerNote[]
   interviewerFollowUps InterviewerFollowUp[]
   warningCount         Int                   @default(0) @map("warning_count")
-  warningLimit         Int                   @default(1) @map("warning_limit")
+  /// Two-strike integrity policy: the first counted violation warns, the second ends the session.
+  warningLimit         Int                   @default(2) @map("warning_limit")
   integrityEvents      IntegrityEvent[]
   createdAt            DateTime              @default(now()) @map("created_at")
   updatedAt            DateTime              @updatedAt @map("updated_at")

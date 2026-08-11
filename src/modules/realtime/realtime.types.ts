@@ -60,6 +60,8 @@ export interface IntegrityUpdatedEvent {
   warningCount: number;
   warningLimit: number;
   status: SessionStatus;
+  /** "warned" | "terminated" | "duplicate" | "recorded" — never client-supplied. */
+  action?: string;
   reason: string;
   /** The latest stored event; always present on a counted decision. */
   event?: unknown;

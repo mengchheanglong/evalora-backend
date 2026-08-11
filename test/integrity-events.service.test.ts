@@ -44,8 +44,9 @@ function candidateSessionRow(overrides: Record<string, unknown> = {}) {
     startedAt: now,
     completedAt: null,
     expiresAt,
+    // Two-strike policy: the default warning limit is 2 counted violations.
     warningCount: 0,
-    warningLimit: 1,
+    warningLimit: 2,
     createdAt: now,
     updatedAt: now,
     ...overrides,
@@ -100,9 +101,6 @@ function createFakePrisma(initialSession = candidateSessionRow()) {
     prisma,
     events,
     session: () => ({ ...session }),
-    setSession: (next: Record<string, unknown>) => {
-      session = { ...session, ...next };
-    },
   };
 }
 
@@ -120,7 +118,7 @@ const visibilityEvent = {
   durationMs: 30_000,
 };
 
-test("one valid counted event expires the session when warningLimit is 1", async () => {
+test("the first valid counted event warns once and keeps the session ACTIVE", async () => {
   const { prisma, events, session } = createFakePrisma();
   const emitted: Array<{ sessionId: string; event: string; payload: any }> = [];
   const publisher = {
@@ -132,65 +130,111 @@ test("one valid counted event expires the session when warningLimit is 1", async
 
   assert.equal(result.counted, true);
   assert.equal(result.warningCount, 1);
-  assert.equal(result.warningLimit, 1);
-  assert.equal(result.status, "expired");
+  assert.equal(result.warningLimit, 2);
+  assert.equal(result.sessionStatus, "in_progress", "the session must stay active after the first strike");
+  assert.equal(result.action, "warned");
   assert.match(result.reason, /Possible tab switching detected\./);
   assert.equal(result.event.type, "visibilitychange");
   assert.equal(result.event.detectedAt, "2026-07-06T13:05:00.000Z");
   assert.equal(result.event.returnedAt, "2026-07-06T13:05:30.000Z");
   assert.equal(result.event.durationMs, 30_000);
 
-  // The event row and the warning increment were written atomically.
   assert.equal(events.length, 1);
   assert.equal(events[0].counted, true);
   assert.equal(session().warningCount, 1);
-  // Enforcement is server-side: the session moved to EXPIRED.
-  assert.equal(session().status, "EXPIRED");
+  assert.equal(session().status, "IN_PROGRESS", "enforcement keeps the session active at strike one");
 
-  // The decision fans out through the authorized session room only. The status
-  // change also reuses the existing session.updated broadcast, so exactly two
-  // events leave the service for this one session.
+  // The warning decision still fans out through the authorized session room.
   const integrityBroadcast = emitted.filter((item) => item.event === INTERVIEW_EVENTS.integrityUpdated);
   assert.equal(integrityBroadcast.length, 1);
   assert.equal(integrityBroadcast[0].sessionId, "session-1");
-  assert.equal(integrityBroadcast[0].payload.sessionId, "session-1");
   assert.equal(integrityBroadcast[0].payload.warningCount, 1);
-  assert.equal(integrityBroadcast[0].payload.warningLimit, 1);
-  assert.equal(integrityBroadcast[0].payload.status, "expired");
-  assert.equal(integrityBroadcast[0].payload.reason, result.reason);
-  assert.ok(emitted.some((item) => item.event === INTERVIEW_EVENTS.sessionUpdated));
+  assert.equal(integrityBroadcast[0].payload.warningLimit, 2);
+  assert.equal(integrityBroadcast[0].payload.status, "in_progress");
+  assert.equal(integrityBroadcast[0].payload.action, "warned");
+  // No session.updated broadcast: the status did not change.
+  assert.equal(emitted.some((item) => item.event === INTERVIEW_EVENTS.sessionUpdated), false);
 });
 
-test("retrying the same clientEventId never counts a second warning", async () => {
-  const { prisma, events, session } = createFakePrisma(candidateSessionRow({ warningLimit: 2 }));
+test("the second valid counted event ends the session", async () => {
+  const { prisma, events, session } = createFakePrisma();
   const service = createService(prisma);
 
   const first = await service.recordIntegrityEvent("EV-123456", visibilityEvent);
-  assert.equal(first.counted, true);
   assert.equal(first.warningCount, 1);
-  assert.equal(first.status, "in_progress");
+  assert.equal(first.sessionStatus, "in_progress");
 
-  // Same clientEventId replayed: must not increment again.
+  const second = await service.recordIntegrityEvent("EV-123456", {
+    ...visibilityEvent,
+    clientEventId: "9c8d7e6f-2222-4333-8444-555566667777",
+    detectedAt: "2026-07-06T13:10:00.000Z",
+    returnedAt: "2026-07-06T13:10:30.000Z",
+  });
+
+  assert.equal(second.counted, true);
+  assert.equal(second.warningCount, 2);
+  assert.equal(second.warningLimit, 2);
+  assert.equal(second.sessionStatus, "expired", "the second strike expires the session server-side");
+  assert.equal(second.action, "terminated");
+  assert.equal(events.length, 2);
+  assert.equal(session().warningCount, 2);
+  assert.equal(session().status, "EXPIRED");
+});
+
+test("a third event is rejected because the session is no longer active", async () => {
+  const { prisma, events } = createFakePrisma();
+  const service = createService(prisma);
+
+  await service.recordIntegrityEvent("EV-123456", visibilityEvent);
+  await service.recordIntegrityEvent("EV-123456", {
+    ...visibilityEvent,
+    clientEventId: "9c8d7e6f-2222-4333-8444-555566667777",
+  });
+
+  await assert.rejects(
+    () =>
+      service.recordIntegrityEvent("EV-123456", {
+        ...visibilityEvent,
+        clientEventId: "5a4b3c2d-3333-4444-8555-666677778888",
+      }),
+    /no longer available/i,
+    "after the second strike the session is expired and rejects further events",
+  );
+  assert.equal(events.length, 2, "the third event is never stored");
+});
+
+test("retrying the same clientEventId never counts a second warning", async () => {
+  const { prisma, events, session } = createFakePrisma();
+  const service = createService(prisma);
+
+  const first = await service.recordIntegrityEvent("EV-123456", visibilityEvent);
+  assert.equal(first.warningCount, 1);
+  assert.equal(first.action, "warned");
+  assert.equal(first.sessionStatus, "in_progress");
+
+  // Same clientEventId replayed while the session is still active: must not
+  // increment, must not end the session.
   const retried = await service.recordIntegrityEvent("EV-123456", visibilityEvent);
   assert.equal(retried.counted, false);
   assert.equal(retried.warningCount, 1);
+  assert.equal(retried.sessionStatus, "in_progress");
+  assert.equal(retried.action, "duplicate");
   assert.match(retried.reason, /Duplicate integrity event\./);
   assert.equal(events.length, 1, "the duplicate is never stored a second time");
   assert.equal(session().warningCount, 1, "warningCount increments exactly once");
 
-  // A NEW violation still counts, proving the dedupe is per clientEventId.
+  // A NEW violation is the second strike and ends the interview.
   const second = await service.recordIntegrityEvent("EV-123456", {
     ...visibilityEvent,
     clientEventId: "9c8d7e6f-2222-4333-8444-555566667777",
   });
-  assert.equal(second.counted, true);
   assert.equal(second.warningCount, 2);
-  assert.equal(second.status, "expired");
+  assert.equal(second.sessionStatus, "expired");
   assert.equal(events.length, 2);
 });
 
 test("blur and other supporting signals are stored but never counted", async () => {
-  const { prisma, events, session } = createFakePrisma(candidateSessionRow({ warningLimit: 2 }));
+  const { prisma, events, session } = createFakePrisma();
   const service = createService(prisma);
 
   const blur = await service.recordIntegrityEvent("EV-123456", {
@@ -201,7 +245,8 @@ test("blur and other supporting signals are stored but never counted", async () 
 
   assert.equal(blur.counted, false);
   assert.equal(blur.warningCount, 0);
-  assert.equal(blur.status, "in_progress");
+  assert.equal(blur.sessionStatus, "in_progress");
+  assert.equal(blur.action, "recorded");
   assert.match(blur.reason, /window lost focus/);
   assert.equal(events.length, 1);
   assert.equal(events[0].counted, false);
@@ -263,8 +308,8 @@ test("invalid event types are rejected by the DTO whitelist, which also blocks e
 
   // The browser can never author enforcement state: these fields are not even
   // part of the DTO, so whitelisting rejects them before the service runs.
-  const forged = validate({ ...visibilityEvent, warningCount: 99, status: "completed", finalAction: "expire" });
-  assert.ok(forged.length > 0, "warningCount/status/finalAction are rejected as unknown fields");
+  const forged = validate({ ...visibilityEvent, warningCount: 99, sessionStatus: "completed", action: "terminated" });
+  assert.ok(forged.length > 0, "warningCount/sessionStatus/action are rejected as unknown fields");
 
   const missingId = validate({ type: "visibilitychange", detectedAt: visibilityEvent.detectedAt });
   assert.ok(missingId.length > 0, "clientEventId is required");
@@ -306,10 +351,30 @@ test("a cross-organization reviewer cannot read another workspace's integrity ti
   const ownerAccess = { userId: "int-1", role: "interviewer" as const, organizationId: "org-1" };
   const summary = await service.getIntegrityEvents("session-1", ownerAccess);
   assert.equal(summary.warningCount, 0);
-  assert.equal(summary.warningLimit, 1);
+  assert.equal(summary.warningLimit, 2);
   assert.equal(summary.status, "in_progress");
   assert.equal(summary.events.length, 1);
   assert.equal(summary.events[0].type, "visibilitychange");
+});
+
+test("reviewer and candidate see the same official warning count after each strike", async () => {
+  const { prisma } = createFakePrisma();
+  const service = createService(prisma);
+
+  const first = await service.recordIntegrityEvent("EV-123456", visibilityEvent);
+  const summaryAfterFirst = await service.getIntegrityEvents("session-1");
+  assert.equal(first.warningCount, summaryAfterFirst.warningCount, "both channels report 1 after the first strike");
+  assert.equal(summaryAfterFirst.status, "in_progress");
+
+  await service.recordIntegrityEvent("EV-123456", {
+    ...visibilityEvent,
+    clientEventId: "9c8d7e6f-2222-4333-8444-555566667777",
+  });
+  const summaryAfterSecond = await service.getIntegrityEvents("session-1");
+  assert.equal(summaryAfterSecond.warningCount, 2, "the reviewer timeline carries the same official count");
+  assert.equal(summaryAfterSecond.warningLimit, 2);
+  assert.equal(summaryAfterSecond.status, "expired");
+  assert.equal(summaryAfterSecond.events.length, 2);
 });
 
 test("integrity.updated is emitted only into the authorized session room", () => {

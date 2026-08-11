@@ -185,7 +185,7 @@ The backend derives `createdById` and organization ownership from the JWT. A tem
 | PUT | `/sessions/access/:accessCode/start` | Candidate link | Start the assigned assessment. |
 | PUT | `/sessions/access/:accessCode/complete` | Candidate link | Complete the assessment and immediately return `reportStatus: "pending"`. |
 | PUT | `/sessions/access/:accessCode/timeout` | Candidate link | Mark an in-progress timed assessment `expired` (shown as "Withdrawn / Rejected") once its time limit has elapsed. Server re-checks elapsed time; idempotent for finished sessions. |
-| POST | `/sessions/access/:accessCode/integrity-events` | Candidate link | Report a browser-detected integrity signal (visibility change, blur, page hide, exit attempt). The backend deduplicates by `sessionId + clientEventId`, decides `counted` from the event type, and expires the session once `warningCount >= warningLimit` (default limit 1). |
+| POST | `/sessions/access/:accessCode/integrity-events` | Candidate link | Report a browser-detected integrity signal (visibility change, blur, page hide, exit attempt). The backend deduplicates by `sessionId + clientEventId`, decides `counted` from the event type, and enforces the two-strike policy: the first counted event increments `warningCount` to 1 and keeps the session active; the second counted event reaches `warningLimit` (default 2) and expires the session. |
 
 Candidate integrity-event request (the body ONLY accepts these fields; `warningCount`, `status`, or any enforcement value is rejected):
 
@@ -199,7 +199,7 @@ Candidate integrity-event request (the body ONLY accepts these fields; `warningC
 }
 ```
 
-Response carries only official values (`counted`, `warningCount`, `warningLimit`, `status`, server-authored `reason`, and the stored `event`); the browser never supplies a count or a final action. `visibilitychange` is the only counted type — `blur`/`pagehide`/`beforeunload` are stored as supporting evidence and never increment the warning. Completed/expired sessions reject new events, and a duplicate `clientEventId` returns the stored event without counting again.
+Response carries only official values (`counted`, `warningCount`, `warningLimit`, `sessionStatus`, `action` — `warned` on the first strike, `terminated` on the second — server-authored `reason`, and the stored `event`); the browser never supplies a count or a final action. `visibilitychange` is the only counted type — `blur`/`pagehide`/`beforeunload` are stored as supporting evidence and never increment the warning. Completed/expired sessions reject new events, and a duplicate `clientEventId` returns the stored event without counting again. `warningLimit` defaults to 2: the first counted event warns while the session stays active; the second counted event ends the session.
 
 Session creation request:
 

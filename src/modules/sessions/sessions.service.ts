@@ -248,13 +248,21 @@ export interface IntegrityEventDto {
 }
 
 /** Official response of the candidate integrity endpoint. */
+/**
+ * What the backend decided for a reported event. The browser never sends this;
+ * it is derived from the official counters after the write.
+ */
+export type IntegrityAction = "warned" | "terminated" | "duplicate" | "recorded";
+
 export interface IntegrityEventResult {
   sessionId: string;
   clientEventId: string;
   counted: boolean;
   warningCount: number;
   warningLimit: number;
-  status: SessionStatus;
+  /** Official session status after the decision (REST field name). */
+  sessionStatus: SessionStatus;
+  action: IntegrityAction;
   reason: string;
   event: IntegrityEventDto;
 }
@@ -318,6 +326,8 @@ const SALT_ROUNDS = 12;
 const INTEGRITY_COUNTED_TYPES: ReadonlySet<string> = new Set(["visibilitychange"]);
 const INTEGRITY_DUPLICATE_REASON = "Duplicate integrity event. No additional warning was counted.";
 const INTEGRITY_EVENTS_LIMIT = 200;
+/** Default warning limit when a session row predates the column or carries no value. */
+const DEFAULT_WARNING_LIMIT = 2;
 
 /**
  * Candidates are invite-only: they authenticate with the private access code and
@@ -692,8 +702,10 @@ export class SessionsService {
    * - `counted` is derived from the event TYPE (only a real visibility change to
    *   hidden counts), never accepted from the browser;
    * - the event row and the warning increment are written in one transaction;
-   * - once `warningCount >= warningLimit`, the session is expired by the server
-   *   and `integrity.updated` is broadcast to the authorized session room.
+   * - the first counted event (warningCount = 1) only warns and keeps the
+   *   session active; once `warningCount >= warningLimit` (the second strike),
+   *   the server expires the session. Either way `integrity.updated` is
+   *   broadcast to the authorized session room.
    */
   async recordIntegrityEvent(accessCode: string, input: IntegrityEventInput): Promise<IntegrityEventResult> {
     const session = await this.findCandidateSessionByAccessCode(accessCode);
@@ -754,12 +766,15 @@ export class SessionsService {
     // between our dedupe read and this write.
     const fresh = await this.readIntegrityState(session.id);
     const warningCount = fresh?.warningCount ?? (session.warningCount ?? 0) + (counted ? 1 : 0);
-    const warningLimit = fresh?.warningLimit ?? session.warningLimit ?? 1;
+    const warningLimit = fresh?.warningLimit ?? session.warningLimit ?? DEFAULT_WARNING_LIMIT;
 
     // ------------------------------------------------------------
-    // Enforcement: reaching the warning limit expires the session server-side.
+    // Two-strike enforcement, decided server-side only:
+    // - warningCount = 1 keeps the session ACTIVE and returns a warning;
+    // - warningCount >= warningLimit (the second strike) expires the session.
     // ------------------------------------------------------------
     let finalStatus: PrismaSessionStatus = fresh?.status ?? session.status;
+    let action: IntegrityAction = counted ? "warned" : "recorded";
     if (counted && warningCount >= warningLimit && finalStatus === "IN_PROGRESS") {
       const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
       const expired = await update({
@@ -768,12 +783,13 @@ export class SessionsService {
         include: CANDIDATE_SESSION_INCLUDE,
       });
       finalStatus = expired.status;
+      action = "terminated";
       this.publishSessionUpdated(expired as CandidateSessionRow);
     }
 
-    const status = fromPrismaSessionStatus(finalStatus);
+    const sessionStatus = fromPrismaSessionStatus(finalStatus);
     const event = toIntegrityEventDto(created);
-    this.publishIntegrityUpdated(session.id, { warningCount, warningLimit, status, reason, event });
+    this.publishIntegrityUpdated(session.id, { warningCount, warningLimit, status: sessionStatus, action, reason, event });
 
     return {
       sessionId: session.id,
@@ -781,7 +797,8 @@ export class SessionsService {
       counted,
       warningCount,
       warningLimit,
-      status,
+      sessionStatus,
+      action,
       reason,
       event,
     };
@@ -811,7 +828,7 @@ export class SessionsService {
     return {
       sessionId: session.id,
       warningCount: session.warningCount ?? 0,
-      warningLimit: session.warningLimit ?? 1,
+      warningLimit: session.warningLimit ?? DEFAULT_WARNING_LIMIT,
       status: fromPrismaSessionStatus(session.status),
       events: events.map(toIntegrityEventDto),
     };
@@ -869,7 +886,9 @@ export class SessionsService {
       where: { id: sessionId },
       select: { warningCount: true, warningLimit: true, status: true },
     });
-    return row ? { warningCount: row.warningCount ?? 0, warningLimit: row.warningLimit ?? 1, status: row.status } : null;
+    return row
+      ? { warningCount: row.warningCount ?? 0, warningLimit: row.warningLimit ?? DEFAULT_WARNING_LIMIT, status: row.status }
+      : null;
   }
 
   private integrityResult(
@@ -883,8 +902,9 @@ export class SessionsService {
       clientEventId: event.clientEventId,
       counted,
       warningCount: session.warningCount ?? 0,
-      warningLimit: session.warningLimit ?? 1,
-      status: fromPrismaSessionStatus(session.status),
+      warningLimit: session.warningLimit ?? DEFAULT_WARNING_LIMIT,
+      sessionStatus: fromPrismaSessionStatus(session.status),
+      action: "duplicate",
       reason,
       event: toIntegrityEventDto(event),
     };
@@ -898,7 +918,7 @@ export class SessionsService {
    */
   private publishIntegrityUpdated(
     sessionId: string,
-    payload: { warningCount: number; warningLimit: number; status: SessionStatus; reason: string; event: IntegrityEventDto },
+    payload: { warningCount: number; warningLimit: number; status: SessionStatus; action: IntegrityAction; reason: string; event: IntegrityEventDto },
   ) {
     try {
       this.events?.emitToSession(sessionId, INTERVIEW_EVENTS.integrityUpdated, {
@@ -906,6 +926,7 @@ export class SessionsService {
         warningCount: payload.warningCount,
         warningLimit: payload.warningLimit,
         status: payload.status,
+        action: payload.action,
         reason: payload.reason,
         event: payload.event,
       });
@@ -1053,7 +1074,7 @@ function toSessionDto(session: SessionRow): InterviewSessionDto {
     status: fromPrismaSessionStatus(session.status),
     accessCode: session.accessCode,
     warningCount: session.warningCount ?? 0,
-    warningLimit: session.warningLimit ?? 1,
+    warningLimit: session.warningLimit ?? DEFAULT_WARNING_LIMIT,
     overallScore: session.report?.overallScore,
     reportReady: Boolean(session.report),
     startedAt: toIso(session.startedAt),

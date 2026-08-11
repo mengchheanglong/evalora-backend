@@ -213,7 +213,7 @@ export function buildTranscript(session: TranscriptSessionRow, totals?: Transcri
     counts: countByOrigin(entries),
     truncation: buildTruncation(session, DEFAULT_LIST_LIMIT, totals),
     warningCount: session.warningCount ?? 0,
-    warningLimit: session.warningLimit ?? 1,
+    warningLimit: session.warningLimit ?? 2,
     integrityEvents: (session.integrityEvents ?? []).map(toTranscriptIntegrityEvent),
   };
 }
