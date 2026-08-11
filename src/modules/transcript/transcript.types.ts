@@ -103,6 +103,8 @@ export interface SessionTranscriptDto {
   entries: TranscriptEntry[];
   counts: TranscriptCounts;
   truncation: TranscriptTruncation;
+  warningCount?: number;
+  warningLimit?: number;
 }
 
 /**
@@ -186,6 +188,8 @@ export interface TranscriptSessionRow {
   aiMessages?: TranscriptAiMessageRow[] | null;
   codeSubmissions?: TranscriptCodeSubmissionRow[] | null;
   interviewerFollowUps?: TranscriptFollowUpRow[] | null;
+  warningCount?: number;
+  warningLimit?: number;
   /** Present only on the follow-up count query, never on the main read. */
   _count?: TranscriptSourceTotals | null;
 }

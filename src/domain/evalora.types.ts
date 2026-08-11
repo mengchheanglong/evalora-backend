@@ -84,6 +84,8 @@ export interface InterviewSessionDto {
   };
   overallScore?: number;
   reportReady?: boolean;
+  warningCount?: number;
+  warningLimit?: number;
   startedAt?: string;
   completedAt?: string;
   expiresAt?: string;

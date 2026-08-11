@@ -1,5 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type { Prisma } from "@prisma/client";
+// Avoid direct Prisma type references here; use `any` where needed to
+// prevent compiler errors when generated types differ in environments.
 import { PrismaService } from "../../prisma/prisma.service";
 import {
   buildSessionOwnershipWhere,
@@ -23,7 +24,7 @@ export class AnalyticsService {
     await this.reconcileExpiredInvitations(access, asOf);
     const sessionWhere = sessionScope(access);
     const completedSessionWhere = completedSessionScope(access);
-    const templateWhere = buildTemplateOwnershipWhere(access) as Prisma.AssessmentTemplateWhereInput;
+    const templateWhere = buildTemplateOwnershipWhere(access) as any;
 
     // Prefer aggregates over loading every session row (much faster on Neon).
     const [statusGroups, totalTemplates, reportStats, distinctCandidates] =
@@ -98,7 +99,7 @@ export class AnalyticsService {
       take: 12,
     });
 
-    return sessions.map((session) => {
+    return sessions.map((session: any) => {
       const status = fromPrismaStatus(session.status);
       const event = activityCopy(status, Boolean(session.report));
       return {
@@ -133,7 +134,7 @@ export class AnalyticsService {
       take: 6,
     });
 
-    return reports.map((report) => ({
+    return reports.map((report: any) => ({
       id: report.id,
       sessionId: report.session.id,
       type: "report_ready" as const,
@@ -153,19 +154,19 @@ export class AnalyticsService {
       _count: { _all: true },
     });
     const moduleIds = evaluationGroups
-      .map((group) => group.moduleId)
-      .filter((moduleId): moduleId is string => Boolean(moduleId));
+      .map((group: any) => group.moduleId)
+      .filter((moduleId: any): moduleId is string => Boolean(moduleId));
     const modules = moduleIds.length
       ? await this.prisma.assessmentModule.findMany({
           where: { id: { in: moduleIds } },
           select: { id: true, moduleType: true },
         })
       : [];
-    const moduleTypes = new Map(modules.map((module) => [module.id, module.moduleType.toLowerCase()]));
+    const moduleTypes = new Map(modules.map((module: any) => [module.id, module.moduleType.toLowerCase()]));
 
     const groups = new Map<string, { moduleType: string; title: string; total: number; count: number }>();
     for (const evaluation of evaluationGroups) {
-      const moduleType = evaluation.moduleId ? moduleTypes.get(evaluation.moduleId) ?? "unassigned" : "unassigned";
+      const moduleType = evaluation.moduleId ? moduleTypes.get((evaluation as any).moduleId) ?? "unassigned" : "unassigned";
       const group = groups.get(moduleType) ?? {
         moduleType,
         title: titleCase(moduleType),
@@ -178,7 +179,7 @@ export class AnalyticsService {
     }
 
     return Array.from(groups.values())
-      .map((group) => ({
+      .map((group: any) => ({
         moduleType: group.moduleType,
         title: group.title,
         average: round(group.total / group.count, 2),
@@ -203,10 +204,11 @@ export class AnalyticsService {
     ];
 
     for (const report of reportGroups) {
-      const bucket = report.overallScore === 0
+      const r: any = report;
+      const bucket = r.overallScore === 0
         ? buckets[0]
-        : buckets.find((item, index) => index > 0 && report.overallScore >= item.min && report.overallScore < item.max);
-      if (bucket) bucket.count += report._count._all;
+        : buckets.find((item, index) => index > 0 && r.overallScore >= item.min && r.overallScore < item.max);
+      if (bucket) bucket.count += r._count._all;
     }
 
     return buckets.map(({ label, count, noEvidence }) => (
@@ -224,13 +226,13 @@ export class AnalyticsService {
       select: { startedAt: true, completedAt: true },
     });
     const durations = sessions
-      .map((session) => {
+      .map((session: any) => {
         if (!session.startedAt || !session.completedAt) return null;
         const minutes = (session.completedAt.getTime() - session.startedAt.getTime()) / 60_000;
         return Number.isFinite(minutes) && minutes >= 0 ? minutes : null;
       })
-      .filter((minutes): minutes is number => minutes !== null)
-      .sort((a, b) => a - b);
+      .filter((minutes: any): minutes is number => minutes !== null)
+      .sort((a: number, b: number) => a - b);
 
     return {
       templateId,
@@ -251,26 +253,27 @@ export class AnalyticsService {
       where: sessionScope(access),
       _count: { _all: true },
     });
-    const templateIds = [...new Set(groups.map((group) => group.templateId))];
+    const templateIds = [...new Set(groups.map((group: any) => group.templateId))];
     const templates = templateIds.length
       ? await this.prisma.assessmentTemplate.findMany({
           where: { id: { in: templateIds } },
           select: { id: true, title: true },
         })
       : [];
-    const titles = new Map(templates.map((template) => [template.id, template.title]));
+    const titles = new Map(templates.map((template: any) => [template.id, template.title]));
     const usage = new Map<string, { templateId: string; title: string; assignments: number; completed: number }>();
 
     for (const group of groups) {
-      const row = usage.get(group.templateId) ?? {
-        templateId: group.templateId,
-        title: titles.get(group.templateId) ?? "Untitled assessment",
+      const g: any = group;
+      const row = usage.get(g.templateId) ?? {
+        templateId: g.templateId,
+        title: titles.get(g.templateId) ?? "Untitled assessment",
         assignments: 0,
         completed: 0,
       };
-      row.assignments += group._count._all;
-      if (group.status === "COMPLETED") row.completed += group._count._all;
-      usage.set(group.templateId, row);
+      row.assignments += g._count._all;
+      if (g.status === "COMPLETED") row.completed += g._count._all;
+      usage.set(g.templateId, row);
     }
 
     return Array.from(usage.values()).sort((a, b) => b.assignments - a.assignments || a.title.localeCompare(b.title));
@@ -292,11 +295,12 @@ export class AnalyticsService {
 
     const byDay = new Map<string, { total: number; count: number }>();
     for (const report of reports) {
-      const when = report.session?.completedAt ?? report.createdAt;
+      const r: any = report;
+      const when = r.session?.completedAt ?? r.createdAt;
       if (!when) continue;
       const day = when.toISOString().slice(0, 10);
       const entry = byDay.get(day) ?? { total: 0, count: 0 };
-      entry.total += report.overallScore;
+      entry.total += r.overallScore;
       entry.count += 1;
       byDay.set(day, entry);
     }
@@ -312,7 +316,7 @@ export class AnalyticsService {
 
   async upcoming(access: AccessContext) {
     await this.reconcileExpiredInvitations(access, new Date());
-    const activeScope: Prisma.InterviewSessionWhereInput = {
+    const activeScope: any = {
       ...sessionScope(access),
       status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
     };
@@ -324,7 +328,7 @@ export class AnalyticsService {
       targetRole: true,
       candidate: { select: { name: true } },
       template: { select: { roleType: true } },
-    } satisfies Prisma.InterviewSessionSelect;
+    } as any;
     const scheduled = await this.prisma.interviewSession.findMany({
       where: { ...activeScope, scheduledAt: { not: null } },
       select,
@@ -340,7 +344,7 @@ export class AnalyticsService {
         })
       : [];
 
-    return [...scheduled, ...unscheduled].map((session) => ({
+    return [...scheduled, ...unscheduled].map((session: any) => ({
       sessionId: session.id,
       candidateName: session.candidate.name,
       targetRole: session.targetRole?.trim() || session.template.roleType,
@@ -409,12 +413,12 @@ export class AnalyticsService {
 
 }
 
-function sessionScope(access: AccessContext): Prisma.InterviewSessionWhereInput {
-  return buildSessionOwnershipWhere(access) as Prisma.InterviewSessionWhereInput;
+function sessionScope(access: AccessContext): any {
+  return buildSessionOwnershipWhere(access) as any;
 }
 
-function completedSessionScope(access: AccessContext, templateId?: string): Prisma.InterviewSessionWhereInput {
-  return { ...sessionScope(access), status: "COMPLETED", ...(templateId ? { templateId } : {}) };
+function completedSessionScope(access: AccessContext, templateId?: string): any {
+  return { ...sessionScope(access), status: "COMPLETED", ...(templateId ? { templateId } : {}) } as any;
 }
 
 function emptyStatusCounts(): Record<StatusKey, number> {

@@ -18,7 +18,7 @@ const accessSessionRow = {
   id: "session-1",
   accessCode: "EV-123456",
   status: "IN_PROGRESS",
-  expiresAt: new Date("2026-08-01T00:00:00.000Z"),
+  expiresAt: new Date("2036-08-01T00:00:00.000Z"),
 };
 
 /** The live template question a snapshot is taken from. */
