@@ -1,5 +1,9 @@
 # dependencies
 node_modules/
+
+# pnpm project (see pnpm-lock.yaml); an npm lockfile breaks pnpm installs.
+package-lock.json
+npm-shrinkwrap.json
 .pnpm-store/
 
 # build output
