@@ -24,15 +24,19 @@ interface SocketIdentity {
   role: ParticipantRole;
   userId: string;
   name: string;
+
   /** Sessions this socket is currently joined to. */
   rooms: Set<string>;
 }
 
 const sockets = new WeakMap<Socket, SocketIdentity>();
+
 /**
- * Authentication does async work (DB lookup for candidates), but socket.io
- * delivers `connect` to the client immediately — so a client can emit `join`
- * before the handshake finished. Handlers await this to close that race.
+ * Authentication does async work (DB lookup for candidates), but Socket.IO
+ * delivers `connect` to the client immediately.
+ *
+ * A client can therefore emit `join` before the handshake finishes.
+ * Handlers await this promise to close that race.
  */
 const authInFlight = new WeakMap<Socket, Promise<void>>();
 
@@ -40,7 +44,9 @@ function roomName(sessionId: string) {
   return `session:${sessionId}`;
 }
 
-/** Loopback and RFC1918 ranges — the addresses a LAN demo is served from. */
+/**
+ * Loopback and RFC1918 ranges — the addresses a LAN demo is served from.
+ */
 const PRIVATE_HOSTNAME_PATTERN =
   /^(?:localhost|\[?::1\]?|127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})$/i;
 
@@ -61,31 +67,22 @@ function isPrivateNetworkOrigin(origin: string): boolean {
 
 /**
  * Decides per handshake which browser origins may open a socket.
- *
- * Exported so it can be unit tested, and called at connection time rather than
- * read into the decorator: decorator arguments are evaluated when this module is
- * imported, which is before ConfigModule has loaded .env — FRONTEND_URL was
- * always empty there, so the allow-list silently degraded to "any origin".
  */
-export function isAllowedRealtimeOrigin(requestOrigin: string | undefined, allowList = configuredOrigins()): boolean {
-  // Non-browser clients (mobile shell, CLI, server-to-server) send no Origin
-  // header. There is no ambient cookie for them to abuse, and the handshake
-  // credential still has to check out.
+export function isAllowedRealtimeOrigin(
+  requestOrigin: string | undefined,
+  allowList = configuredOrigins(),
+): boolean {
+  // Non-browser clients do not send Origin.
   if (!requestOrigin) return true;
 
-  // Nothing configured: keep the same explicit fallback main.ts documents —
-  // accept any origin, but never with credentials (see `credentials: false`
-  // below), so a misconfigured deployment cannot leak an authenticated response.
+  // Nothing configured: preserve the existing fallback behavior.
   if (!allowList.length) return true;
 
   const normalized = requestOrigin.trim().replace(/\/$/, "").toLowerCase();
+
   if (allowList.includes(normalized)) return true;
 
-  // The product is demoed over the LAN: the candidate opens the app on a phone
-  // at http://<host-lan-ip>:3010, an origin that can never appear in
-  // FRONTEND_URL. Private-network origins stay allowed so that making the
-  // allow-list effective does not break the demo it was written for; public
-  // origins are now genuinely rejected, which is the point of the list.
+  // Allow private LAN origins for local/demo use.
   return isPrivateNetworkOrigin(normalized);
 }
 
@@ -93,68 +90,105 @@ export function isAllowedRealtimeOrigin(requestOrigin: string | undefined, allow
  * Real-time interview transport.
  *
  * Design rules:
- *  - REST stays authoritative. Every event carries enough data for an immediate
- *    UI update, but a client that missed events recovers by re-joining (which
- *    returns a full snapshot) or by re-reading the REST endpoints.
- *  - Authorization is enforced on join, not just on connect: a socket may only
- *    enter a session room it can actually access (org ownership for staff, the
- *    private access code for candidates).
+ *
+ * - REST remains authoritative.
+ * - Socket events provide live UI updates.
+ * - Reconnecting clients rebuild state from a session snapshot.
+ * - Authorization is enforced before entering a session room.
+ * - WebRTC media does NOT pass through this server.
+ * - This gateway only exchanges WebRTC signaling messages:
+ *      offer
+ *      answer
+ *      ICE candidates
+ *      camera state
  */
 @WebSocketGateway({
   namespace: "/interview",
+
   cors: {
-    origin: (requestOrigin: string | undefined, callback: (error: Error | null, allowed?: boolean) => void) =>
-      callback(null, isAllowedRealtimeOrigin(requestOrigin)),
+    origin: (
+      requestOrigin: string | undefined,
+      callback: (error: Error | null, allowed?: boolean) => void,
+    ) => callback(null, isAllowedRealtimeOrigin(requestOrigin)),
+
     credentials: false,
   },
+
   /**
-   * `cors` only writes response headers, and a browser never applies CORS to a
-   * WebSocket upgrade — so the allow-list above governs polling alone and a page
-   * on any origin could still open a socket. allowRequest runs on the handshake
-   * itself, for both transports, and is the only place an origin can actually be
-   * refused. This is defence in depth: the credential (ticket or access code)
-   * remains the real gate, because a non-browser client sends any Origin it likes.
+   * CORS only controls HTTP/polling response headers.
+   *
+   * allowRequest additionally protects the actual Socket.IO handshake.
    */
   allowRequest: (
-    request: { headers?: Record<string, string | string[] | undefined> },
+    request: {
+      headers?: Record<string, string | string[] | undefined>;
+    },
     callback: (message: string | null, allowed: boolean) => void,
   ) => {
     const header = request.headers?.origin;
-    const requestOrigin = Array.isArray(header) ? header[0] : header;
-    // Same-origin and non-browser clients send no Origin at all. The credential
-    // check still applies to them, so refusing here would only break scripts.
-    if (!requestOrigin) return callback(null, true);
+
+    const requestOrigin = Array.isArray(header)
+      ? header[0]
+      : header;
+
+    // Same-origin and non-browser clients may have no Origin.
+    if (!requestOrigin) {
+      return callback(null, true);
+    }
+
     return isAllowedRealtimeOrigin(requestOrigin)
       ? callback(null, true)
       : callback("origin_not_allowed", false);
   },
 })
-export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class InterviewGateway
+  implements OnGatewayConnection, OnGatewayDisconnect
+{
   private readonly logger = new Logger(InterviewGateway.name);
-  /** Cheap in-process counters powering the System Activity view. */
-  private readonly counters = { connections: 0, disconnects: 0, joins: 0, rejectedJoins: 0, eventsEmitted: 0 };
+
+  /**
+   * Cheap in-process counters powering the System Activity view.
+   */
+  private readonly counters = {
+    connections: 0,
+    disconnects: 0,
+    joins: 0,
+    rejectedJoins: 0,
+    eventsEmitted: 0,
+  };
+
   private readonly startedAt = Date.now();
 
   @WebSocketServer()
   server!: Server;
 
-  // Explicit @Inject: the tsx/esbuild dev runtime does not emit
-  // `design:paramtypes`, so type-only constructor injection resolves to
-  // undefined there. The token keeps DI identical in dev and in the build.
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  /**
+   * Explicit @Inject:
+   *
+   * The tsx/esbuild dev runtime does not emit design:paramtypes, so
+   * type-only constructor injection can resolve to undefined.
+   */
+  constructor(
+    @Inject(PrismaService)
+    private readonly prisma: PrismaService,
+  ) {}
 
-  // ------------------------------------------------------------- lifecycle
+  // ==============================================================
+  // lifecycle
+  // ==============================================================
 
   handleConnection(client: Socket) {
     this.counters.connections += 1;
-    // Registered synchronously so a `join` that arrives before authentication
-    // finishes can await it instead of being rejected as unauthenticated.
+
+    /**
+     * Register authentication immediately.
+     *
+     * A join can arrive before authentication finishes.
+     */
     authInFlight.set(client, this.authenticate(client));
   }
 
   private async authenticate(client: Socket) {
-    // Any throw in a gateway lifecycle hook is unhandled and takes the whole
-    // process down, so every failure here is converted into a clean disconnect.
     try {
       const auth = (client.handshake.auth ?? {}) as {
         token?: string;
@@ -163,256 +197,966 @@ export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnec
         name?: string;
       };
 
-      // Workspace user (interviewer/owner/admin). Browsers keep the session JWT
-      // in an httpOnly cookie, so they present a short-lived `ticket` from
-      // POST /auth/realtime-ticket instead; `token` supports non-browser clients
-      // that hold the session JWT directly (scripts, integration tests).
-      //
-      // Each credential is verified against the purpose it was issued for. A
-      // ticket is accepted only here, never by REST — that asymmetry is the
-      // whole point, since the ticket is readable by page scripts. `token` keeps
-      // accepting a session JWT: a caller that already holds the session can do
-      // strictly more over REST than over this socket, so refusing it would cost
-      // non-browser clients an entry point while removing no privilege.
+      /**
+       * Workspace user:
+       *
+       * Interviewer / owner / admin.
+       *
+       * Browser:
+       * httpOnly session cookie -> realtime ticket -> Socket.IO
+       *
+       * Non-browser:
+       * session JWT may be passed directly.
+       */
       const credential = auth.ticket
-        ? { value: auth.ticket, purpose: TOKEN_PURPOSES.realtimeTicket }
+        ? {
+            value: auth.ticket,
+            purpose: TOKEN_PURPOSES.realtimeTicket,
+          }
         : auth.token
-          ? { value: auth.token, purpose: TOKEN_PURPOSES.session }
+          ? {
+              value: auth.token,
+              purpose: TOKEN_PURPOSES.session,
+            }
           : null;
+
       if (credential) {
-        const user = tryExtractAuthUserFromToken(credential.value, credential.purpose);
-        if (!user) return this.reject(client, "Your session expired. Sign in again.");
-        sockets.set(client, { role: "interviewer", userId: user.id, name: auth.name?.slice(0, 80) || user.email, rooms: new Set() });
+        const user = tryExtractAuthUserFromToken(
+          credential.value,
+          credential.purpose,
+        );
+
+        if (!user) {
+          return this.reject(
+            client,
+            "Your session expired. Sign in again.",
+          );
+        }
+
+        sockets.set(client, {
+          role: "interviewer",
+          userId: user.id,
+          name: auth.name?.slice(0, 80) || user.email,
+          rooms: new Set(),
+        });
+
         return;
       }
 
-      // Candidate — the private access code is the credential. Never logged.
+      // ------------------------------------------------------------
+      // Candidate authentication
+      // ------------------------------------------------------------
+
+      /**
+       * Candidate uses the private assessment access code.
+       *
+       * Never log the access code.
+       */
       if (auth.accessCode) {
-        const session = await this.findSessionByAccessCode(auth.accessCode);
-        if (!session) return this.reject(client, "This assessment link is not valid.");
+        const session = await this.findSessionByAccessCode(
+          auth.accessCode,
+        );
+
+        if (!session) {
+          return this.reject(
+            client,
+            "This assessment link is not valid.",
+          );
+        }
+
         sockets.set(client, {
           role: "candidate",
           userId: session.candidateId,
           name: session.candidate?.name ?? "Candidate",
           rooms: new Set(),
         });
+
         return;
       }
 
       this.reject(client, "Authentication is required.");
     } catch (error) {
-      this.logger.error(`Handshake failed: ${error instanceof Error ? error.message : "unknown error"}`);
-      this.reject(client, "Could not establish the live connection. Retrying is safe.");
+      this.logger.error(
+        `Handshake failed: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`,
+      );
+
+      this.reject(
+        client,
+        "Could not establish the live connection. Retrying is safe.",
+      );
     }
   }
 
   private reject(client: Socket, message: string) {
-    client.emit(INTERVIEW_EVENTS.error, { message });
+    client.emit(INTERVIEW_EVENTS.error, {
+      message,
+    });
+
     client.disconnect(true);
   }
 
   handleDisconnect(client: Socket) {
     this.counters.disconnects += 1;
+
     const identity = sockets.get(client);
+
     if (!identity) return;
-    // Announce departure so the other side sees presence drop immediately.
+
+    /**
+     * Tell the remaining participant that this user left.
+     */
     for (const sessionId of identity.rooms) {
       void this.broadcastPresence(sessionId);
     }
+
     sockets.delete(client);
   }
 
-  // ---------------------------------------------------------------- rooms
+  // ==============================================================
+  // rooms
+  // ==============================================================
 
   @SubscribeMessage(INTERVIEW_EVENTS.joinSession)
   async joinSession(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { sessionId?: string; accessCode?: string },
-  ): Promise<{ ok: boolean; snapshot?: SessionSnapshot; message?: string }> {
+    @MessageBody()
+    body: {
+      sessionId?: string;
+      accessCode?: string;
+    },
+  ): Promise<{
+    ok: boolean;
+    snapshot?: SessionSnapshot;
+    message?: string;
+  }> {
     try {
       await authInFlight.get(client);
-      const identity = sockets.get(client);
-      if (!identity) return { ok: false, message: "Not authenticated." };
 
-      const session = await this.resolveAuthorizedSession(identity, body);
+      const identity = sockets.get(client);
+
+      if (!identity) {
+        return {
+          ok: false,
+          message: "Not authenticated.",
+        };
+      }
+
+      const session = await this.resolveAuthorizedSession(
+        identity,
+        body,
+      );
+
       if (!session) {
         this.counters.rejectedJoins += 1;
-        return { ok: false, message: "Session not found or access denied." };
+
+        return {
+          ok: false,
+          message: "Session not found or access denied.",
+        };
       }
+
       this.counters.joins += 1;
 
       await client.join(roomName(session.id));
+
       identity.rooms.add(session.id);
+
       await this.broadcastPresence(session.id);
 
-      // A reconnecting client resumes from this snapshot — nothing is lost even
-      // if it missed every event while offline.
-      return { ok: true, snapshot: await this.buildSnapshot(session.id) };
+      /**
+       * Reconnecting client gets the full current state.
+       */
+      return {
+        ok: true,
+        snapshot: await this.buildSnapshot(session.id),
+      };
     } catch (error) {
-      this.logger.error(`Join failed: ${error instanceof Error ? error.message : "unknown error"}`);
-      return { ok: false, message: "Could not join the live session." };
+      this.logger.error(
+        `Join failed: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`,
+      );
+
+      return {
+        ok: false,
+        message: "Could not join the live session.",
+      };
     }
   }
 
   @SubscribeMessage(INTERVIEW_EVENTS.leaveSession)
-  async leaveSession(@ConnectedSocket() client: Socket, @MessageBody() body: { sessionId?: string }) {
+  async leaveSession(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    body: {
+      sessionId?: string;
+    },
+  ) {
     await authInFlight.get(client);
+
     const identity = sockets.get(client);
+
     const sessionId = body?.sessionId;
-    if (!identity || !sessionId || !identity.rooms.has(sessionId)) return { ok: false };
+
+    if (
+      !identity ||
+      !sessionId ||
+      !identity.rooms.has(sessionId)
+    ) {
+      return {
+        ok: false,
+      };
+    }
+
     await client.leave(roomName(sessionId));
+
     identity.rooms.delete(sessionId);
+
     await this.broadcastPresence(sessionId);
-    return { ok: true };
-  }
 
-  /** Lightweight liveness probe so clients can measure round-trip latency. */
-  @SubscribeMessage(INTERVIEW_EVENTS.ping)
-  ping(@MessageBody() body: { sentAt?: number }) {
-    return { sentAt: body?.sentAt ?? null, serverTime: Date.now() };
-  }
-
-  // ------------------------------------------------------- server-side API
-
-  /** Called by services after a successful DB write. */
-  emitToSession(sessionId: string, event: string, payload: unknown) {
-    if (!this.server) return;
-    this.counters.eventsEmitted += 1;
-    this.server.to(roomName(sessionId)).emit(event, payload);
-  }
-
-  /** Live transport stats for the System Activity dashboard. */
-  getRealtimeStats() {
-    const container = this.server as unknown as Record<string, unknown>;
-    const nested = container.sockets as Record<string, unknown> | undefined;
-    const rooms =
-      (container.adapter as { rooms?: Map<string, Set<string>> } | undefined)?.rooms ??
-      (nested?.adapter as { rooms?: Map<string, Set<string>> } | undefined)?.rooms;
-    const socketsById = (nested instanceof Map ? nested : (nested?.sockets as Map<string, unknown> | undefined)) as
-      | Map<string, unknown>
-      | undefined;
-
-    // socket.io also creates a room per socket id; only `session:` rooms count.
-    const sessionRooms = rooms ? [...rooms.keys()].filter((key) => key.startsWith("session:")) : [];
     return {
-      connectedSockets: socketsById?.size ?? 0,
-      activeSessionRooms: sessionRooms.length,
-      ...this.counters,
-      uptimeSeconds: Math.round((Date.now() - this.startedAt) / 1000),
+      ok: true,
     };
   }
 
-  async broadcastPresence(sessionId: string) {
-    if (!this.server) return;
-    const participants = await this.participantsIn(sessionId);
-    this.server.to(roomName(sessionId)).emit(INTERVIEW_EVENTS.presenceUpdated, { sessionId, participants });
+  // ==============================================================
+  // camera / WebRTC signaling
+  // ==============================================================
+
+  /**
+   * WebRTC OFFER
+   *
+   * Candidate:
+   *
+   *   createOffer()
+   *        ↓
+   *   Socket.IO
+   *        ↓
+   *   interviewer
+   */
+  @SubscribeMessage(INTERVIEW_EVENTS.cameraOffer)
+  async cameraOffer(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    body: {
+      sessionId?: string;
+      targetUserId?: string;
+      offer?: unknown;
+    },
+  ) {
+    return this.forwardCameraSignal(
+      client,
+      INTERVIEW_EVENTS.cameraOffer,
+      body,
+    );
   }
 
-  private async participantsIn(sessionId: string): Promise<InterviewParticipant[]> {
-    // `@WebSocketServer()` on a namespaced gateway yields the Namespace, whose
-    // `.sockets` is a Map<id, Socket> and whose rooms live on `.adapter`.
-    // Resolve both shapes so this works for a Namespace or a root Server.
-    const container = this.server as unknown as Record<string, unknown>;
-    const nested = container.sockets as Record<string, unknown> | undefined;
-    const rooms =
-      ((container.adapter as { rooms?: Map<string, Set<string>> } | undefined)?.rooms ??
-        (nested?.adapter as { rooms?: Map<string, Set<string>> } | undefined)?.rooms) ?? undefined;
-    const socketsById = (nested instanceof Map ? nested : (nested?.sockets as Map<string, Socket> | undefined)) as
-      | Map<string, Socket>
-      | undefined;
+  /**
+   * WebRTC ANSWER
+   *
+   * Interviewer:
+   *
+   *   createAnswer()
+   *        ↓
+   *   Socket.IO
+   *        ↓
+   *   candidate
+   */
+  @SubscribeMessage(INTERVIEW_EVENTS.cameraAnswer)
+  async cameraAnswer(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    body: {
+      sessionId?: string;
+      targetUserId?: string;
+      answer?: unknown;
+    },
+  ) {
+    return this.forwardCameraSignal(
+      client,
+      INTERVIEW_EVENTS.cameraAnswer,
+      body,
+    );
+  }
 
-    const room = rooms?.get(roomName(sessionId));
-    if (!room || !socketsById) return [];
+  /**
+   * ICE candidate exchange.
+   *
+   * ICE candidates are exchanged in both directions.
+   */
+  @SubscribeMessage(INTERVIEW_EVENTS.cameraIceCandidate)
+  async cameraIceCandidate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    body: {
+      sessionId?: string;
+      targetUserId?: string;
+      candidate?: unknown;
+    },
+  ) {
+    return this.forwardCameraSignal(
+      client,
+      INTERVIEW_EVENTS.cameraIceCandidate,
+      body,
+    );
+  }
 
-    const participants: InterviewParticipant[] = [];
-    for (const socketId of room) {
-      const socket = socketsById.get(socketId);
-      const identity = socket && sockets.get(socket);
-      if (!identity) continue;
-      // One entry per person, not per tab.
-      if (participants.some((item) => item.userId === identity.userId)) continue;
-      participants.push({ userId: identity.userId, name: identity.name, role: identity.role });
+  /**
+   * Camera enabled / disabled state.
+   *
+   * This is NOT the video stream.
+   *
+   * It only tells the other participant whether the camera is currently
+   * enabled.
+   */
+  @SubscribeMessage(INTERVIEW_EVENTS.cameraState)
+  async cameraState(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    body: {
+      sessionId?: string;
+      state?: "enabled" | "disabled";
+    },
+  ) {
+    await authInFlight.get(client);
+
+    const identity = sockets.get(client);
+
+    const sessionId = body?.sessionId;
+
+    if (
+      !identity ||
+      !sessionId ||
+      !identity.rooms.has(sessionId)
+    ) {
+      return {
+        ok: false,
+        message: "Not connected to this interview session.",
+      };
     }
+
+    /**
+     * Broadcast camera state to everyone in the session.
+     */
+    this.server
+      .to(roomName(sessionId))
+      .emit(INTERVIEW_EVENTS.cameraState, {
+        sessionId,
+        userId: identity.userId,
+        state:
+          body.state === "enabled"
+            ? "enabled"
+            : "disabled",
+      });
+
+    return {
+      ok: true,
+    };
+  }
+
+  /**
+   * Forward WebRTC signaling data to one specific participant.
+   *
+   * IMPORTANT:
+   *
+   * The backend never receives or stores the actual camera stream.
+   *
+   * It only forwards:
+   *
+   *   offer
+   *   answer
+   *   ICE candidate
+   */
+  private async forwardCameraSignal(
+    client: Socket,
+    event: string,
+    body: {
+      sessionId?: string;
+      targetUserId?: string;
+      [key: string]: unknown;
+    },
+  ) {
+    await authInFlight.get(client);
+
+    const identity = sockets.get(client);
+
+    const sessionId = body?.sessionId;
+
+    const targetUserId = body?.targetUserId;
+
+    // ------------------------------------------------------------
+    // Validate sender
+    // ------------------------------------------------------------
+
+    if (
+      !identity ||
+      !sessionId ||
+      !identity.rooms.has(sessionId)
+    ) {
+      return {
+        ok: false,
+        message:
+          "Not connected to this interview session.",
+      };
+    }
+
+    // ------------------------------------------------------------
+    // Validate target
+    // ------------------------------------------------------------
+
+    if (
+      !targetUserId ||
+      targetUserId === identity.userId
+    ) {
+      return {
+        ok: false,
+        message:
+          "A valid target participant is required.",
+      };
+    }
+
+    // ------------------------------------------------------------
+    // Find session room
+    // ------------------------------------------------------------
+
+    const room =
+      this.server.sockets.adapter.rooms.get(
+        roomName(sessionId),
+      );
+
+    if (!room) {
+      return {
+        ok: false,
+        message:
+          "Interview session is not active.",
+      };
+    }
+
+    // ------------------------------------------------------------
+    // Find target socket
+    // ------------------------------------------------------------
+
+    for (const socketId of room) {
+      const targetSocket =
+        this.server.sockets.sockets.get(socketId);
+
+      if (!targetSocket) continue;
+
+      const targetIdentity =
+        sockets.get(targetSocket);
+
+      if (
+        !targetIdentity ||
+        targetIdentity.userId !== targetUserId
+      ) {
+        continue;
+      }
+
+      // Offers must start at the candidate and answers must return from an
+      // interviewer. ICE candidates are valid in both directions. This keeps a
+      // participant from using a signaling event to impersonate the other side.
+      const expectedRoles = event === INTERVIEW_EVENTS.cameraOffer
+        ? { sender: "candidate", target: "interviewer" }
+        : event === INTERVIEW_EVENTS.cameraAnswer
+          ? { sender: "interviewer", target: "candidate" }
+          : null;
+      if (
+        expectedRoles &&
+        (identity.role !== expectedRoles.sender || targetIdentity.role !== expectedRoles.target)
+      ) {
+        return { ok: false, message: "Camera signaling role is not allowed." };
+      }
+
+      // ----------------------------------------------------------
+      // Forward signaling message
+      // ----------------------------------------------------------
+
+      targetSocket.emit(event, {
+        ...body,
+
+        sessionId,
+
+        /**
+         * Receiver can identify who sent the message.
+         */
+        fromUserId: identity.userId,
+      });
+
+      return {
+        ok: true,
+      };
+    }
+
+    return {
+      ok: false,
+      message:
+        "Target participant is not connected.",
+    };
+  }
+
+  // ==============================================================
+  // ping
+  // ==============================================================
+
+  /**
+   * Lightweight liveness probe so clients can measure round-trip latency.
+   */
+  @SubscribeMessage(INTERVIEW_EVENTS.ping)
+  ping(
+    @MessageBody()
+    body: {
+      sentAt?: number;
+    },
+  ) {
+    return {
+      sentAt: body?.sentAt ?? null,
+      serverTime: Date.now(),
+    };
+  }
+
+  // ==============================================================
+  // server-side API
+  // ==============================================================
+
+  /**
+   * Called by services after a successful DB write.
+   */
+  emitToSession(
+    sessionId: string,
+    event: string,
+    payload: unknown,
+  ) {
+    if (!this.server) return;
+
+    this.counters.eventsEmitted += 1;
+
+    this.server
+      .to(roomName(sessionId))
+      .emit(event, payload);
+  }
+
+  // ==============================================================
+  // realtime stats
+  // ==============================================================
+
+  /**
+   * Live transport stats for the System Activity dashboard.
+   */
+  getRealtimeStats() {
+    const container =
+      this.server as unknown as Record<
+        string,
+        unknown
+      >;
+
+    const nested =
+      container.sockets as
+        | Record<string, unknown>
+        | undefined;
+
+    const rooms =
+      (
+        container.adapter as
+          | {
+              rooms?: Map<string, Set<string>>;
+            }
+          | undefined
+      )?.rooms ??
+      (
+        nested?.adapter as
+          | {
+              rooms?: Map<string, Set<string>>;
+            }
+          | undefined
+      )?.rooms;
+
+    const socketsById = (
+      nested instanceof Map
+        ? nested
+        : (nested?.sockets as
+            | Map<string, unknown>
+            | undefined)
+    ) as Map<string, unknown> | undefined;
+
+    /**
+     * Socket.IO also creates a room per socket ID.
+     *
+     * Only session:* rooms count as interview rooms.
+     */
+    const sessionRooms = rooms
+      ? [...rooms.keys()].filter((key) =>
+          key.startsWith("session:"),
+        )
+      : [];
+
+    return {
+      connectedSockets:
+        socketsById?.size ?? 0,
+
+      activeSessionRooms:
+        sessionRooms.length,
+
+      ...this.counters,
+
+      uptimeSeconds: Math.round(
+        (Date.now() - this.startedAt) /
+          1000,
+      ),
+    };
+  }
+
+  // ==============================================================
+  // presence
+  // ==============================================================
+
+  async broadcastPresence(sessionId: string) {
+    if (!this.server) return;
+
+    const participants =
+      await this.participantsIn(sessionId);
+
+    this.server
+      .to(roomName(sessionId))
+      .emit(
+        INTERVIEW_EVENTS.presenceUpdated,
+        {
+          sessionId,
+          participants,
+        },
+      );
+  }
+
+  private async participantsIn(
+    sessionId: string,
+  ): Promise<InterviewParticipant[]> {
+    /**
+     * @WebSocketServer() on a namespaced gateway yields the Namespace,
+     * whose `.sockets` is a Map<id, Socket> and whose rooms live on
+     * `.adapter`.
+     *
+     * Resolve both shapes so this works for a Namespace or root Server.
+     */
+    const container =
+      this.server as unknown as Record<
+        string,
+        unknown
+      >;
+
+    const nested =
+      container.sockets as
+        | Record<string, unknown>
+        | undefined;
+
+    const rooms =
+      (
+        container.adapter as
+          | {
+              rooms?: Map<string, Set<string>>;
+            }
+          | undefined
+      )?.rooms ??
+      (
+        nested?.adapter as
+          | {
+              rooms?: Map<string, Set<string>>;
+            }
+          | undefined
+      )?.rooms;
+
+    const socketsById = (
+      nested instanceof Map
+        ? nested
+        : (nested?.sockets as
+            | Map<string, Socket>
+            | undefined)
+    ) as Map<string, Socket> | undefined;
+
+    const room = rooms?.get(
+      roomName(sessionId),
+    );
+
+    if (!room || !socketsById) {
+      return [];
+    }
+
+    const participants: InterviewParticipant[] =
+      [];
+
+    for (const socketId of room) {
+      const socket =
+        socketsById.get(socketId);
+
+      const identity =
+        socket && sockets.get(socket);
+
+      if (!identity) continue;
+
+      /**
+       * One participant per person, not per browser tab.
+       */
+      if (
+        participants.some(
+          (item) =>
+            item.userId === identity.userId,
+        )
+      ) {
+        continue;
+      }
+
+      participants.push({
+        userId: identity.userId,
+        name: identity.name,
+        role: identity.role,
+      });
+    }
+
     return participants;
   }
 
-  // ------------------------------------------------------------- internals
+  // ==============================================================
+  // authorization
+  // ==============================================================
 
-  private async resolveAuthorizedSession(identity: SocketIdentity, body: { sessionId?: string; accessCode?: string }) {
+  private async resolveAuthorizedSession(
+    identity: SocketIdentity,
+    body: {
+      sessionId?: string;
+      accessCode?: string;
+    },
+  ) {
+    // ------------------------------------------------------------
+    // Candidate
+    // ------------------------------------------------------------
+
     if (identity.role === "candidate") {
-      // Candidates may only ever enter their own session.
-      const session = body.accessCode ? await this.findSessionByAccessCode(body.accessCode) : null;
-      if (!session || session.candidateId !== identity.userId) return null;
+      /**
+       * Candidate may only ever enter their own session.
+       */
+      const session = body.accessCode
+        ? await this.findSessionByAccessCode(
+            body.accessCode,
+          )
+        : null;
+
+      if (
+        !session ||
+        session.candidateId !==
+          identity.userId
+      ) {
+        return null;
+      }
+
       return session;
     }
 
+    // ------------------------------------------------------------
+    // Interviewer / staff
+    // ------------------------------------------------------------
+
     const sessionId = body.sessionId;
+
     if (!sessionId) return null;
-    const user = await this.prisma.user.findUnique({
-      where: { id: identity.userId },
-      select: { role: true, organizationId: true },
-    });
+
+    const user =
+      await this.prisma.user.findUnique({
+        where: {
+          id: identity.userId,
+        },
+
+        select: {
+          role: true,
+          organizationId: true,
+        },
+      });
+
     if (!user) return null;
-    const session = await this.prisma.interviewSession.findUnique({
-      where: { id: sessionId },
-      select: { id: true, organizationId: true, candidateId: true, candidate: { select: { name: true } } },
-    });
+
+    const session =
+      await this.prisma.interviewSession.findUnique(
+        {
+          where: {
+            id: sessionId,
+          },
+
+          select: {
+            id: true,
+            organizationId: true,
+            candidateId: true,
+
+            candidate: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        },
+      );
+
     if (!session) return null;
-    // Admins are platform operators; everyone else is scoped to their workspace.
-    if (user.role !== "ADMIN" && session.organizationId !== user.organizationId) return null;
+
+    /**
+     * Admins are platform operators.
+     *
+     * Everyone else is scoped to their organization.
+     */
+    if (
+      user.role !== "ADMIN" &&
+      session.organizationId !==
+        user.organizationId
+    ) {
+      return null;
+    }
+
     return session;
   }
 
-  private async findSessionByAccessCode(accessCode: string) {
-    const normalized = String(accessCode).trim().toUpperCase();
-    if (!normalized) return null;
-    return this.prisma.interviewSession.findFirst({
-      where: { accessCode: normalized },
-      select: { id: true, organizationId: true, candidateId: true, candidate: { select: { name: true } } },
-    });
-  }
+  // ==============================================================
+  // candidate session lookup
+  // ==============================================================
 
-  private async buildSnapshot(sessionId: string): Promise<SessionSnapshot> {
-    const [session, followUps, participants] = await Promise.all([
-      this.prisma.interviewSession.findUnique({
-        where: { id: sessionId },
-        select: { id: true, status: true, startedAt: true, completedAt: true, expiresAt: true },
-      }),
-      this.prisma.interviewerFollowUp.findMany({
-        where: { sessionId },
-        orderBy: { sequence: "asc" },
-        take: 200,
+  private async findSessionByAccessCode(
+    accessCode: string,
+  ) {
+    const normalized = String(
+      accessCode,
+    )
+      .trim()
+      .toUpperCase();
+
+    if (!normalized) return null;
+
+    return this.prisma.interviewSession.findFirst(
+      {
+        where: {
+          accessCode: normalized,
+        },
+
         select: {
           id: true,
-          questionText: true,
-          answerText: true,
-          required: true,
-          sequence: true,
-          status: true,
-          askedBy: { select: { name: true } },
+          organizationId: true,
+          candidateId: true,
+
+          candidate: {
+            select: {
+              name: true,
+            },
+          },
         },
-      }),
+      },
+    );
+  }
+
+  // ==============================================================
+  // session snapshot
+  // ==============================================================
+
+  private async buildSnapshot(
+    sessionId: string,
+  ): Promise<SessionSnapshot> {
+    const [
+      session,
+      followUps,
+      participants,
+    ] = await Promise.all([
+      this.prisma.interviewSession.findUnique(
+        {
+          where: {
+            id: sessionId,
+          },
+
+          select: {
+            id: true,
+            status: true,
+            startedAt: true,
+            completedAt: true,
+            expiresAt: true,
+          },
+        },
+      ),
+
+      this.prisma.interviewerFollowUp.findMany(
+        {
+          where: {
+            sessionId,
+          },
+
+          orderBy: {
+            sequence: "asc",
+          },
+
+          take: 200,
+
+          select: {
+            id: true,
+            questionText: true,
+            answerText: true,
+            required: true,
+            sequence: true,
+            status: true,
+
+            askedBy: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        },
+      ),
+
       this.participantsIn(sessionId),
     ]);
 
     return {
       sessionId,
-      // Lowercased on the way out: the raw Prisma enum would be the only
-      // uppercase status a client ever sees, and screens compare it against the
-      // lowercase status the REST DTOs return.
-      status: session ? (session.status.toLowerCase() as SessionStatus) : "not_started",
-      startedAt: session?.startedAt?.toISOString(),
-      completedAt: session?.completedAt?.toISOString(),
+
+      /**
+       * Lowercase status so REST and WebSocket clients use the same format.
+       */
+      status: session
+        ? (session.status.toLowerCase() as SessionStatus)
+        : "not_started",
+
+      startedAt:
+        session?.startedAt?.toISOString(),
+
+      completedAt:
+        session?.completedAt?.toISOString(),
+
       participants,
-      followUps: followUps.map((followUp) => ({
-        id: followUp.id,
-        questionText: followUp.questionText,
-        answerText: followUp.answerText ?? undefined,
-        required: followUp.required,
-        sequence: followUp.sequence,
-        status: followUp.status.toLowerCase() as "sent" | "answered" | "cancelled",
-        askedBy: { name: followUp.askedBy?.name ?? "Interviewer" },
-      })),
+
+      followUps: followUps.map(
+        (followUp) => ({
+          id: followUp.id,
+
+          questionText:
+            followUp.questionText,
+
+          answerText:
+            followUp.answerText ??
+            undefined,
+
+          required:
+            followUp.required,
+
+          sequence:
+            followUp.sequence,
+
+          status:
+            followUp.status.toLowerCase() as
+              | "sent"
+              | "answered"
+              | "cancelled",
+
+          askedBy: {
+            name:
+              followUp.askedBy?.name ??
+              "Interviewer",
+          },
+        }),
+      ),
+
       serverTime: Date.now(),
     };
   }
