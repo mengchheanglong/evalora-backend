@@ -51,12 +51,31 @@ export interface InterviewEventPublisher {
   emitToSession(sessionId: string, event: string, payload: unknown): void;
 }
 
+/**
+ * Server-authored integrity decision. Only the backend writes these values;
+ * the candidate browser reports a signal and receives this back.
+ */
+export interface IntegrityUpdatedEvent {
+  sessionId: string;
+  warningCount: number;
+  warningLimit: number;
+  status: SessionStatus;
+  reason: string;
+  /** The latest stored event; always present on a counted decision. */
+  event?: unknown;
+}
+
 /** Single source of truth for event names on both sides of the wire. */
 export const INTERVIEW_EVENTS = {
   // client -> server
   joinSession: "session.join",
   leaveSession: "session.leave",
   ping: "session.ping",
+  // WebRTC camera signaling
+  cameraOffer: "camera.offer",
+  cameraAnswer: "camera.answer",
+  cameraIceCandidate: "camera.ice-candidate",
+  cameraState: "camera.state",
   // server -> client
   presenceUpdated: "presence.updated",
   sessionUpdated: "session.updated",

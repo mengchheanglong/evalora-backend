@@ -180,10 +180,26 @@ The backend derives `createdById` and organization ownership from the JWT. A tem
 | PUT | `/sessions/:id/start` | Workspace | Start a not-started session; idempotent while in progress. |
 | PUT | `/sessions/:id/complete` | Workspace | Complete a session and queue report generation. |
 | DELETE | `/sessions/:id` | Workspace | Permanently delete a scoped session and its cascaded responses, submissions, evaluations, report, and notes. |
+| GET | `/sessions/:id/integrity-events` | Workspace | Official integrity summary (warning count, warning limit, status) plus the event timeline for one session. |
 | GET | `/sessions/access/:accessCode` | Candidate link | Read the sanitized assigned assessment while access is open. |
 | PUT | `/sessions/access/:accessCode/start` | Candidate link | Start the assigned assessment. |
 | PUT | `/sessions/access/:accessCode/complete` | Candidate link | Complete the assessment and immediately return `reportStatus: "pending"`. |
 | PUT | `/sessions/access/:accessCode/timeout` | Candidate link | Mark an in-progress timed assessment `expired` (shown as "Withdrawn / Rejected") once its time limit has elapsed. Server re-checks elapsed time; idempotent for finished sessions. |
+| POST | `/sessions/access/:accessCode/integrity-events` | Candidate link | Report a browser-detected integrity signal (visibility change, blur, page hide, exit attempt). The backend deduplicates by `sessionId + clientEventId`, decides `counted` from the event type, and expires the session once `warningCount >= warningLimit` (default limit 1). |
+
+Candidate integrity-event request (the body ONLY accepts these fields; `warningCount`, `status`, or any enforcement value is rejected):
+
+```json
+{
+  "clientEventId": "c66e6b0a-1111-4222-8333-444455556666",
+  "type": "visibilitychange",
+  "detectedAt": "2026-07-06T13:05:00.000Z",
+  "returnedAt": "2026-07-06T13:05:30.000Z",
+  "durationMs": 30000
+}
+```
+
+Response carries only official values (`counted`, `warningCount`, `warningLimit`, `status`, server-authored `reason`, and the stored `event`); the browser never supplies a count or a final action. `visibilitychange` is the only counted type — `blur`/`pagehide`/`beforeunload` are stored as supporting evidence and never increment the warning. Completed/expired sessions reject new events, and a duplicate `clientEventId` returns the stored event without counting again.
 
 Session creation request:
 
