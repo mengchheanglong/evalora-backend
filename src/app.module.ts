@@ -37,6 +37,7 @@ import { createEmailServiceFromEnv, EmailService } from "./modules/email/email.s
 import { PrismaService } from "./prisma/prisma.service";
 import { PrismaModule } from "./prisma/prisma.module";
 
+
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, RealtimeModule, CodeModule],
   controllers: [
