@@ -621,10 +621,12 @@ export class InterviewGateway
     // Find session room
     // ------------------------------------------------------------
 
-    const room =
-      this.server.sockets.adapter.rooms.get(
-        roomName(sessionId),
-      );
+    const { rooms, socketsById } =
+      this.resolveSocketInfra();
+
+    const room = rooms?.get(
+      roomName(sessionId),
+    );
 
     if (!room) {
       return {
@@ -635,12 +637,21 @@ export class InterviewGateway
     }
 
     // ------------------------------------------------------------
-    // Find target socket
+    // Find target socket(s)
     // ------------------------------------------------------------
+
+    /**
+     * A user can legitimately hold more than one socket (e.g. the interview
+     * room mounts one for presence and one for signaling). Forward to EVERY
+     * socket belonging to the target user instead of only the first: picking
+     * one at random meant an offer could land on a socket with no camera
+     * handler and be silently dropped, making the connection flaky.
+     */
+    let forwarded = 0;
 
     for (const socketId of room) {
       const targetSocket =
-        this.server.sockets.sockets.get(socketId);
+        socketsById?.get(socketId);
 
       if (!targetSocket) continue;
 
@@ -684,15 +695,19 @@ export class InterviewGateway
         fromUserId: identity.userId,
       });
 
+      forwarded += 1;
+    }
+
+    if (forwarded === 0) {
       return {
-        ok: true,
+        ok: false,
+        message:
+          "Target participant is not connected.",
       };
     }
 
     return {
-      ok: false,
-      message:
-        "Target participant is not connected.",
+      ok: true,
     };
   }
 
@@ -735,6 +750,60 @@ export class InterviewGateway
     this.server
       .to(roomName(sessionId))
       .emit(event, payload);
+  }
+
+  /**
+   * Resolve the Socket.IO room membership table and the socket id -> Socket
+   * map regardless of which shape @WebSocketServer() handed us:
+   *
+   *   - the root Server, whose `.sockets` is the default Namespace (rooms live
+   *     on `.sockets.adapter.rooms`)
+   *   - the namespaced Namespace, whose `.sockets` is a Map<id, Socket> and
+   *     whose rooms live on `.adapter`
+   *
+   * signaling forwarding must find the target socket the same way presence
+   * does, or offers/answers/ICE candidates are silently dropped.
+   */
+  private resolveSocketInfra(): {
+    rooms?: Map<string, Set<string>>;
+    socketsById?: Map<string, Socket>;
+  } {
+    const container =
+      this.server as unknown as Record<
+        string,
+        unknown
+      >;
+
+    const nested =
+      container.sockets as
+        | Record<string, unknown>
+        | undefined;
+
+    const rooms =
+      (
+        container.adapter as
+          | {
+              rooms?: Map<string, Set<string>>;
+            }
+          | undefined
+      )?.rooms ??
+      (
+        nested?.adapter as
+          | {
+              rooms?: Map<string, Set<string>>;
+            }
+          | undefined
+      )?.rooms;
+
+    const socketsById = (
+      nested instanceof Map
+        ? nested
+        : (nested?.sockets as
+            | Map<string, Socket>
+            | undefined)
+    ) as Map<string, Socket> | undefined;
+
+    return { rooms, socketsById };
   }
 
   // ==============================================================
