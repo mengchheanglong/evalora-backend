@@ -127,3 +127,29 @@ export interface GeneratedTemplateDraftResult {
   draft: TemplateDraft;
   provider: TemplateDraftProvider;
 }
+
+/** One prior turn of the refinement conversation, replayed for context only. */
+export interface TemplateDraftChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/** What the refiner is asked to revise, and the instruction to apply. */
+export interface TemplateDraftRefinementInput {
+  currentDraft: TemplateDraft;
+  message: string;
+  history?: TemplateDraftChatTurn[];
+  /** The uploaded text this draft was generated from, when there was one, so
+   *  requests like "summarize the document" can go back to the source. */
+  sourceText?: string;
+}
+
+/** The model's raw refinement, before validation. Like GeneratedTemplateDraft,
+ *  nothing here is trusted until `normalizeDraft` has run over `draft`. */
+export interface GeneratedTemplateDraftRefinement {
+  /** One or two sentences for the reviewer: what changed, or why nothing did. */
+  reply?: string;
+  /** False when the model deliberately left the draft as it was. */
+  changed?: boolean;
+  draft?: GeneratedTemplateDraft;
+}

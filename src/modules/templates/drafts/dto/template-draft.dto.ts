@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -13,6 +14,8 @@ import {
   ValidateNested,
 } from "class-validator";
 import {
+  MAX_CHAT_HISTORY_TURNS,
+  MAX_CHAT_MESSAGE_LENGTH,
   MAX_DESCRIPTION_LENGTH,
   MAX_IDEA_LENGTH,
   MAX_MODULES,
@@ -180,4 +183,28 @@ export class ConfirmTemplateDraftDto {
   @IsString()
   @MaxLength(MAX_TITLE_LENGTH)
   title?: string;
+}
+
+export class TemplateDraftChatTurnDto {
+  @IsIn(["user", "assistant"])
+  role!: "user" | "assistant";
+
+  @IsString()
+  @MaxLength(MAX_CHAT_MESSAGE_LENGTH)
+  content!: string;
+}
+
+export class ChatTemplateDraftDto {
+  @IsString()
+  @MaxLength(MAX_CHAT_MESSAGE_LENGTH)
+  message!: string;
+
+  /** Prior turns replayed for context. The client owns the transcript; the
+   *  server stores none of it, so a refresh simply starts a fresh conversation. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_CHAT_HISTORY_TURNS)
+  @ValidateNested({ each: true })
+  @Type(() => TemplateDraftChatTurnDto)
+  history?: TemplateDraftChatTurnDto[];
 }

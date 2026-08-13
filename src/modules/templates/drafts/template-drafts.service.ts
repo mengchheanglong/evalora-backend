@@ -11,9 +11,10 @@ import {
 import type { TemplateModuleInput, TemplateQuestionInput, TemplatesService } from "../templates.service";
 import { normalizeDraft } from "./draft-normalizer";
 import { buildFallbackProposal } from "./fallback-draft";
-import { MAX_IDEA_LENGTH } from "./draft.constants";
+import { MAX_CHAT_HISTORY_TURNS, MAX_CHAT_MESSAGE_LENGTH, MAX_CHAT_REPLY_LENGTH, MAX_IDEA_LENGTH } from "./draft.constants";
 import type {
   TemplateDraft,
+  TemplateDraftChatTurn,
   TemplateDraftDto,
   TemplateDraftGenerationInput,
   TemplateDraftProvider,
@@ -64,11 +65,24 @@ export interface ConfirmDraftInput {
   title?: string;
 }
 
+export interface RefineDraftInput {
+  message?: string;
+  /** Prior turns the client replays for context; the server stores none of them. */
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
+}
+
+export interface DraftChatResultDto {
+  /** False when the assistant answered without changing the draft. */
+  applied: boolean;
+  reply: string;
+  draft: TemplateDraftDto;
+}
+
 @Injectable()
 export class TemplateDraftsService {
   constructor(
     private readonly prisma: DraftPrismaClient,
-    private readonly aiService: Pick<AiService, "generateTemplateDraft">,
+    private readonly aiService: Pick<AiService, "generateTemplateDraft" | "refineTemplateDraft">,
     private readonly templatesService: Pick<TemplatesService, "createTemplate">,
   ) {}
 
@@ -116,6 +130,71 @@ export class TemplateDraftsService {
     });
 
     return toDraftDto(row);
+  }
+
+  /**
+   * Apply one chat instruction to the stored draft.
+   *
+   * The revision goes through the same normalizer as generation and hand edits,
+   * and only the stored draft ever changes — a chat message cannot publish
+   * anything, so confirmDraft stays the single gate to a real template. Failure
+   * modes answer conversationally (applied: false plus the unchanged draft)
+   * rather than with an error, because "the assistant couldn't do that" is a
+   * normal chat outcome, not an exceptional one.
+   */
+  async refineDraft(id: string, input: RefineDraftInput, access?: AccessContext): Promise<DraftChatResultDto> {
+    assertCanWriteOrganizationResource(access);
+    const existing = await this.requireDraft(id, access);
+    assertEditable(existing);
+
+    const message = input.message?.trim().slice(0, MAX_CHAT_MESSAGE_LENGTH);
+    if (!message) throw new BadRequestException("Describe the change you would like the assistant to make.");
+
+    const current = asDraft(existing.draft);
+    const refinement = await this.aiService.refineTemplateDraft({
+      currentDraft: current,
+      message,
+      history: sanitizeChatHistory(input.history),
+      // The original upload, so "summarize the document" can go back to the
+      // source instead of working from whatever survived into the draft.
+      sourceText: existing.sourceText ?? undefined,
+    });
+
+    if (refinement.provider === "fallback") {
+      return {
+        applied: false,
+        reply: "The AI assistant is unavailable right now, so nothing was changed. Try again in a moment, or edit the draft directly.",
+        draft: toDraftDto(existing),
+      };
+    }
+
+    if (!refinement.proposal || refinement.changed === false) {
+      return {
+        applied: false,
+        reply:
+          clampReply(refinement.reply) ??
+          "I didn't change the draft for that request. Tell me what you would like different about this assessment.",
+        draft: toDraftDto(existing),
+      };
+    }
+
+    const draft = normalizeDraft(refinement.proposal, { roleType: current.roleType });
+    if (draft.modules.length === 0) {
+      return {
+        applied: false,
+        reply: "That change would leave the assessment without any modules, so nothing was changed. Try describing it differently.",
+        draft: toDraftDto(existing),
+      };
+    }
+
+    const update = requireMethod(this.prisma.assessmentTemplateDraft.update, "assessmentTemplateDraft.update");
+    const row = await update({ where: { id: existing.id }, data: { draft: draft as unknown as JsonValue } });
+
+    return {
+      applied: true,
+      reply: clampReply(refinement.reply) ?? "Done — I've updated the draft.",
+      draft: toDraftDto(row),
+    };
   }
 
   async listDrafts(access?: AccessContext): Promise<TemplateDraftSummaryDto[]> {
@@ -247,6 +326,24 @@ function assertEditable(row: DraftRow): void {
   if (row.status === "DISCARDED") {
     throw new ConflictException("This draft was discarded and can no longer be edited.");
   }
+}
+
+/** Drops malformed turns rather than rejecting: history is context, not content. */
+function sanitizeChatHistory(history: RefineDraftInput["history"]): TemplateDraftChatTurn[] | undefined {
+  if (!history?.length) return undefined;
+  const turns = history
+    .filter(
+      (turn): turn is { role: "user" | "assistant"; content: string } =>
+        (turn?.role === "user" || turn?.role === "assistant") && typeof turn?.content === "string" && Boolean(turn.content.trim()),
+    )
+    .map((turn) => ({ role: turn.role, content: turn.content.trim().slice(0, MAX_CHAT_MESSAGE_LENGTH) }));
+  return turns.length ? turns.slice(-MAX_CHAT_HISTORY_TURNS) : undefined;
+}
+
+function clampReply(reply: string | undefined): string | undefined {
+  const trimmed = reply?.trim();
+  if (!trimmed) return undefined;
+  return trimmed.length > MAX_CHAT_REPLY_LENGTH ? `${trimmed.slice(0, MAX_CHAT_REPLY_LENGTH - 1)}…` : trimmed;
 }
 
 function assertUsableDraft(draft: TemplateDraft): void {

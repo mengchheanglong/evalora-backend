@@ -30,7 +30,7 @@ import { CandidateAccessRateLimitGuard } from "./modules/sessions/access-rate-li
 import { TemplatesController } from "./modules/templates/templates.controller";
 import { TemplatesService } from "./modules/templates/templates.service";
 import { DocumentExtractionService } from "./modules/templates/drafts/document-extraction.service";
-import { DraftRateLimitGuard } from "./modules/templates/drafts/draft-rate-limit.guard";
+import { DraftChatRateLimitGuard, DraftRateLimitGuard } from "./modules/templates/drafts/draft-rate-limit.guard";
 import { TemplateDraftsController } from "./modules/templates/drafts/template-drafts.controller";
 import { TemplateDraftsService } from "./modules/templates/drafts/template-drafts.service";
 import { TranscriptController } from "./modules/transcript/transcript.controller";
@@ -70,6 +70,7 @@ import { PrismaModule } from "./prisma/prisma.module";
     CandidateAccessRateLimitGuard,
     CandidateAiService,
     DocumentExtractionService,
+    DraftChatRateLimitGuard,
     DraftRateLimitGuard,
     JwtAuthGuard,
     RolesGuard,

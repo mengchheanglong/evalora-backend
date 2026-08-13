@@ -42,6 +42,16 @@ export const DEFAULT_TIME_LIMIT_MIN = 60;
 /** Free-text idea prompt, when the user types instead of uploading. */
 export const MAX_IDEA_LENGTH = 8_000;
 
+/** One chat instruction sent to the refinement assistant. */
+export const MAX_CHAT_MESSAGE_LENGTH = 2_000;
+
+/** Prior conversation turns replayed to the model for context. The client keeps
+ *  the transcript; the server stores none of it. */
+export const MAX_CHAT_HISTORY_TURNS = 12;
+
+/** The assistant's conversational reply, separate from the draft JSON. */
+export const MAX_CHAT_REPLY_LENGTH = 1_200;
+
 /** Upload ceiling enforced by multer before a single byte is parsed. */
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 

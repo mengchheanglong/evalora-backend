@@ -20,8 +20,9 @@ import { toAccessContext } from "../../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../../auth/auth.guard";
 import { MAX_UPLOAD_BYTES } from "./draft.constants";
 import { DocumentExtractionService, type UploadedDocument } from "./document-extraction.service";
-import { DraftRateLimitGuard } from "./draft-rate-limit.guard";
+import { DraftChatRateLimitGuard, DraftRateLimitGuard } from "./draft-rate-limit.guard";
 import {
+  ChatTemplateDraftDto,
   ConfirmTemplateDraftDto,
   GenerateTemplateDraftDto,
   UpdateTemplateDraftDto,
@@ -110,6 +111,26 @@ export class TemplateDraftsController {
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new BadRequestException(error instanceof Error ? error.message : "Draft update failed.");
+    }
+  }
+
+  /**
+   * Conversational refinement: apply one chat instruction to the stored draft.
+   * Still draft-only — whatever the assistant does here, nothing reaches a real
+   * template except through `confirm` below.
+   */
+  @Post(":id/chat")
+  @UseGuards(DraftChatRateLimitGuard)
+  async chat(
+    @Param("id") id: string,
+    @Body(new ValidateDto(ChatTemplateDraftDto)) body: ChatTemplateDraftDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    try {
+      return await this.draftsService.refineDraft(id, body, toAccessContext(request.user));
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new BadRequestException(error instanceof Error ? error.message : "The assistant could not process that request.");
     }
   }
 

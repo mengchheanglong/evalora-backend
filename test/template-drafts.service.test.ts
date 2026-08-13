@@ -67,6 +67,25 @@ function createAiStub(next: typeof proposal | "unavailable") {
       next === "unavailable"
         ? { provider: "fallback" as const }
         : { proposal: next as any, provider: "deepseek" as const },
+    refineTemplateDraft: async () => ({ provider: "fallback" as const }),
+  };
+}
+
+/** Refinement stub that records what the model was shown. */
+function createRefineStub(result: {
+  proposal?: any;
+  reply?: string;
+  changed?: boolean;
+  provider: "deepseek" | "fallback";
+}) {
+  const calls: any[] = [];
+  return {
+    calls,
+    generateTemplateDraft: async () => ({ proposal: proposal as any, provider: "deepseek" as const }),
+    refineTemplateDraft: async (input: any) => {
+      calls.push(input);
+      return result;
+    },
   };
 }
 
@@ -273,6 +292,88 @@ test("listing returns summaries for the caller's workspace", async () => {
   assert.equal(summary.moduleCount, 2);
   assert.equal(summary.questionCount, 2);
   assert.equal(summary.status, "draft");
+});
+
+test("a chat instruction revises the stored draft but never touches the original proposal", async () => {
+  const revised = {
+    ...proposal,
+    title: "Backend Engineer Assessment v2",
+    modules: [
+      ...proposal.modules,
+      {
+        type: "problem_solving",
+        title: "Problem Solving",
+        description: "Debug a failing rollout",
+        weightRationale: "Requested by the reviewer.",
+        weightSignals: { roleImportance: 4, riskIfWeak: 4, evidenceVolume: 3, difficulty: 3, essential: false },
+        questions: [{ questionText: "A deploy doubled p99 latency. Walk through your next hour.", questionType: "scenario", rubric: ["method"] }],
+      },
+    ],
+  };
+  const ai = createRefineStub({ proposal: revised, reply: "Added a problem solving module.", provider: "deepseek" });
+  const { service, templates } = createService({ ai });
+  const draft = await service.generateDraft({ idea: "Backend engineer" }, ownerAccess);
+
+  const result = await service.refineDraft(
+    draft.id,
+    { message: "Add a problem solving module.", history: [{ role: "assistant", content: "Here is a first draft." }] },
+    ownerAccess,
+  );
+
+  assert.equal(result.applied, true);
+  assert.equal(result.reply, "Added a problem solving module.");
+  assert.equal(result.draft.draft.modules.length, 3);
+  assert.equal(result.draft.draft.modules.reduce((sum, module) => sum + module.weight, 0), TOTAL_WEIGHT);
+  assert.equal(result.draft.aiProposal.modules.length, 2, "the original proposal must survive chat revisions");
+  assert.equal(templates.created.length, 0, "chat must never create a template");
+
+  // The model saw the current draft and the replayed history.
+  assert.equal(ai.calls.length, 1);
+  assert.equal(ai.calls[0].message, "Add a problem solving module.");
+  assert.equal(ai.calls[0].currentDraft.modules.length, 2);
+  assert.equal(ai.calls[0].history.length, 1);
+});
+
+test("a declined or failed chat turn leaves the stored draft untouched", async () => {
+  const declined = createRefineStub({ reply: "That request is not about this assessment.", changed: false, provider: "deepseek" });
+  const { service, prisma } = createService({ ai: declined });
+  const draft = await service.generateDraft({ idea: "Backend engineer" }, ownerAccess);
+  const storedBefore = JSON.stringify(prisma.rows.get(draft.id).draft);
+
+  const refused = await service.refineDraft(draft.id, { message: "Write my performance review." }, ownerAccess);
+  assert.equal(refused.applied, false);
+  assert.equal(refused.reply, "That request is not about this assessment.");
+  assert.equal(JSON.stringify(prisma.rows.get(draft.id).draft), storedBefore);
+
+  const unavailable = createService({ ai: createRefineStub({ provider: "fallback" }) });
+  const fallbackDraft = await unavailable.service.generateDraft({ idea: "Backend engineer" }, ownerAccess);
+  const result = await unavailable.service.refineDraft(fallbackDraft.id, { message: "Add a module." }, ownerAccess);
+  assert.equal(result.applied, false);
+  assert.match(result.reply, /unavailable/i);
+});
+
+test("a chat revision that would empty the assessment is not applied", async () => {
+  const empty = createRefineStub({ proposal: { ...proposal, modules: [] }, reply: "Removed everything.", provider: "deepseek" });
+  const { service, prisma } = createService({ ai: empty });
+  const draft = await service.generateDraft({ idea: "Backend engineer" }, ownerAccess);
+
+  const result = await service.refineDraft(draft.id, { message: "Delete all modules." }, ownerAccess);
+
+  assert.equal(result.applied, false);
+  assert.match(result.reply, /without any modules/i);
+  assert.equal(prisma.rows.get(draft.id).draft.modules.length, 2);
+});
+
+test("chat requires a message and respects draft lifecycle and org scoping", async () => {
+  const ai = createRefineStub({ proposal, provider: "deepseek" });
+  const { service } = createService({ ai });
+  const draft = await service.generateDraft({ idea: "Backend engineer" }, ownerAccess);
+
+  await assert.rejects(() => service.refineDraft(draft.id, { message: "   " }, ownerAccess), /describe the change/i);
+  await assert.rejects(() => service.refineDraft(draft.id, { message: "Add a module." }, otherOrgAccess), /not found or access denied/i);
+
+  await service.confirmDraft(draft.id, {}, ownerAccess);
+  await assert.rejects(() => service.refineDraft(draft.id, { message: "Add a module." }, ownerAccess), /already published/i);
 });
 
 test("a stored draft with corrupted JSON still reads back as a valid draft shape", async () => {

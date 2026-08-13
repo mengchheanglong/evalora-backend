@@ -20,8 +20,9 @@ interface WindowState {
 @Injectable()
 export class DraftRateLimitGuard implements CanActivate {
   private readonly buckets = new Map<string, WindowState>();
-  private readonly windowMs = positiveInt(process.env.DRAFT_RATE_LIMIT_WINDOW_MS, 60 * 60_000);
-  private readonly maxRequests = positiveInt(process.env.DRAFT_RATE_LIMIT_MAX, 10);
+  protected readonly windowMs = positiveInt(process.env.DRAFT_RATE_LIMIT_WINDOW_MS, 60 * 60_000);
+  protected readonly maxRequests = positiveInt(process.env.DRAFT_RATE_LIMIT_MAX, 10);
+  protected readonly limitMessage: string = "You have generated a lot of drafts recently. Please wait a few minutes and try again.";
   private lastSweep = 0;
 
   canActivate(context: ExecutionContext): boolean {
@@ -43,7 +44,7 @@ export class DraftRateLimitGuard implements CanActivate {
         {
           statusCode: HttpStatus.TOO_MANY_REQUESTS,
           error: "Too Many Requests",
-          message: "You have generated a lot of drafts recently. Please wait a few minutes and try again.",
+          message: this.limitMessage,
           retryAfter,
         },
         HttpStatus.TOO_MANY_REQUESTS,
@@ -58,6 +59,19 @@ export class DraftRateLimitGuard implements CanActivate {
     this.lastSweep = now;
     for (const [key, bucket] of this.buckets) if (bucket.resetAt <= now) this.buckets.delete(key);
   }
+}
+
+/**
+ * Chat refinement gets its own bucket and a larger budget: one conversation is
+ * several turns per draft, and sharing the generation window would let a single
+ * chat session lock the user out of generating anything new. A distinct class
+ * means a distinct Nest instance, so the two buckets never mix.
+ */
+@Injectable()
+export class DraftChatRateLimitGuard extends DraftRateLimitGuard {
+  protected override readonly windowMs = positiveInt(process.env.DRAFT_CHAT_RATE_LIMIT_WINDOW_MS, 60 * 60_000);
+  protected override readonly maxRequests = positiveInt(process.env.DRAFT_CHAT_RATE_LIMIT_MAX, 40);
+  protected override readonly limitMessage = "You have sent the assistant a lot of requests recently. Please wait a few minutes and try again.";
 }
 
 function positiveInt(raw: string | undefined, fallback: number): number {
