@@ -32,6 +32,24 @@ When database access is ready, add migration scripts such as:
 pnpm prisma migrate dev --name init
 ```
 
+## Integrity monitoring migration
+
+`prisma/migrations/1786605432509_add_integrity_monitoring/` adds the
+`warning_count` / `warning_limit` columns to `interview_sessions` (defaults
+`0` / `2`) and creates the `integrity_events` table with the
+`(session_id, client_event_id)` unique constraint.
+
+- Fresh database: `pnpm exec prisma migrate deploy` applies it.
+- Existing database that was previously `prisma db push`ed: either keep using
+  `prisma db push` (it will warn about the migrations folder but still sync the
+  schema) or baseline the migration with
+  `pnpm exec prisma migrate resolve --applied 1786605432509_add_integrity_monitoring`
+  before `migrate deploy` so the ALTER is not re-run against already-updated
+  tables.
+
+No migration was applied as part of this change set — apply it when you have
+database access, per your deploy process.
+
 ## Model implementation order
 
 1. `User`, `Organization`.
