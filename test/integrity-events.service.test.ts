@@ -118,6 +118,14 @@ const visibilityEvent = {
   durationMs: 30_000,
 };
 
+const pointerExitEvent = {
+  clientEventId: "5e4d3c2b-9999-4000-8111-222233334444",
+  type: "pointer_exit" as const,
+  detectedAt: "2026-07-06T13:05:00.000Z",
+  returnedAt: "2026-07-06T13:05:20.000Z",
+  durationMs: 20_000,
+};
+
 test("the first valid counted event warns once and keeps the session ACTIVE", async () => {
   const { prisma, events, session } = createFakePrisma();
   const emitted: Array<{ sessionId: string; event: string; payload: any }> = [];
@@ -233,6 +241,80 @@ test("retrying the same clientEventId never counts a second warning", async () =
   assert.equal(events.length, 2);
 });
 
+test("a pointer exit counts as the first strike, warns, and keeps the session ACTIVE", async () => {
+  const { prisma, events, session } = createFakePrisma();
+  const service = createService(prisma);
+
+  const result = await service.recordIntegrityEvent("EV-123456", pointerExitEvent);
+
+  assert.equal(result.counted, true);
+  assert.equal(result.warningCount, 1);
+  assert.equal(result.warningLimit, 2);
+  assert.equal(result.sessionStatus, "in_progress", "the session stays active after the first pointer exit");
+  assert.equal(result.action, "warned");
+  assert.match(result.reason, /Pointer left the assessment window\./);
+  assert.equal(result.event.type, "pointer_exit");
+  assert.equal(result.event.detectedAt, "2026-07-06T13:05:00.000Z");
+  assert.equal(result.event.returnedAt, "2026-07-06T13:05:20.000Z");
+  assert.equal(result.event.durationMs, 20_000);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].counted, true);
+  assert.equal(session().warningCount, 1);
+  assert.equal(session().status, "IN_PROGRESS");
+});
+
+test("a second pointer exit reaches the limit and expires the session", async () => {
+  const { prisma, events, session } = createFakePrisma();
+  const service = createService(prisma);
+
+  const first = await service.recordIntegrityEvent("EV-123456", pointerExitEvent);
+  assert.equal(first.warningCount, 1);
+  assert.equal(first.sessionStatus, "in_progress");
+
+  const second = await service.recordIntegrityEvent("EV-123456", {
+    ...pointerExitEvent,
+    clientEventId: "6f5e4d3c-aaaa-4000-8222-333344445555",
+    detectedAt: "2026-07-06T13:10:00.000Z",
+    returnedAt: "2026-07-06T13:10:15.000Z",
+  });
+
+  assert.equal(second.counted, true);
+  assert.equal(second.warningCount, 2);
+  assert.equal(second.sessionStatus, "expired", "the second pointer exit expires the session server-side");
+  assert.equal(second.action, "terminated");
+  assert.equal(events.length, 2);
+  assert.equal(session().warningCount, 2);
+  assert.equal(session().status, "EXPIRED");
+});
+
+test("retrying the same pointer-exit clientEventId never counts twice", async () => {
+  const { prisma, events, session } = createFakePrisma();
+  const service = createService(prisma);
+
+  const first = await service.recordIntegrityEvent("EV-123456", pointerExitEvent);
+  assert.equal(first.warningCount, 1);
+
+  const retried = await service.recordIntegrityEvent("EV-123456", pointerExitEvent);
+  assert.equal(retried.counted, false);
+  assert.equal(retried.warningCount, 1);
+  assert.equal(retried.action, "duplicate");
+  assert.equal(retried.sessionStatus, "in_progress");
+  assert.equal(events.length, 1, "the pointer-exit duplicate is never stored again");
+  assert.equal(session().warningCount, 1);
+});
+
+test("completed and expired sessions reject pointer_exit events", async () => {
+  for (const status of ["COMPLETED", "EXPIRED"]) {
+    const { prisma } = createFakePrisma(candidateSessionRow({ status }));
+    const service = createService(prisma);
+    await assert.rejects(
+      () => service.recordIntegrityEvent("EV-123456", pointerExitEvent),
+      /no longer available/i,
+      `${status} must reject pointer-exit events`,
+    );
+  }
+});
+
 test("blur and other supporting signals are stored but never counted", async () => {
   const { prisma, events, session } = createFakePrisma();
   const service = createService(prisma);
@@ -302,6 +384,9 @@ test("invalid event types are rejected by the DTO whitelist, which also blocks e
 
   const valid = validate({ ...visibilityEvent });
   assert.equal(valid.length, 0, "a well-formed visibilitychange payload passes");
+
+  const validPointer = validate({ ...pointerExitEvent });
+  assert.equal(validPointer.length, 0, "a well-formed pointer_exit payload passes the allow-list");
 
   const badType = validate({ ...visibilityEvent, type: "keylogger" });
   assert.ok(badType.length > 0, "unknown event types are rejected");
