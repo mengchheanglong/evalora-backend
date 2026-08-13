@@ -5,6 +5,7 @@ import * as jwt from "jsonwebtoken";
 import type { Socket } from "socket.io";
 import { TOKEN_PURPOSES } from "../src/modules/auth/auth.guard";
 import { InterviewGateway, isAllowedRealtimeOrigin } from "../src/modules/realtime/interview.gateway";
+import { INTERVIEW_EVENTS } from "../src/modules/realtime/realtime.types";
 
 // The gateway resolves the signing secret from the environment at handshake time.
 process.env.JWT_SECRET = "gateway-test-secret";
@@ -20,8 +21,12 @@ function fakeSocket(auth: Record<string, unknown>) {
     handshake: { auth },
     disconnected: false,
     errors: [] as string[],
+    joinedRooms: [] as string[],
     emit(_event: string, payload: { message?: string }) {
       socket.errors.push(payload?.message ?? "");
+    },
+    join(room: string) {
+      socket.joinedRooms.push(room);
     },
     disconnect() {
       socket.disconnected = true;
@@ -37,6 +42,87 @@ async function connect(auth: Record<string, unknown>) {
   // Handshake authentication is async; let it settle before asserting.
   await new Promise((resolve) => setTimeout(resolve, 0));
   return socket;
+}
+
+async function connectWith(
+  gateway: InterviewGateway,
+  auth: Record<string, unknown>,
+) {
+  const socket = fakeSocket(auth);
+  gateway.handleConnection(socket as unknown as Socket);
+  // Handshake authentication is async; let it settle before asserting.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  return socket;
+}
+
+/**
+ * Gateway wired to fake prisma + fake Socket.IO server so join/room
+ * authorization can be exercised without a real database or socket.
+ */
+function candidateGateway() {
+  const sessions: Record<
+    string,
+    {
+      id: string;
+      organizationId: string;
+      candidateId: string;
+      candidate: { name: string };
+    }
+  > = {
+    AAA111: {
+      id: "session-a",
+      organizationId: "org-1",
+      candidateId: "candidate-1",
+      candidate: { name: "Alice" },
+    },
+    BBB222: {
+      id: "session-b",
+      organizationId: "org-1",
+      candidateId: "candidate-2",
+      candidate: { name: "Bob" },
+    },
+  };
+
+  const fakePrisma = {
+    interviewSession: {
+      findFirst: async ({
+        where,
+      }: {
+        where: { accessCode: string };
+      }) => sessions[where.accessCode] ?? null,
+      findUnique: async ({
+        where,
+      }: {
+        where: { id: string };
+      }) => {
+        const session = sessions[where.id];
+        return session
+          ? {
+              id: session.id,
+              status: "IN_PROGRESS",
+              startedAt: new Date(),
+              completedAt: null,
+              expiresAt: null,
+            }
+          : null;
+      },
+    },
+    interviewerFollowUp: {
+      findMany: async () => [],
+    },
+  };
+
+  const fakeServer = {
+    to() {
+      return { emit() {} };
+    },
+    sockets: new Map(),
+    adapter: { rooms: new Map() },
+  };
+
+  const gateway = new InterviewGateway(fakePrisma as never);
+  (gateway as unknown as { server: unknown }).server = fakeServer;
+  return gateway;
 }
 
 test("a realtime ticket opens the socket handshake", async () => {
@@ -89,4 +175,69 @@ test("realtime origin policy keeps the LAN demo working", () => {
 
 test("realtime origin policy falls back to any origin when none is configured", () => {
   assert.equal(isAllowedRealtimeOrigin("https://anything.example.com", []), true);
+});
+
+test("integrity.updated is emitted only to the authorized session room", () => {
+  const emitted: Array<{ room: string; event: string }> = [];
+
+  const gateway = new InterviewGateway({} as never);
+  (gateway as unknown as { server: unknown }).server = {
+    to(room: string) {
+      return {
+        emit(event: string) {
+          emitted.push({ room, event });
+        },
+      };
+    },
+  };
+
+  gateway.emitToSession("session-a", INTERVIEW_EVENTS.integrityUpdated, {
+    sessionId: "session-a",
+    warningCount: 2,
+    warningLimit: 2,
+    status: "expired",
+    action: "terminated",
+    reason: "Possible tab switching detected.",
+  });
+
+  // The event goes to session:session-a and nowhere else — no broadcast.
+  assert.equal(emitted.length, 1);
+  assert.equal(emitted[0].room, "session:session-a");
+  assert.equal(emitted[0].event, "integrity.updated");
+});
+
+test("a candidate joins only their own session room via the access code", async () => {
+  const gateway = candidateGateway();
+  const socket = await connectWith(gateway, {
+    accessCode: "AAA111",
+  });
+
+  assert.equal(socket.disconnected, false);
+  assert.deepEqual(socket.errors, []);
+
+  const result = await gateway.joinSession(
+    socket as unknown as Socket,
+    { accessCode: "AAA111" },
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(socket.joinedRooms, ["session:session-a"]);
+});
+
+test("cross-session access is denied: a candidate cannot join another candidate's session", async () => {
+  const gateway = candidateGateway();
+  const socket = await connectWith(gateway, {
+    accessCode: "AAA111",
+  });
+
+  const result = await gateway.joinSession(
+    socket as unknown as Socket,
+    { accessCode: "BBB222" },
+  );
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(socket.joinedRooms, []);
+  // The denial must not kill the socket itself — the candidate keeps their
+  // own session connection.
+  assert.equal(socket.disconnected, false);
 });
