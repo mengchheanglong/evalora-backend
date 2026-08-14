@@ -18,6 +18,7 @@ import type { SessionStatus } from "../../domain/evalora.types";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { ReportsService } from "../reports/reports.service";
+import { LiveKitService } from "../livekit/livekit.service";
 import { CandidateAccessRateLimitGuard } from "./access-rate-limit.guard";
 import { type CreateSessionInput, type ListSessionsFilter, SessionsService } from "./sessions.service";
 
@@ -27,6 +28,7 @@ export class SessionsController {
   constructor(
     @Inject(SessionsService) private readonly sessionsService: SessionsService,
     @Inject(ReportsService) private readonly reportsService: ReportsService,
+    @Inject(LiveKitService) private readonly liveKitService: LiveKitService,
   ) {}
 
   @Post()
@@ -59,6 +61,19 @@ export class SessionsController {
     const session = await this.sessionsService.getSession(id, toAccessContext(request.user));
     if (!session) throw new NotFoundException("Session not found.");
     return session;
+  }
+
+  @Post(":id/livekit-token")
+  @Roles("admin", "organization", "interviewer")
+  async liveKitToken(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
+    const session = await this.sessionsService.getSession(id, toAccessContext(request.user));
+    if (!session || !request.user) throw new NotFoundException("Session not found.");
+    return this.liveKitService.createParticipantToken({
+      sessionId: session.id,
+      identity: `interviewer:${request.user.id}`,
+      name: request.user.email,
+      role: "interviewer",
+    });
   }
 
   @Put(":id/start")
@@ -94,11 +109,24 @@ export class CandidateSessionAccessController {
   constructor(
     @Inject(SessionsService) private readonly sessionsService: SessionsService,
     @Inject(ReportsService) private readonly reportsService: ReportsService,
+    @Inject(LiveKitService) private readonly liveKitService: LiveKitService,
   ) {}
 
   @Get(":accessCode")
   findByAccessCode(@Param("accessCode") accessCode: string) {
     return this.sessionsService.getSessionByAccessCode(accessCode);
+  }
+
+  /** Device check runs before session start; a valid open invite is sufficient. */
+  @Post(":accessCode/livekit-token")
+  async liveKitToken(@Param("accessCode") accessCode: string) {
+    const session = await this.sessionsService.getSessionByAccessCode(accessCode);
+    return this.liveKitService.createParticipantToken({
+      sessionId: session.id,
+      identity: `candidate:${session.candidateId ?? session.id}`,
+      name: session.candidateName,
+      role: "candidate",
+    });
   }
 
   @Put(":accessCode/start")

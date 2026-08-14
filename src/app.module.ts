@@ -36,6 +36,7 @@ import { OrganizationService } from "./modules/organization/organization.service
 import { createEmailServiceFromEnv, EmailService } from "./modules/email/email.service";
 import { PrismaService } from "./prisma/prisma.service";
 import { PrismaModule } from "./prisma/prisma.module";
+import { LiveKitService } from "./modules/livekit/livekit.service";
 
 
 @Module({
@@ -65,6 +66,7 @@ import { PrismaModule } from "./prisma/prisma.module";
     CandidateAiService,
     JwtAuthGuard,
     RolesGuard,
+    LiveKitService,
     {
       provide: AiService,
       useFactory: () => new AiService(createDeepSeekProviderFromEnv()),
