@@ -73,11 +73,16 @@ export const INTERVIEW_EVENTS = {
   joinSession: "session.join",
   leaveSession: "session.leave",
   ping: "session.ping",
+<<<<<<< HEAD
   // WebRTC camera signaling
   cameraOffer: "camera.offer",
   cameraAnswer: "camera.answer",
   cameraIceCandidate: "camera.ice-candidate",
   cameraState: "camera.state",
+=======
+
+  // ------------------------------------------------------------------
+>>>>>>> ab7764096ed6792c8049b240000bd24492546f59
   // server -> client
   presenceUpdated: "presence.updated",
   sessionUpdated: "session.updated",
