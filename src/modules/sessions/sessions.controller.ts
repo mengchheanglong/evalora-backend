@@ -17,6 +17,7 @@ import {
 import type { SessionStatus } from "../../domain/evalora.types";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
+import { ReportsService } from "../reports/reports.service";
 import { LiveKitService } from "../livekit/livekit.service";
 import { ValidateDto } from "../../common/pipes/validate-dto.pipe";
 import { CandidateAccessRateLimitGuard } from "./access-rate-limit.guard";
