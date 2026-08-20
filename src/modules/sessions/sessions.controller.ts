@@ -18,11 +18,8 @@ import type { SessionStatus } from "../../domain/evalora.types";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { ReportsService } from "../reports/reports.service";
-<<<<<<< HEAD
 import { ValidateDto } from "../../common/pipes/validate-dto.pipe";
-=======
 import { LiveKitService } from "../livekit/livekit.service";
->>>>>>> ab7764096ed6792c8049b240000bd24492546f59
 import { CandidateAccessRateLimitGuard } from "./access-rate-limit.guard";
 import { ReportIntegrityEventDto } from "./dto/report-integrity-event.dto";
 import { type CreateSessionInput, type ListSessionsFilter, SessionsService } from "./sessions.service";
@@ -68,12 +65,12 @@ export class SessionsController {
     return session;
   }
 
-<<<<<<< HEAD
   @Get(":id/integrity-events")
   @Roles("admin", "organization", "interviewer")
   getIntegrityEvents(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
     return this.sessionsService.getIntegrityEvents(id, toAccessContext(request.user));
-=======
+  }
+
   @Post(":id/livekit-token")
   @Roles("admin", "organization", "interviewer")
   async liveKitToken(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
@@ -85,7 +82,6 @@ export class SessionsController {
       name: request.user.email,
       role: "interviewer",
     });
->>>>>>> ab7764096ed6792c8049b240000bd24492546f59
   }
 
   @Put(":id/start")
