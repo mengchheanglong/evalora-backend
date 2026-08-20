@@ -91,8 +91,12 @@ export class AnalyticsService {
         status: true,
         createdAt: true,
         updatedAt: true,
+        startedAt: true,
+        completedAt: true,
+        expiredAt: true,
+        expiresAt: true,
         candidate: { select: { name: true } },
-        template: { select: { title: true } },
+        template: { select: { title: true, timeLimitMin: true } },
         report: { select: { id: true } },
       },
       orderBy: { updatedAt: "desc" },
@@ -110,7 +114,7 @@ export class AnalyticsService {
         candidateName: session.candidate.name,
         assessmentName: session.template.title,
         status,
-        createdAt: (session.updatedAt ?? session.createdAt).toISOString(),
+        createdAt: activityTimestamp(session).toISOString(),
       };
     });
   }
@@ -376,14 +380,20 @@ export class AnalyticsService {
 
   private async reconcileExpiredInvitations(access: AccessContext, asOf: Date): Promise<void> {
     if (typeof this.prisma.interviewSession.updateMany !== "function") return;
-    await this.prisma.interviewSession.updateMany({
+    const expiredInvitations = await this.prisma.interviewSession.findMany({
       where: {
         ...sessionScope(access),
         status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
         expiresAt: { lte: asOf },
       },
-      data: { status: "EXPIRED" },
+      select: { id: true, expiresAt: true },
     });
+    await Promise.all(expiredInvitations.flatMap((session) => session.expiresAt ? [
+      this.prisma.interviewSession.updateMany({
+        where: { ...sessionScope(access), id: { in: [session.id] }, status: { in: ["NOT_STARTED", "IN_PROGRESS"] } },
+        data: { status: "EXPIRED", expiredAt: session.expiresAt },
+      }),
+    ] : []));
 
     const inProgress = await this.prisma.interviewSession.findMany({
       where: { ...sessionScope(access), status: "IN_PROGRESS", startedAt: { not: null } },
@@ -393,7 +403,7 @@ export class AnalyticsService {
         template: { select: { timeLimitMin: true } },
       },
     });
-    const timedOutIds = inProgress
+    const timedOutSessions = inProgress
       .filter((session) => {
         const timeLimitMin = session.template.timeLimitMin;
         return Boolean(
@@ -403,12 +413,14 @@ export class AnalyticsService {
           && session.startedAt.getTime() + timeLimitMin * 60_000 + AUTO_EXPIRY_GRACE_MS <= asOf.getTime(),
         );
       })
-      .map((session) => session.id);
-    if (!timedOutIds.length) return;
-    await this.prisma.interviewSession.updateMany({
-      where: { ...sessionScope(access), id: { in: timedOutIds }, status: "IN_PROGRESS" },
-      data: { status: "EXPIRED" },
-    });
+      .map((session) => ({
+        id: session.id,
+        expiredAt: new Date(session.startedAt!.getTime() + session.template.timeLimitMin! * 60_000),
+      }));
+    await Promise.all(timedOutSessions.map((session) => this.prisma.interviewSession.updateMany({
+      where: { ...sessionScope(access), id: { in: [session.id] }, status: "IN_PROGRESS" },
+      data: { status: "EXPIRED", expiredAt: session.expiredAt },
+    })));
   }
 
 }
@@ -423,6 +435,31 @@ function completedSessionScope(access: AccessContext, templateId?: string): any 
 
 function emptyStatusCounts(): Record<StatusKey, number> {
   return { not_started: 0, in_progress: 0, completed: 0, expired: 0 };
+}
+
+function activityTimestamp(session: {
+  status: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "EXPIRED";
+  createdAt: Date;
+  updatedAt: Date;
+  startedAt: Date | null;
+  completedAt: Date | null;
+  expiredAt: Date | null;
+  expiresAt: Date | null;
+  template: { timeLimitMin: number | null };
+}): Date {
+  if (session.status === "COMPLETED") return session.completedAt ?? session.updatedAt;
+  if (session.status !== "EXPIRED") return session.status === "NOT_STARTED" ? session.createdAt : session.startedAt ?? session.updatedAt;
+  if (session.expiredAt) return session.expiredAt;
+
+  // Sessions expired before expiredAt existed retain a correct activity time by
+  // deriving the earliest applicable deadline instead of using reconciliation's updatedAt.
+  const deadlines = [
+    session.expiresAt,
+    session.startedAt && session.template.timeLimitMin
+      ? new Date(session.startedAt.getTime() + session.template.timeLimitMin * 60_000)
+      : null,
+  ].filter((deadline): deadline is Date => Boolean(deadline));
+  return deadlines.length ? new Date(Math.min(...deadlines.map((deadline) => deadline.getTime()))) : session.updatedAt;
 }
 
 function fromPrismaStatus(status: string): StatusKey {

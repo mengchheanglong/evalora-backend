@@ -120,6 +120,7 @@ interface SessionRow {
   status: PrismaSessionStatus;
   startedAt?: Date | null;
   completedAt?: Date | null;
+  expiredAt?: Date | null;
   expiresAt?: Date | null;
   createdAt?: Date | null;
   updatedAt?: Date | null;
@@ -508,16 +509,20 @@ export class SessionsService {
    */
   private async reconcileTimedOutSessions<T extends SessionRow>(rows: T[]): Promise<T[]> {
     const nowMs = this.now().getTime();
-    const timedOutIds = rows.filter((row) => isSessionTimedOut(row, nowMs)).map((row) => row.id);
-    if (timedOutIds.length === 0) return rows;
+    const timedOutSessions = rows.filter((row) => isSessionTimedOut(row, nowMs)).map((row) => ({
+      id: row.id,
+      expiredAt: new Date(row.startedAt!.getTime() + row.template!.timeLimitMin! * 60_000),
+    }));
+    if (timedOutSessions.length === 0) return rows;
 
     const updateMany = requireMethod(this.prisma.interviewSession.updateMany, "interviewSession.updateMany");
-    const result = await updateMany({
-      where: { id: { in: timedOutIds }, status: "IN_PROGRESS" },
-      data: { status: "EXPIRED" },
-    });
+    const results = await Promise.all(timedOutSessions.map((session) => updateMany({
+      where: { id: { in: [session.id] }, status: "IN_PROGRESS" },
+      data: { status: "EXPIRED", expiredAt: session.expiredAt },
+    })));
 
-    const expired = await this.resolveExpiredIds(timedOutIds, result.count);
+    const timedOutIds = timedOutSessions.map((session) => session.id);
+    const expired = await this.resolveExpiredIds(timedOutIds, results.reduce((count, result) => count + result.count, 0));
     for (const row of rows) {
       if (expired.has(row.id)) this.publishSessionUpdated({ ...row, status: "EXPIRED" });
     }
@@ -686,7 +691,7 @@ export class SessionsService {
     const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
     const session = await update({
       where: { id: current.id },
-      data: { status: "EXPIRED" },
+      data: { status: "EXPIRED", expiredAt: new Date(deadline) },
       include: CANDIDATE_SESSION_INCLUDE,
     });
     this.publishSessionUpdated(session as CandidateSessionRow);

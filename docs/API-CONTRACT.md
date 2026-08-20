@@ -370,6 +370,8 @@ Workspace analytics are computed from persisted data visible to the authenticate
 | GET | `/analytics/score-distribution?templateId=:id` | Persisted report score buckets for one exact template. `templateId` is required. |
 | GET | `/analytics/completion-duration?templateId=:id` | Median minutes and duration buckets for completed sessions using one exact template. `templateId` is required. |
 
+`GET /analytics/activity` uses the actual lifecycle time for each current state: invitation creation, assessment start, completion, or expiry. It does not use a later database reconciliation/update time as the activity timestamp.
+
 `GET /analytics/summary` returns:
 
 - scope metadata: `asOf`, `dataWindow: "all_time"`, and `scope: "organization" | "platform"`;

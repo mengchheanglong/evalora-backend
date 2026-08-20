@@ -90,9 +90,9 @@ test("analytics summary uses organization-scoped persisted sessions and reports"
   assert.equal(summary.dataWindow, "all_time");
   assert.ok(!Number.isNaN(Date.parse(summary.asOf)));
   assert.ok(calls.some((call) => call.method === "session.groupBy"));
-  const reconciliation = calls.find((call) => call.method === "session.updateMany");
-  assert.deepEqual((reconciliation?.args as { where: any }).where.organizationId, "org-1");
-  assert.deepEqual((reconciliation?.args as { where: any }).where.status, { in: ["NOT_STARTED", "IN_PROGRESS"] });
+  // No stale session was supplied, so reconciliation should not write merely for
+  // loading summary metrics.
+  assert.equal(calls.some((call) => call.method === "session.updateMany"), false);
   assert.ok(calls.some((call) => call.method === "report.aggregate"));
   const scoped = calls.find((call) => call.method === "session.groupBy");
   assert.deepEqual((scoped?.args as { where: unknown }).where, { organizationId: "org-1" });
@@ -162,16 +162,14 @@ test("ready reports are ordered by report recency within the authorized scope", 
 
 test("analytics reads reconcile timed-out in-progress sessions", async () => {
   const updates: any[] = [];
-  let findCalls = 0;
   const prisma = {
     interviewSession: {
       updateMany: async (args: any) => {
         updates.push(args);
         return { count: 1 };
       },
-      findMany: async () => {
-        findCalls += 1;
-        if (findCalls === 1) {
+      findMany: async (args: any) => {
+        if (args?.where?.status === "IN_PROGRESS") {
           return [{
             id: "timed-session",
             startedAt: new Date(Date.now() - 61 * 60_000),
@@ -186,10 +184,41 @@ test("analytics reads reconcile timed-out in-progress sessions", async () => {
 
   await service.activity(access);
 
-  assert.equal(updates.length, 2);
-  assert.deepEqual(updates[1].where.id, { in: ["timed-session"] });
-  assert.equal(updates[1].where.organizationId, "org-1");
-  assert.equal(updates[1].where.status, "IN_PROGRESS");
+  assert.equal(updates.length, 1);
+  assert.deepEqual(updates[0].where.id, { in: ["timed-session"] });
+  assert.equal(updates[0].where.organizationId, "org-1");
+  assert.equal(updates[0].where.status, "IN_PROGRESS");
+  assert.ok(updates[0].data.expiredAt instanceof Date);
+});
+
+test("analytics activity uses the real deadline for historical expired sessions", async () => {
+  const expiredAt = new Date("2026-07-29T05:36:33.321Z");
+  const prisma = {
+    interviewSession: {
+      updateMany: async () => ({ count: 0 }),
+      findMany: async (args: any) => {
+        if (args?.where?.expiresAt || args?.where?.status === "IN_PROGRESS") return [];
+        return [{
+          id: "historical-expiry",
+          status: "EXPIRED",
+          createdAt: new Date("2026-07-29T04:04:30.263Z"),
+          updatedAt: new Date("2026-07-30T01:03:50.829Z"),
+          startedAt: new Date("2026-07-29T04:06:33.321Z"),
+          completedAt: null,
+          expiredAt: null,
+          expiresAt: new Date("2026-08-05T04:04:30.262Z"),
+          candidate: { name: "Lina" },
+          template: { title: "Software Engineer Assessment", timeLimitMin: 90 },
+          report: null,
+        }];
+      },
+    },
+  };
+  const service = new AnalyticsService(prisma as never);
+
+  const activity = await service.activity(access);
+
+  assert.equal(activity[0].createdAt, expiredAt.toISOString());
 });
 
 test("analytics trend averages report scores per day as a percentage, scoped to the org", async () => {

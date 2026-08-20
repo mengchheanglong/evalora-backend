@@ -48,7 +48,7 @@ InterviewSession 1---N IntegrityEvent
 
 - Passwords are stored only as `passwordHash`.
 - Public login is for admin/interviewer platform accounts. Candidate `User` rows are invite-only participant records created from session candidate info and use random password hashes that are not used for login.
-- Candidate assessment access is controlled by `InterviewSession.accessCode`; access ends after completion/expiry while authorized admins/interviewers retain session data, responses, evaluations, and reports.
+- Candidate assessment access is controlled by `InterviewSession.accessCode`; access ends after completion/expiry while authorized admins/interviewers retain session data, responses, evaluations, and reports. `completedAt` and `expiredAt` record the actual terminal lifecycle time, independently of later record updates.
 - Workspace create-session metadata is optional: `title`, `interviewType`, `interviewers` (JSON string array), `notes`, `targetRole`, `department`, `scheduledAt`, `durationMin`, `language`, `timeZone`, and `createdById`.
 - `InterviewSession.warningCount` and `warningLimit` (default 2) are the official integrity counters. Two-strike policy: the first counted event increments `warningCount` to 1 and keeps the session active; the second counted event reaches the limit and the backend expires the session. Only the backend increments/reads them; the browser reports signals and receives the decision back.
 - `IntegrityEvent` rows are immutable audit records. `(sessionId, clientEventId)` is unique so retries can never double-count; `counted` is decided server-side from the event type (`visibilitychange` counts; `blur`/`pagehide`/`beforeunload` are supporting evidence only).
