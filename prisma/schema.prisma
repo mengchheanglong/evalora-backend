@@ -49,37 +49,50 @@ enum InviteStatus {
   EXPIRED
 }
 
+enum TemplateDraftStatus {
+  DRAFT
+  PUBLISHED
+  DISCARDED
+}
+
+enum TemplateDraftSource {
+  DOCUMENT
+  PROMPT
+}
+
 model Organization {
-  id        String               @id @default(uuid())
-  name      String
-  users     User[]
-  invites   OrganizationInvite[]
-  templates AssessmentTemplate[]
-  sessions  InterviewSession[]
-  createdAt DateTime             @default(now()) @map("created_at")
-  updatedAt DateTime             @updatedAt @map("updated_at")
+  id             String                    @id @default(uuid())
+  name           String
+  users          User[]
+  invites        OrganizationInvite[]
+  templates      AssessmentTemplate[]
+  templateDrafts AssessmentTemplateDraft[]
+  sessions       InterviewSession[]
+  createdAt      DateTime                  @default(now()) @map("created_at")
+  updatedAt      DateTime                  @updatedAt @map("updated_at")
 
   @@map("organizations")
 }
 
 model User {
-  id                   String                @id @default(uuid())
+  id                   String                    @id @default(uuid())
   name                 String
-  email                String                @unique
-  emailVerified        Boolean               @default(false) @map("email_verified")
-  passwordHash         String                @map("password_hash")
-  profilePhoto         String?               @db.Text @map("profile_photo")
+  email                String                    @unique
+  emailVerified        Boolean                   @default(false) @map("email_verified")
+  passwordHash         String                    @map("password_hash")
+  profilePhoto         String?                   @map("profile_photo") @db.Text
   role                 UserRole
-  organizationId       String?               @map("organization_id")
-  organization         Organization?         @relation(fields: [organizationId], references: [id])
-  createdTemplates     AssessmentTemplate[]  @relation("TemplateCreator")
-  candidateSessions    InterviewSession[]    @relation("CandidateSessions")
-  createdSessions      InterviewSession[]    @relation("SessionCreator")
+  organizationId       String?                   @map("organization_id")
+  organization         Organization?             @relation(fields: [organizationId], references: [id])
+  createdTemplates     AssessmentTemplate[]      @relation("TemplateCreator")
+  templateDrafts       AssessmentTemplateDraft[] @relation("TemplateDraftCreator")
+  candidateSessions    InterviewSession[]        @relation("CandidateSessions")
+  createdSessions      InterviewSession[]        @relation("SessionCreator")
   reviewerNotes        ReviewerNote[]
-  interviewerFollowUps InterviewerFollowUp[] @relation("InterviewerFollowUpAuthor")
-  sentInvites          OrganizationInvite[]  @relation("InviteSender")
-  createdAt            DateTime              @default(now()) @map("created_at")
-  updatedAt            DateTime              @updatedAt @map("updated_at")
+  interviewerFollowUps InterviewerFollowUp[]     @relation("InterviewerFollowUpAuthor")
+  sentInvites          OrganizationInvite[]      @relation("InviteSender")
+  createdAt            DateTime                  @default(now()) @map("created_at")
+  updatedAt            DateTime                  @updatedAt @map("updated_at")
 
   @@map("users")
 }
@@ -124,6 +137,40 @@ model AssessmentTemplate {
 
   @@index([organizationId])
   @@map("assessment_templates")
+}
+
+/// A proposed assessment produced by AI-assisted generation. It is NOT an
+/// assessment: nothing here is ever assigned to a candidate. A draft becomes a
+/// real AssessmentTemplate only when an authenticated workspace user confirms it,
+/// which is the single gate keeping generated content out of live templates.
+model AssessmentTemplateDraft {
+  id                  String              @id @default(uuid())
+  organizationId      String              @map("organization_id")
+  organization        Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdById         String              @map("created_by_id")
+  createdBy           User                @relation("TemplateDraftCreator", fields: [createdById], references: [id])
+  status              TemplateDraftStatus @default(DRAFT)
+  source              TemplateDraftSource
+  sourceFileName      String?             @map("source_file_name")
+  /// Sanitized, capped text extracted from the uploaded document. Untrusted input:
+  /// never executed, never treated as instructions, never copied into a template as-is.
+  sourceText          String?             @map("source_text") @db.Text
+  /// The proposal as the model returned it, after validation and before any user
+  /// edit, so a reviewer can compare what the AI suggested against what shipped.
+  aiProposal          Json                @map("ai_proposal")
+  /// The current, user-editable draft. Confirmation reads this field, never aiProposal.
+  draft               Json
+  /// Which generator produced aiProposal: "deepseek" or "fallback".
+  provider            String
+  /// Plain id, not a relation: deleting a published template must not be blocked
+  /// by the draft that produced it.
+  publishedTemplateId String?             @map("published_template_id")
+  publishedAt         DateTime?           @map("published_at")
+  createdAt           DateTime            @default(now()) @map("created_at")
+  updatedAt           DateTime            @updatedAt @map("updated_at")
+
+  @@index([organizationId, status, updatedAt])
+  @@map("assessment_template_drafts")
 }
 
 model AssessmentModule {
@@ -207,18 +254,18 @@ model InterviewSession {
 }
 
 model Response {
-  id           String           @id @default(uuid())
-  sessionId    String           @map("session_id")
-  session      InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  questionId   String?          @map("question_id")
-  question     Question?        @relation(fields: [questionId], references: [id])
-  responseText String           @map("response_text")
-  responseJson Json?            @map("response_json")
+  id               String           @id @default(uuid())
+  sessionId        String           @map("session_id")
+  session          InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  questionId       String?          @map("question_id")
+  question         Question?        @relation(fields: [questionId], references: [id])
+  responseText     String           @map("response_text")
+  responseJson     Json?            @map("response_json")
   // Private, server-authored scoring context. Never return this field through
   // candidate access-code endpoints.
-  questionSnapshot Json?        @map("question_snapshot")
-  createdAt    DateTime         @default(now()) @map("created_at")
-  updatedAt    DateTime         @updatedAt @map("updated_at")
+  questionSnapshot Json?            @map("question_snapshot")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
 
   // One stored answer per (session, question) so a double-submit / retry updates
   // rather than inserting a duplicate. questionId is nullable and Postgres treats

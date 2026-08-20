@@ -373,6 +373,10 @@ export class OrganizationService {
       await tx.interviewSession.deleteMany({ where: { organizationId } });
       // Templates cascade modules/questions.
       await tx.assessmentTemplate.deleteMany({ where: { organizationId } });
+      // Drafts hold the text of uploaded job descriptions, so a wipe must take
+      // them too — otherwise the most sensitive thing the workspace uploaded is
+      // the one thing that survives "delete all my data".
+      await tx.assessmentTemplateDraft.deleteMany({ where: { organizationId } });
       await tx.organizationInvite.deleteMany({ where: { organizationId } });
     });
 

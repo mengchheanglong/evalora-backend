@@ -40,6 +40,12 @@ Endpoints:
 - `GET /api/templates/:id`
 - `PUT /api/templates/:id`
 - `DELETE /api/templates/:id`
+- `POST /api/templates/drafts`
+- `GET /api/templates/drafts`
+- `GET /api/templates/drafts/:id`
+- `PATCH /api/templates/drafts/:id`
+- `POST /api/templates/drafts/:id/confirm`
+- `DELETE /api/templates/drafts/:id`
 
 Implemented template persistence slice:
 
@@ -51,6 +57,15 @@ Implemented template persistence slice:
 - `pnpm seed:prebuilt` upserts those prebuilt tests into Neon for the seeded organization scope.
 - Template routes require JWT auth; write routes allow `admin`, `organization`, and `interviewer` roles.
 - Ownership hardening: admins can query broadly, while organization/interviewer users are scoped to their JWT `organizationId`.
+
+AI-assisted template generation (`src/modules/templates/drafts/`):
+
+- `template-drafts.controller.ts` is registered before `TemplatesController` in `app.module.ts`; otherwise `GET /api/templates/:id` would match `/templates/drafts`.
+- `document-extraction.service.ts` reads PDF, DOCX, and plain text uploads. Format comes from magic bytes, not the declared MIME type; size, page, and character caps apply before anything is stored or sent to the model.
+- `weighting.ts` owns the sum-to-100 rule. The model rates modules 1-5 on five signals; the backend converts ratings into integer percentages with configurable minimums and largest-remainder rounding.
+- `draft-normalizer.ts` validates all untrusted draft content — model output and reviewer edits alike — dropping unsupported types, capping counts and lengths, and re-running the weight normalization.
+- `template-drafts.service.ts` holds the confirmation gate: generation only writes `AssessmentTemplateDraft`, and `confirm` delegates to `TemplatesService.createTemplate()` so generated templates obey the same write rules as hand-authored ones. Re-confirming returns `409`.
+- `draft-rate-limit.guard.ts` caps generation per authenticated user (`DRAFT_RATE_LIMIT_MAX`, default 10/hour).
 
 Next template task:
 

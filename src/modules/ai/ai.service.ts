@@ -1,4 +1,10 @@
 import { Injectable } from "@nestjs/common";
+import type {
+  GeneratedTemplateDraft,
+  GeneratedTemplateDraftRefinement,
+  TemplateDraftGenerationInput,
+  TemplateDraftRefinementInput,
+} from "../templates/drafts/template-draft.types";
 import {
   evaluateResponse as deterministicEvaluateResponse,
   generateCandidateReport as deterministicGenerateCandidateReport,
@@ -47,9 +53,27 @@ export interface CodeSubmissionEvaluationInput {
   weight?: number;
 }
 
+export interface TemplateDraftProposal {
+  /** Absent when no provider is configured or the call failed; the caller then
+   *  falls back to a prebuilt blueprint rather than showing the user nothing. */
+  proposal?: GeneratedTemplateDraft;
+  provider: "deepseek" | "fallback";
+}
+
+export interface TemplateDraftRefinement {
+  /** Absent when the provider failed or deliberately declined the request. */
+  proposal?: GeneratedTemplateDraft;
+  reply?: string;
+  /** False when the model answered but left the draft as it was. */
+  changed?: boolean;
+  provider: "deepseek" | "fallback";
+}
+
 export interface AiProviderClient {
   generateInterviewQuestion?(input: InterviewQuestionInput): Promise<Partial<GeneratedInterviewQuestion>>;
   generateFollowUp?(input: FollowUpInput): Promise<Partial<GeneratedFollowUp>>;
+  generateTemplateDraft?(input: TemplateDraftGenerationInput): Promise<Partial<GeneratedTemplateDraft>>;
+  refineTemplateDraft?(input: TemplateDraftRefinementInput): Promise<GeneratedTemplateDraftRefinement>;
   evaluateResponse(input: EvaluateResponseInput): Promise<Partial<EvaluationResultDto>>;
   evaluateCodeSubmission?(input: CodeSubmissionEvaluationInput): Promise<Partial<EvaluationResultDto>>;
 }
@@ -95,6 +119,53 @@ export class AiService {
       };
     } catch {
       return fallback;
+    }
+  }
+
+  /**
+   * Propose an assessment template from a job description or a written idea.
+   *
+   * Unlike the evaluation calls, there is no deterministic substitute worth
+   * inventing here, so a missing or failing provider returns no proposal at all
+   * and the caller supplies a prebuilt blueprint instead. Nothing this returns is
+   * trusted: the proposal is validated and re-weighted before it becomes a draft.
+   */
+  async generateTemplateDraft(input: TemplateDraftGenerationInput): Promise<TemplateDraftProposal> {
+    if (!this.provider?.generateTemplateDraft) return { provider: "fallback" };
+
+    try {
+      const proposal = await this.provider.generateTemplateDraft(input);
+      if (!proposal || !Array.isArray(proposal.modules) || proposal.modules.length === 0) {
+        return { provider: "fallback" };
+      }
+      return { proposal, provider: "deepseek" };
+    } catch {
+      return { provider: "fallback" };
+    }
+  }
+
+  /**
+   * Revise an existing draft according to one reviewer chat instruction.
+   *
+   * Same posture as generateTemplateDraft: there is no deterministic substitute
+   * for a conversational edit, so a missing or failing provider returns no
+   * proposal and the caller tells the reviewer the assistant is unavailable
+   * rather than guessing at a change.
+   */
+  async refineTemplateDraft(input: TemplateDraftRefinementInput): Promise<TemplateDraftRefinement> {
+    if (!this.provider?.refineTemplateDraft) return { provider: "fallback" };
+
+    try {
+      const generated = await this.provider.refineTemplateDraft(input);
+      const draft = generated?.draft;
+      if (!draft || !Array.isArray(draft.modules) || draft.modules.length === 0) {
+        // The model answered without a usable draft — a polite refusal or a
+        // malformed revision. Either way the stored draft must not change.
+        return { reply: generated?.reply, changed: false, provider: "deepseek" };
+      }
+      return { proposal: draft, reply: generated.reply, changed: generated.changed !== false, provider: "deepseek" };
+    } catch {
+      return { provider: "fallback" };
     }
   }
 
