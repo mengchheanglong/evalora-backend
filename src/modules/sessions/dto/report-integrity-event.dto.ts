@@ -1,7 +1,13 @@
 import { IsIn, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Max, Min } from "class-validator";
 
 /** Event types the candidate browser is allowed to report. */
-export const INTEGRITY_EVENT_TYPES = ["visibilitychange", "blur", "pagehide", "beforeunload"] as const;
+export const INTEGRITY_EVENT_TYPES = [
+  "visibilitychange",
+  "pointer_exit",
+  "blur",
+  "pagehide",
+  "beforeunload",
+] as const;
 
 export type IntegrityEventType = (typeof INTEGRITY_EVENT_TYPES)[number];
 

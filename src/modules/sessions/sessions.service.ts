@@ -318,13 +318,15 @@ const INVITE_ONLY_PASSWORD_PREFIX = "evalora-invite-only";
 const SALT_ROUNDS = 12;
 
 /**
- * Which browser signals count toward the official warning. Only a real
- * visibility transition to hidden is counted; blur/pagehide/beforeunload are
- * stored as supporting evidence because they can fire for benign reasons
- * (clicking another window, a browser update) and would create false positives.
- * This rule lives here — the browser never decides what counts.
+ * Which browser signals count toward the official warning. A real visibility
+ * transition to hidden and a sustained pointer exit count; blur/pagehide/
+ * beforeunload are stored as supporting evidence because they can fire for
+ * benign reasons (clicking another window, a browser update) and would create
+ * false positives. This rule lives here — the browser never decides what
+ * counts, and the frontend only reports a pointer exit after the pointer has
+ * stayed outside the window past its own threshold.
  */
-const INTEGRITY_COUNTED_TYPES: ReadonlySet<string> = new Set(["visibilitychange"]);
+const INTEGRITY_COUNTED_TYPES: ReadonlySet<string> = new Set(["visibilitychange", "pointer_exit"]);
 const INTEGRITY_DUPLICATE_REASON = "Duplicate integrity event. No additional warning was counted.";
 const INTEGRITY_EVENTS_LIMIT = 200;
 /** Default warning limit when a session row predates the column or carries no value. */
@@ -1331,9 +1333,9 @@ function normalizeClientEventId(value: string): string {
  */
 function integrityReason(type: string, counted: boolean): string {
   if (counted) {
-    return type === "visibilitychange"
-      ? "Possible tab switching detected."
-      : "Possible exit from the assessment detected.";
+    if (type === "visibilitychange") return "Possible tab switching detected.";
+    if (type === "pointer_exit") return "Pointer left the assessment window.";
+    return "Possible exit from the assessment detected.";
   }
   if (type === "blur") return "Supporting signal: the browser window lost focus.";
   if (type === "pagehide" || type === "beforeunload") return "Supporting signal: the browser page started leaving.";

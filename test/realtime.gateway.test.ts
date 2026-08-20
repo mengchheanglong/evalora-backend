@@ -206,6 +206,45 @@ test("integrity.updated is emitted only to the authorized session room", () => {
   assert.equal(emitted[0].event, "integrity.updated");
 });
 
+test("integrity.updated carries a pointer_exit reason only to the authorized room", () => {
+  const emitted: Array<{ room: string; event: string; payload: Record<string, unknown> }> = [];
+
+  const gateway = new InterviewGateway({} as never);
+  (gateway as unknown as { server: unknown }).server = {
+    to(room: string) {
+      return {
+        emit(event: string, payload: Record<string, unknown>) {
+          emitted.push({ room, event, payload });
+        },
+      };
+    },
+  };
+
+  gateway.emitToSession("session-a", INTERVIEW_EVENTS.integrityUpdated, {
+    sessionId: "session-a",
+    warningCount: 1,
+    warningLimit: 2,
+    status: "in_progress",
+    action: "warned",
+    reason: "Pointer left the assessment window.",
+    event: {
+      id: "evt-1",
+      sessionId: "session-a",
+      clientEventId: "evt-1",
+      type: "pointer_exit",
+      detectedAt: "2026-07-06T13:05:00.000Z",
+      counted: true,
+      reason: "Pointer left the assessment window.",
+    },
+  });
+
+  assert.equal(emitted.length, 1, "one emit, no broadcast to other rooms or the namespace");
+  assert.equal(emitted[0].room, "session:session-a");
+  assert.equal(emitted[0].event, "integrity.updated");
+  assert.equal(emitted[0].payload.reason, "Pointer left the assessment window.");
+  assert.equal((emitted[0].payload.event as { type: string }).type, "pointer_exit");
+});
+
 test("a candidate joins only their own session room via the access code", async () => {
   const gateway = candidateGateway();
   const socket = await connectWith(gateway, {
