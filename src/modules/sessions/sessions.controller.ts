@@ -17,9 +17,10 @@ import {
 import type { SessionStatus } from "../../domain/evalora.types";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
-import { ReportsService } from "../reports/reports.service";
 import { LiveKitService } from "../livekit/livekit.service";
+import { ValidateDto } from "../../common/pipes/validate-dto.pipe";
 import { CandidateAccessRateLimitGuard } from "./access-rate-limit.guard";
+import { ReportIntegrityEventDto } from "./dto/report-integrity-event.dto";
 import { type CreateSessionInput, type ListSessionsFilter, SessionsService } from "./sessions.service";
 
 @Controller("sessions")
@@ -74,6 +75,12 @@ export class SessionsController {
       name: request.user.email,
       role: "interviewer",
     });
+  }
+
+  @Get(":id/integrity-events")
+  @Roles("admin", "organization", "interviewer")
+  getIntegrityEvents(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
+    return this.sessionsService.getIntegrityEvents(id, toAccessContext(request.user));
   }
 
   @Put(":id/start")
@@ -144,5 +151,18 @@ export class CandidateSessionAccessController {
   @Put(":accessCode/timeout")
   timeoutByAccessCode(@Param("accessCode") accessCode: string) {
     return this.sessionsService.expireSessionByAccessCode(accessCode);
+  }
+
+  @Post(":accessCode/integrity-events")
+  async recordIntegrityEvent(
+    @Param("accessCode") accessCode: string,
+    @Body(new ValidateDto(ReportIntegrityEventDto)) body: ReportIntegrityEventDto,
+  ) {
+    try {
+      return await this.sessionsService.recordIntegrityEvent(accessCode, body);
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new BadRequestException(error instanceof Error ? error.message : "Integrity event could not be recorded.");
+    }
   }
 }

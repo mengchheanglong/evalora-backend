@@ -9,6 +9,7 @@ import type { EmailDeliveryResult, EmailService } from "../email/email.service";
 // fans out through one shared shape instead of look-alike interfaces that drift.
 import { INTERVIEW_EVENTS, type InterviewEventPublisher } from "../realtime/realtime.types";
 import { storedInterviewerNames, type StoredInterviewerAssignment } from "./interviewer-assignment";
+import { ReportIntegrityEventDto, type IntegrityEventType } from "./dto/report-integrity-event.dto";
 
 type PrismaSessionStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "EXPIRED";
 type PrismaRole = "ADMIN" | "ORGANIZATION" | "INTERVIEWER" | "CANDIDATE";
@@ -67,6 +68,32 @@ interface CandidateTemplateRow extends SessionTemplateRow {
   modules?: CandidateModuleRow[];
 }
 
+interface IntegrityEventRow {
+  id: string;
+  sessionId: string;
+  clientEventId: string;
+  type: string;
+  detectedAt: Date;
+  returnedAt?: Date | null;
+  durationMs?: number | null;
+  counted: boolean;
+  reason: string;
+}
+
+/**
+ * Transaction-scoped client shape used only for integrity writes, so the
+ * service stays unit-testable with a plain object. The real Prisma client
+ * satisfies it naturally.
+ */
+interface IntegrityTxClient {
+  integrityEvent: {
+    create: (args: any) => Promise<IntegrityEventRow>;
+  };
+  interviewSession: {
+    update: (args: any) => Promise<unknown>;
+  };
+}
+
 interface SessionRow {
   id: string;
   candidateId: string;
@@ -74,6 +101,8 @@ interface SessionRow {
   templateId: string;
   template?: SessionTemplateRow | null;
   report?: SessionReportRow | null;
+  warningCount?: number;
+  warningLimit?: number;
   createdById?: string | null;
   createdBy?: SessionCreatorRow | null;
   title?: string | null;
@@ -117,6 +146,18 @@ type UserFindManyFn = (args: any) => Promise<CandidateUserRow[]>;
 type UserCreateFn = (args: any) => Promise<CandidateUserRow>;
 
 interface SessionPrismaClient {
+  /** Optional so existing mocks keep working; present on the real client. */
+  integrityEvent?: {
+    findUnique?: (args: any) => Promise<IntegrityEventRow | null>;
+    findMany?: (args: any) => Promise<IntegrityEventRow[]>;
+    create?: (args: any) => Promise<IntegrityEventRow>;
+  };
+  /**
+   * Optional so mocks without transaction support keep working; present on the
+   * real client. Integrity writes run inside it so an event row and its warning
+   * increment can never diverge.
+   */
+  $transaction?: <T>(fn: (tx: IntegrityTxClient) => Promise<T>) => Promise<T>;
   user?: {
     findUnique?: UserFindUniqueFn;
     findMany?: UserFindManyFn;
@@ -181,6 +222,60 @@ export interface CandidateAccessSessionDto extends InterviewSessionDto {
   template: AssessmentTemplateDto;
 }
 
+/**
+ * What the candidate browser is allowed to report. The backend derives every
+ * enforcement decision (`counted`, `warningCount`, `status`) from this input;
+ * nothing here can force a warning or a session transition.
+ */
+export interface IntegrityEventInput {
+  clientEventId: string;
+  type: IntegrityEventType;
+  detectedAt: Date | string;
+  returnedAt?: Date | string;
+  durationMs?: number;
+}
+
+export interface IntegrityEventDto {
+  id: string;
+  sessionId: string;
+  clientEventId: string;
+  type: string;
+  detectedAt: string;
+  returnedAt?: string;
+  durationMs?: number;
+  counted: boolean;
+  reason: string;
+}
+
+/** Official response of the candidate integrity endpoint. */
+/**
+ * What the backend decided for a reported event. The browser never sends this;
+ * it is derived from the official counters after the write.
+ */
+export type IntegrityAction = "warned" | "terminated" | "duplicate" | "recorded";
+
+export interface IntegrityEventResult {
+  sessionId: string;
+  clientEventId: string;
+  counted: boolean;
+  warningCount: number;
+  warningLimit: number;
+  /** Official session status after the decision (REST field name). */
+  sessionStatus: SessionStatus;
+  action: IntegrityAction;
+  reason: string;
+  event: IntegrityEventDto;
+}
+
+/** Reviewer-facing timeline plus the official warning summary. */
+export interface IntegritySummaryDto {
+  sessionId: string;
+  warningCount: number;
+  warningLimit: number;
+  status: SessionStatus;
+  events: IntegrityEventDto[];
+}
+
 interface SessionsServiceOptions {
   generateAccessCode?: () => string;
   now?: () => Date;
@@ -220,6 +315,19 @@ export const CANDIDATE_SESSION_INCLUDE = {
 const CANDIDATE_SELECT = { id: true, role: true, organizationId: true };
 const INVITE_ONLY_PASSWORD_PREFIX = "evalora-invite-only";
 const SALT_ROUNDS = 12;
+
+/**
+ * Which browser signals count toward the official warning. Only a real
+ * visibility transition to hidden is counted; blur/pagehide/beforeunload are
+ * stored as supporting evidence because they can fire for benign reasons
+ * (clicking another window, a browser update) and would create false positives.
+ * This rule lives here — the browser never decides what counts.
+ */
+const INTEGRITY_COUNTED_TYPES: ReadonlySet<string> = new Set(["visibilitychange"]);
+const INTEGRITY_DUPLICATE_REASON = "Duplicate integrity event. No additional warning was counted.";
+const INTEGRITY_EVENTS_LIMIT = 200;
+/** Default warning limit when a session row predates the column or carries no value. */
+const DEFAULT_WARNING_LIMIT = 2;
 
 /**
  * Candidates are invite-only: they authenticate with the private access code and
@@ -585,6 +693,248 @@ export class SessionsService {
     return toCandidateAccessSessionDto(session as CandidateSessionRow);
   }
 
+  /**
+   * Records a browser-detected integrity signal for an active session.
+   *
+   * The backend is the only source of truth here:
+   * - only an in-progress, unexpired session accepts events;
+   * - `sessionId + clientEventId` is deduplicated so a retry never double-counts;
+   * - `counted` is derived from the event TYPE (only a real visibility change to
+   *   hidden counts), never accepted from the browser;
+   * - the event row and the warning increment are written in one transaction;
+   * - the first counted event (warningCount = 1) only warns and keeps the
+   *   session active; once `warningCount >= warningLimit` (the second strike),
+   *   the server expires the session. Either way `integrity.updated` is
+   *   broadcast to the authorized session room.
+   */
+  async recordIntegrityEvent(accessCode: string, input: IntegrityEventInput): Promise<IntegrityEventResult> {
+    const session = await this.findCandidateSessionByAccessCode(accessCode);
+    assertCandidateAccessOpen(session);
+    if (session.status !== "IN_PROGRESS") {
+      throw forbiddenResourceError("Only an in-progress session accepts integrity events");
+    }
+
+    const clientEventId = normalizeClientEventId(input.clientEventId);
+    const type = input.type;
+    const detectedAt = strictToDate(input.detectedAt, "detectedAt");
+    const returnedAt = input.returnedAt != null ? strictToDate(input.returnedAt, "returnedAt") : undefined;
+    if (returnedAt && returnedAt.getTime() < detectedAt.getTime()) {
+      throw new BadRequestException("returnedAt cannot be earlier than detectedAt.");
+    }
+    const durationMs = input.durationMs != null ? Math.round(input.durationMs) : undefined;
+    const counted = INTEGRITY_COUNTED_TYPES.has(type);
+    const reason = integrityReason(type, counted);
+
+    // ------------------------------------------------------------
+    // Deduplicate before writing: retrying the same clientEventId must
+    // return the stored event without counting it a second time.
+    // ------------------------------------------------------------
+    const findUnique = this.prisma.integrityEvent?.findUnique;
+    const existing = findUnique
+      ? await findUnique({ where: { sessionId_clientEventId: { sessionId: session.id, clientEventId } } })
+      : null;
+    if (existing) {
+      return this.integrityResult(session, existing, false, INTEGRITY_DUPLICATE_REASON);
+    }
+
+    // ------------------------------------------------------------
+    // Write the event and the warning increment atomically.
+    // ------------------------------------------------------------
+    let created: IntegrityEventRow;
+    try {
+      created = await this.persistIntegrityEvent(session.id, {
+        clientEventId,
+        type,
+        detectedAt,
+        returnedAt,
+        durationMs,
+        counted,
+        reason,
+      });
+    } catch (error) {
+      // A concurrent retry can beat us to the insert and raise the unique
+      // constraint before our pre-check sees it. Treat that like a duplicate.
+      if (isUniqueConstraintError(error) && findUnique) {
+        const raced = await findUnique({ where: { sessionId_clientEventId: { sessionId: session.id, clientEventId } } });
+        if (raced) return this.integrityResult(session, raced, false, INTEGRITY_DUPLICATE_REASON);
+      }
+      throw error;
+    }
+
+    // The increment ran inside the transaction, so re-read the authoritative
+    // counters before deciding enforcement — a concurrent event may have landed
+    // between our dedupe read and this write.
+    const fresh = await this.readIntegrityState(session.id);
+    const warningCount = fresh?.warningCount ?? (session.warningCount ?? 0) + (counted ? 1 : 0);
+    const warningLimit = fresh?.warningLimit ?? session.warningLimit ?? DEFAULT_WARNING_LIMIT;
+
+    // ------------------------------------------------------------
+    // Two-strike enforcement, decided server-side only:
+    // - warningCount = 1 keeps the session ACTIVE and returns a warning;
+    // - warningCount >= warningLimit (the second strike) expires the session.
+    // ------------------------------------------------------------
+    let finalStatus: PrismaSessionStatus = fresh?.status ?? session.status;
+    let action: IntegrityAction = counted ? "warned" : "recorded";
+    if (counted && warningCount >= warningLimit && finalStatus === "IN_PROGRESS") {
+      const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
+      const expired = await update({
+        where: { id: session.id },
+        data: { status: "EXPIRED" },
+        include: CANDIDATE_SESSION_INCLUDE,
+      });
+      finalStatus = expired.status;
+      action = "terminated";
+      this.publishSessionUpdated(expired as CandidateSessionRow);
+    }
+
+    const sessionStatus = fromPrismaSessionStatus(finalStatus);
+    const event = toIntegrityEventDto(created);
+    this.publishIntegrityUpdated(session.id, { warningCount, warningLimit, status: sessionStatus, action, reason, event });
+
+    return {
+      sessionId: session.id,
+      clientEventId,
+      counted,
+      warningCount,
+      warningLimit,
+      sessionStatus,
+      action,
+      reason,
+      event,
+    };
+  }
+
+  /**
+   * Reviewer-facing integrity timeline for one session. Scoped through the
+   * caller's ownership filter so one workspace can never read another's events.
+   */
+  async getIntegrityEvents(sessionId: string, access?: AccessContext): Promise<IntegritySummaryDto> {
+    const findFirst = requireMethod(this.prisma.interviewSession.findFirst, "interviewSession.findFirst");
+    const session = await findFirst({
+      relationLoadStrategy: "join",
+      where: mergeWhere({ id: sessionId }, buildSessionOwnershipWhere(access)),
+      select: { id: true, status: true, warningCount: true, warningLimit: true },
+    });
+    if (!session) throw forbiddenResourceError("Session");
+
+    const events = this.prisma.integrityEvent?.findMany
+      ? await this.prisma.integrityEvent.findMany({
+          where: { sessionId: session.id },
+          orderBy: { detectedAt: "asc" },
+          take: INTEGRITY_EVENTS_LIMIT,
+        })
+      : [];
+
+    return {
+      sessionId: session.id,
+      warningCount: session.warningCount ?? 0,
+      warningLimit: session.warningLimit ?? DEFAULT_WARNING_LIMIT,
+      status: fromPrismaSessionStatus(session.status),
+      events: events.map(toIntegrityEventDto),
+    };
+  }
+
+  /**
+   * Writes the event and (for counted events) increments warningCount in one
+   * transaction. Falls back to sequential writes only when a mock client has no
+   * transaction support; the real Prisma client always runs the atomic path.
+   */
+  private async persistIntegrityEvent(
+    sessionId: string,
+    data: {
+      clientEventId: string;
+      type: IntegrityEventType;
+      detectedAt: Date;
+      returnedAt?: Date;
+      durationMs?: number;
+      counted: boolean;
+      reason: string;
+    },
+  ): Promise<IntegrityEventRow> {
+    const row = { ...data, sessionId };
+
+    if (this.prisma.$transaction) {
+      const [created] = await this.prisma.$transaction(async (tx) => {
+        const event = await tx.integrityEvent.create({ data: row });
+        if (data.counted) {
+          await tx.interviewSession.update({
+            where: { id: sessionId },
+            data: { warningCount: { increment: 1 } },
+          });
+        }
+        return [event];
+      });
+      return created;
+    }
+
+    const event = await requireMethod(this.prisma.integrityEvent?.create, "integrityEvent.create")({ data: row });
+    if (data.counted) {
+      await requireMethod(this.prisma.interviewSession.update, "interviewSession.update")({
+        where: { id: sessionId },
+        data: { warningCount: { increment: 1 } },
+      });
+    }
+    return event;
+  }
+
+  private async readIntegrityState(
+    sessionId: string,
+  ): Promise<{ warningCount: number; warningLimit: number; status: PrismaSessionStatus } | null> {
+    const findUnique = this.prisma.interviewSession.findUnique;
+    if (!findUnique) return null;
+    const row = await findUnique({
+      where: { id: sessionId },
+      select: { warningCount: true, warningLimit: true, status: true },
+    });
+    return row
+      ? { warningCount: row.warningCount ?? 0, warningLimit: row.warningLimit ?? DEFAULT_WARNING_LIMIT, status: row.status }
+      : null;
+  }
+
+  private integrityResult(
+    session: CandidateSessionRow,
+    event: IntegrityEventRow,
+    counted: boolean,
+    reason: string,
+  ): IntegrityEventResult {
+    return {
+      sessionId: session.id,
+      clientEventId: event.clientEventId,
+      counted,
+      warningCount: session.warningCount ?? 0,
+      warningLimit: session.warningLimit ?? DEFAULT_WARNING_LIMIT,
+      sessionStatus: fromPrismaSessionStatus(session.status),
+      action: "duplicate",
+      reason,
+      event: toIntegrityEventDto(event),
+    };
+  }
+
+  /**
+   * Announces an integrity decision to everyone watching the session. Only
+   * sockets that joined the authorized session room receive it, because the
+   * gateway enforces authorization before a socket can enter that room.
+   * Fire-and-forget like every other live update: the write is committed.
+   */
+  private publishIntegrityUpdated(
+    sessionId: string,
+    payload: { warningCount: number; warningLimit: number; status: SessionStatus; action: IntegrityAction; reason: string; event: IntegrityEventDto },
+  ) {
+    try {
+      this.events?.emitToSession(sessionId, INTERVIEW_EVENTS.integrityUpdated, {
+        sessionId,
+        warningCount: payload.warningCount,
+        warningLimit: payload.warningLimit,
+        status: payload.status,
+        action: payload.action,
+        reason: payload.reason,
+        event: payload.event,
+      });
+    } catch {
+      // Swallowed on purpose — clients recover via REST or the re-join snapshot.
+    }
+  }
+
   private async resolveCandidateId(input: CreateSessionInput, organizationId: string | undefined, access?: AccessContext): Promise<string> {
     if (input.candidateId?.trim()) {
       const candidateId = input.candidateId.trim();
@@ -723,6 +1073,8 @@ function toSessionDto(session: SessionRow): InterviewSessionDto {
     organizationId: session.organizationId ?? undefined,
     status: fromPrismaSessionStatus(session.status),
     accessCode: session.accessCode,
+    warningCount: session.warningCount ?? 0,
+    warningLimit: session.warningLimit ?? DEFAULT_WARNING_LIMIT,
     overallScore: session.report?.overallScore,
     reportReady: Boolean(session.report),
     startedAt: toIso(session.startedAt),
@@ -955,6 +1307,51 @@ function toIso(value?: Date | null): string | undefined {
 function toDate(value?: Date | string): Date | undefined {
   if (!value) return undefined;
   return value instanceof Date ? value : new Date(value);
+}
+
+function strictToDate(value: Date | string, label: string): Date {
+  const date = toDate(value);
+  if (!date || Number.isNaN(date.getTime())) throw new BadRequestException(`${label} is invalid.`);
+  return date;
+}
+
+function normalizeClientEventId(value: string): string {
+  const trimmed = requireNonEmpty(value, "clientEventId is required.").trim();
+  return trimmed.slice(0, ReportIntegrityEventDto.maxClientEventIdLength);
+}
+
+/**
+ * Server-authored copy of what was detected. Never echoes candidate text, and
+ * never claims proof of cheating — only what the browser signaled.
+ */
+function integrityReason(type: string, counted: boolean): string {
+  if (counted) {
+    return type === "visibilitychange"
+      ? "Possible tab switching detected."
+      : "Possible exit from the assessment detected.";
+  }
+  if (type === "blur") return "Supporting signal: the browser window lost focus.";
+  if (type === "pagehide" || type === "beforeunload") return "Supporting signal: the browser page started leaving.";
+  return "Supporting signal recorded.";
+}
+
+function toIntegrityEventDto(event: IntegrityEventRow): IntegrityEventDto {
+  return {
+    id: event.id,
+    sessionId: event.sessionId,
+    clientEventId: event.clientEventId,
+    type: event.type,
+    detectedAt: toIso(event.detectedAt) ?? new Date(event.detectedAt).toISOString(),
+    returnedAt: toIso(event.returnedAt),
+    durationMs: event.durationMs ?? undefined,
+    counted: event.counted,
+    reason: event.reason,
+  };
+}
+
+/** Prisma unique-constraint violation ("P2002"). */
+function isUniqueConstraintError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: string }).code === "P2002";
 }
 
 function normalizeEmail(email: string): string {

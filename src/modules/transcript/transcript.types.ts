@@ -92,6 +92,17 @@ export interface TranscriptTruncation {
   omitted: TranscriptSourceCounts;
 }
 
+export interface TranscriptIntegrityEvent {
+  id: string;
+  clientEventId: string;
+  type: string;
+  detectedAt: string;
+  returnedAt?: string;
+  durationMs?: number;
+  counted: boolean;
+  reason: string;
+}
+
 export interface SessionTranscriptDto {
   sessionId: string;
   status: SessionStatus;
@@ -103,6 +114,10 @@ export interface SessionTranscriptDto {
   entries: TranscriptEntry[];
   counts: TranscriptCounts;
   truncation: TranscriptTruncation;
+  /** Official integrity warning summary + timeline for the reviewer UI. */
+  warningCount?: number;
+  warningLimit?: number;
+  integrityEvents?: TranscriptIntegrityEvent[];
 }
 
 /**
@@ -172,6 +187,17 @@ export interface TranscriptFollowUpRow {
   askedBy?: { id?: string | null; name?: string | null } | null;
 }
 
+export interface TranscriptIntegrityEventRow {
+  id: string;
+  clientEventId: string;
+  type: string;
+  detectedAt: Date | string;
+  returnedAt?: Date | string | null;
+  durationMs?: number | null;
+  counted: boolean;
+  reason: string;
+}
+
 export interface TranscriptSessionRow {
   id: string;
   candidateId: string;
@@ -186,6 +212,9 @@ export interface TranscriptSessionRow {
   aiMessages?: TranscriptAiMessageRow[] | null;
   codeSubmissions?: TranscriptCodeSubmissionRow[] | null;
   interviewerFollowUps?: TranscriptFollowUpRow[] | null;
+  integrityEvents?: TranscriptIntegrityEventRow[] | null;
+  warningCount?: number;
+  warningLimit?: number;
   /** Present only on the follow-up count query, never on the main read. */
   _count?: TranscriptSourceTotals | null;
 }

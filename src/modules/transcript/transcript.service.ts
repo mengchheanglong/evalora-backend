@@ -18,6 +18,8 @@ import {
   type TranscriptEntry,
   type TranscriptEntryDraft,
   type TranscriptFollowUpRow,
+  type TranscriptIntegrityEvent,
+  type TranscriptIntegrityEventRow,
   type TranscriptModuleRow,
   type TranscriptResponseRow,
   type TranscriptSessionRow,
@@ -101,6 +103,22 @@ export const TRANSCRIPT_SESSION_INCLUDE = {
     },
     orderBy: { sequence: "asc" },
     take: DEFAULT_LIST_LIMIT,
+  },
+  // Integrity warning timeline: capped because a hostile client could otherwise
+  // flood the reviewer payload with supporting (uncounted) signals.
+  integrityEvents: {
+    select: {
+      id: true,
+      clientEventId: true,
+      type: true,
+      detectedAt: true,
+      returnedAt: true,
+      durationMs: true,
+      counted: true,
+      reason: true,
+    },
+    orderBy: { detectedAt: "asc" },
+    take: 100,
   },
 };
 
@@ -194,6 +212,9 @@ export function buildTranscript(session: TranscriptSessionRow, totals?: Transcri
     entries,
     counts: countByOrigin(entries),
     truncation: buildTruncation(session, DEFAULT_LIST_LIMIT, totals),
+    warningCount: session.warningCount ?? 0,
+    warningLimit: session.warningLimit ?? 2,
+    integrityEvents: (session.integrityEvents ?? []).map(toTranscriptIntegrityEvent),
   };
 }
 
@@ -645,6 +666,20 @@ function buildAnsweredQuestionIndex(responses: TranscriptResponseRow[]): Map<str
 
 function moduleFields(module?: ModuleRef) {
   return { moduleId: module?.id, moduleTitle: module?.title, moduleType: module?.moduleType };
+}
+
+function toTranscriptIntegrityEvent(event: TranscriptIntegrityEventRow): TranscriptIntegrityEvent {
+  const asDate = (value?: Date | string | null) => (value instanceof Date ? value : value ? new Date(value) : undefined);
+  return {
+    id: event.id,
+    clientEventId: event.clientEventId,
+    type: event.type,
+    detectedAt: isoString(asDate(event.detectedAt)) ?? String(event.detectedAt),
+    returnedAt: isoString(asDate(event.returnedAt)),
+    durationMs: event.durationMs ?? undefined,
+    counted: event.counted,
+    reason: event.reason,
+  };
 }
 
 function toModuleRef(module: { id: string; title: string; moduleType: string }): ModuleRef {

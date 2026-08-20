@@ -241,6 +241,10 @@ model InterviewSession {
   report               CandidateReport?
   reviewerNotes        ReviewerNote[]
   interviewerFollowUps InterviewerFollowUp[]
+  warningCount         Int                   @default(0) @map("warning_count")
+  /// Two-strike integrity policy: the first counted violation warns, the second ends the session.
+  warningLimit         Int                   @default(2) @map("warning_limit")
+  integrityEvents      IntegrityEvent[]
   createdAt            DateTime              @default(now()) @map("created_at")
   updatedAt            DateTime              @updatedAt @map("updated_at")
 
@@ -389,4 +393,20 @@ model ReviewerNote {
   createdAt  DateTime         @default(now()) @map("created_at")
 
   @@map("reviewer_notes")
+}
+
+model IntegrityEvent {
+  id            String           @id @default(uuid())
+  sessionId     String           @map("session_id")
+  session       InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  clientEventId String           @map("client_event_id")
+  type          String
+  detectedAt    DateTime         @map("detected_at")
+  returnedAt    DateTime?        @map("returned_at")
+  durationMs    Int?             @map("duration_ms")
+  counted       Boolean          @default(true)
+  reason        String
+
+  @@unique([sessionId, clientEventId])
+  @@map("integrity_events")
 }

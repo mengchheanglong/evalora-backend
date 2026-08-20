@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import { SessionsService } from "../src/modules/sessions/sessions.service";
 import { PREBUILT_ASSESSMENT_TEMPLATES, buildPrebuiltTemplateCreateData } from "../src/modules/templates/prebuilt-templates";
 
-const expiresAt = new Date("2026-08-01T00:00:00.000Z");
+const expiresAt = new Date("2036-08-01T00:00:00.000Z");
 const now = new Date("2026-07-06T13:00:00.000Z");
 
 const sessionRow = {

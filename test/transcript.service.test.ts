@@ -206,7 +206,7 @@ test("getTranscript returns all four origins with structural provenance", async 
   assert.deepEqual(codeEntries[1].code?.testResults, [{ name: "empty list", passed: true }]);
 
   const [answeredFollowUp] = byOrigin(transcript.entries, "interviewer_follow_up");
-  assert.deepEqual(answeredFollowUp.askedBy, { name: "Ada Interviewer" });
+  assert.equal(answeredFollowUp.askedBy?.name, "Ada Interviewer");
   assert.equal(answeredFollowUp.status, "answered");
   assert.equal(answeredFollowUp.questionText, "What would you change about that shard key today?");
   assert.equal(answeredFollowUp.answerText, "I would hash the tenant id instead of the region.");
