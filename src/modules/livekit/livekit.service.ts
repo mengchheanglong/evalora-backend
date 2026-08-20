@@ -3,11 +3,35 @@ import { AccessToken, type VideoGrant } from "livekit-server-sdk";
 
 export type LiveKitParticipantRole = "candidate" | "interviewer";
 
+export interface LiveKitConfig {
+  url: string;
+  apiKey: string;
+  apiSecret: string;
+}
+
 @Injectable()
 export class LiveKitService {
-  private readonly url = requiredEnv("LIVEKIT_URL");
-  private readonly apiKey = requiredEnv("LIVEKIT_API_KEY");
-  private readonly apiSecret = requiredEnv("LIVEKIT_API_SECRET");
+  getConfig(): LiveKitConfig {
+    const url = process.env.LIVEKIT_URL?.trim();
+    const apiKey = process.env.LIVEKIT_API_KEY?.trim();
+    const apiSecret = process.env.LIVEKIT_API_SECRET?.trim();
+
+    if (!url || !apiKey || !apiSecret) {
+      throw new ServiceUnavailableException(
+        "LiveKit service is not configured. LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET are required.",
+      );
+    }
+
+    return { url, apiKey, apiSecret };
+  }
+
+  isConfigured(): boolean {
+    return Boolean(
+      process.env.LIVEKIT_URL?.trim() &&
+        process.env.LIVEKIT_API_KEY?.trim() &&
+        process.env.LIVEKIT_API_SECRET?.trim(),
+    );
+  }
 
   async createParticipantToken(input: {
     sessionId: string;
@@ -15,7 +39,9 @@ export class LiveKitService {
     name: string;
     role: LiveKitParticipantRole;
   }): Promise<{ url: string; token: string }> {
-    const token = new AccessToken(this.apiKey, this.apiSecret, {
+    const { url, apiKey, apiSecret } = this.getConfig();
+
+    const token = new AccessToken(apiKey, apiSecret, {
       identity: input.identity,
       name: input.name,
       ttl: "10m",
@@ -28,14 +54,6 @@ export class LiveKitService {
       canSubscribe: true,
     };
     token.addGrant(grant);
-    return { url: this.url, token: await token.toJwt() };
+    return { url, token: await token.toJwt() };
   }
-}
-
-function requiredEnv(name: string): string {
-  const value = process.env[name]?.trim();
-  if (!value) {
-    throw new ServiceUnavailableException(`${name} is required for LiveKit.`);
-  }
-  return value;
 }

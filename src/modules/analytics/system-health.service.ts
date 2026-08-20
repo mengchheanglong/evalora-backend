@@ -100,6 +100,17 @@ export class SystemHealthService {
         configured: Boolean(process.env.RESEND_API_KEY?.trim() || process.env.SMTP_USER?.trim()),
         fallbackNote: "Links are surfaced in the UI when email is not configured.",
       }),
+      this.describeProvider({
+        key: "livekit",
+        name: "Live video & WebRTC (LiveKit)",
+        detail: "Candidate live camera, screen share, and interviewer audio",
+        configured: Boolean(
+          process.env.LIVEKIT_URL?.trim() &&
+            process.env.LIVEKIT_API_KEY?.trim() &&
+            process.env.LIVEKIT_API_SECRET?.trim(),
+        ),
+        fallbackNote: "Set LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET to enable live video.",
+      }),
     ];
 
     const memory = process.memoryUsage();
