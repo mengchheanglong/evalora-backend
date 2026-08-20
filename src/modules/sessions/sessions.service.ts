@@ -986,9 +986,10 @@ export class SessionsService {
 
   private async findCandidateSessionByAccessCode(accessCode: string): Promise<CandidateSessionRow> {
     const findFirst = requireMethod(this.prisma.interviewSession.findFirst, "interviewSession.findFirst");
+    const normalized = normalizeAccessCode(accessCode);
     const session = await findFirst({
       relationLoadStrategy: "join",
-      where: { accessCode: normalizeAccessCode(accessCode) },
+      where: { accessCode: normalized },
       include: CANDIDATE_SESSION_INCLUDE,
     });
     if (!session) throw forbiddenResourceError("Session");
