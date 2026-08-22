@@ -382,7 +382,6 @@ function resolveWritableOrganizationId(requestedOrganizationId: string | undefin
 }
 
 function toPrismaModuleCreate(module: TemplateModuleInput) {
-  const aiInterview = module.type === "ai_interview";
   return {
     moduleType: toPrismaModuleType(module.type),
     title: requireNonEmpty(module.title, "Module title is required."),
@@ -390,9 +389,13 @@ function toPrismaModuleCreate(module: TemplateModuleInput) {
     weight: module.weight ?? 1,
     orderIndex: module.orderIndex ?? 1,
     settings: normalizeModuleSettings(module),
-    // AI interview openings are generated only after earlier evidence exists.
-    // Ignore authored questions at the API boundary as well as in the editor.
-    questions: { create: (aiInterview ? [] : (module.questions ?? [])).map(toPrismaQuestionCreate) },
+    // Authored ai_interview questions are kept as the session's opening
+    // questions. Prebuilt templates have always shipped them this way; dropping
+    // them here made every non-prebuilt template depend entirely on live
+    // adaptive generation, so any AI hiccup dead-ended the candidate while the
+    // same flow worked fine on prebuilt templates. Live adaptive questions are
+    // still appended on top of these during the session.
+    questions: { create: (module.questions ?? []).map(toPrismaQuestionCreate) },
   };
 }
 
