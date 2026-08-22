@@ -149,16 +149,10 @@ function normalizeQuestions(
 ): DraftQuestion[] {
   const raw = asArray(input);
 
-  // AI interview openings are generated during the session from earlier evidence,
-  // so authored questions there are discarded at the template write boundary
-  // (see templates.service.ts). Dropping them here keeps the draft honest about
-  // what will actually be created.
-  if (moduleType === "ai_interview") {
-    if (raw.length > 0) {
-      warnings.push("AI interview questions are generated live during the session, so the suggested ones were removed.");
-    }
-    return [];
-  }
+  // Authored ai_interview questions are kept: they become the module's opening
+  // questions, with live adaptive questions generated on top during the session.
+  // Stripping them here made AI-generated templates diverge from prebuilt ones,
+  // which always ship their ai_interview questions inline.
 
   if (raw.length > MAX_QUESTIONS_PER_MODULE) {
     warnings.push(

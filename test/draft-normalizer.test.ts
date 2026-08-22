@@ -57,7 +57,7 @@ test("module and question types are accepted in any casing or separator style", 
   assert.equal(draft.modules[0].type, "ai_interview");
 });
 
-test("AI interview questions are stripped because they are generated live", () => {
+test("AI interview questions are kept as opening questions like prebuilt templates", () => {
   const draft = normalizeDraft({
     modules: [
       {
@@ -68,8 +68,8 @@ test("AI interview questions are stripped because they are generated live", () =
     ],
   });
 
-  assert.deepEqual(draft.modules[0].questions, []);
-  assert.match(draft.warnings.join(" "), /generated live/i);
+  assert.equal(draft.modules[0].questions.length, 1);
+  assert.equal(draft.modules[0].questions[0].questionText, "Tell me about a hard bug.");
 });
 
 test("an MCQ with no answer choices becomes a short answer question", () => {

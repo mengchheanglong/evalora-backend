@@ -33,7 +33,7 @@ const templateRow = {
   ],
 };
 
-test("createTemplate keeps the AI interview generated-only at the write boundary", async () => {
+test("createTemplate keeps authored ai_interview questions like prebuilt templates do", async () => {
   const calls: unknown[] = [];
   const service = new TemplatesService({
     assessmentTemplate: {
@@ -98,7 +98,14 @@ test("createTemplate keeps the AI interview generated-only at the write boundary
               adaptiveQuestionCount: 3,
             },
             questions: {
-              create: [],
+              create: [
+                {
+                  questionText: "Tell us about a production incident.",
+                  questionType: "SCENARIO",
+                  options: undefined,
+                  rubric: ["clarity", "ownership"],
+                },
+              ],
             },
           },
         ],
