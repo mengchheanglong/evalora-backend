@@ -81,5 +81,6 @@ export const INTERVIEW_EVENTS = {
   questionAnswered: "interviewer-question.answered",
   questionCancelled: "interviewer-question.cancelled",
   integrityUpdated: "integrity.updated",
+  integrityPolicyUpdated: "integrity.policy.updated",
   error: "session.error",
 } as const;

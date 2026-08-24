@@ -47,6 +47,7 @@ function candidateSessionRow(overrides: Record<string, unknown> = {}) {
     // Two-strike policy: the default warning limit is 2 counted violations.
     warningCount: 0,
     warningLimit: 2,
+    pointerDetectionEnabled: true,
     createdAt: now,
     updatedAt: now,
     ...overrides,
@@ -482,4 +483,79 @@ test("integrity.updated is emitted only into the authorized session room", () =>
   assert.deepEqual(emitted, [
     { room: "session:session-1", event: "integrity.updated", payload: { sessionId: "session-1", warningCount: 1 } },
   ]);
+});
+
+// ------------------------------------------------------------------
+// pointerDetectionEnabled toggle tests
+// ------------------------------------------------------------------
+
+test("pointer_exit while pointerDetectionEnabled=false is not counted", async () => {
+  const { prisma, session } = createFakePrisma(candidateSessionRow({ pointerDetectionEnabled: false }));
+  const service = createService(prisma);
+
+  const result = await service.recordIntegrityEvent("EV-123456", pointerExitEvent);
+
+  assert.equal(result.counted, false, "pointer_exit must not be counted when detection is paused");
+  assert.equal(result.warningCount, 0, "warningCount must remain 0");
+  assert.equal(result.action, "recorded");
+  assert.equal(session().status, "IN_PROGRESS", "session must remain ACTIVE");
+  assert.ok(result.reason.toLowerCase().includes("supporting"), "reason should indicate this is a supporting signal");
+});
+
+test("visibility_hidden while pointerDetectionEnabled=false is still counted", async () => {
+  const { prisma, session } = createFakePrisma(candidateSessionRow({ pointerDetectionEnabled: false }));
+  const service = createService(prisma);
+
+  const result = await service.recordIntegrityEvent("EV-123456", visibilityEvent);
+
+  assert.equal(result.counted, true, "visibilitychange is always counted regardless of pointer toggle");
+  assert.equal(result.warningCount, 1);
+  assert.equal(result.action, "warned");
+  assert.equal(session().status, "IN_PROGRESS");
+});
+
+test("re-enabling pointer detection makes pointer_exit count again under two-strike policy", async () => {
+  const { prisma, session } = createFakePrisma(candidateSessionRow({ pointerDetectionEnabled: false }));
+  const service = createService(prisma);
+
+  // First: pointer_exit while disabled — not counted.
+  const disabled = await service.recordIntegrityEvent("EV-123456", pointerExitEvent);
+  assert.equal(disabled.counted, false);
+  assert.equal(disabled.warningCount, 0);
+
+  // Simulate interviewer re-enabling.
+  await service.updateIntegrityPolicy("session-1", true);
+  // Re-read the row so the service sees the updated flag.
+  const afterReenable = session();
+  assert.equal(afterReenable.pointerDetectionEnabled, true);
+
+  // Now a pointer_exit should count as the first strike.
+  const enabled = await service.recordIntegrityEvent("EV-123456", {
+    ...pointerExitEvent,
+    clientEventId: "new-event-id-after-reenable",
+  });
+  assert.equal(enabled.counted, true, "pointer_exit counts after re-enable");
+  assert.equal(enabled.warningCount, 1);
+  assert.equal(enabled.action, "warned");
+  assert.equal(session().status, "IN_PROGRESS");
+});
+
+test("updateIntegrityPolicy emits integrity.policy.updated to the authorized room", async () => {
+  const { prisma } = createFakePrisma();
+  const emitted: Array<{ room: string; event: string; payload: unknown }> = [];
+  const publisher = {
+    emitToSession: (_sid: string, event: string, payload: unknown) => {
+      emitted.push({ room: "session:session-1", event, payload });
+    },
+  };
+  const service = createService(prisma, publisher);
+
+  const result = await service.updateIntegrityPolicy("session-1", false);
+  assert.equal(result.pointerDetectionEnabled, false);
+  assert.equal(emitted.length, 1);
+  assert.equal(emitted[0].event, "integrity.policy.updated");
+  const payload = emitted[0].payload as Record<string, unknown>;
+  assert.equal(payload.sessionId, "session-1");
+  assert.equal(payload.pointerDetectionEnabled, false);
+  assert.equal(typeof payload.updatedAt, "string", "updatedAt must be an ISO string");
 });
