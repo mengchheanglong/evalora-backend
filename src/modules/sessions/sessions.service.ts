@@ -952,8 +952,8 @@ export class SessionsService {
       return candidateId;
     }
 
-    const name = requireNonEmpty(input.candidateName, "Candidate name is required.");
     const email = normalizeEmail(requireNonEmpty(input.candidateEmail, "Candidate email is required."));
+    const name = input.candidateName?.trim() || candidateNameFromEmail(email);
     const findUnique = requireMethod(this.prisma.user?.findUnique, "user.findUnique");
     const create = requireMethod(this.prisma.user?.create, "user.create");
 
@@ -965,7 +965,9 @@ export class SessionsService {
       if (existingCandidate.role !== "CANDIDATE") {
         throw new Error("Candidate email is already used by a platform account.");
       }
-      assertCandidateBelongsToOrganization(existingCandidate, organizationId);
+      if (organizationId && existingCandidate.organizationId !== organizationId) {
+        throw new Error("This email already belongs to a candidate in another workspace. Use a different email address.");
+      }
       return existingCandidate.id;
     }
 
@@ -1364,6 +1366,14 @@ function isUniqueConstraintError(error: unknown): boolean {
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
+}
+
+/** "sok.dara+jobs@example.com" → "Sok Dara"; falls back to the email itself for unusual local parts. */
+function candidateNameFromEmail(email: string): string {
+  const localPart = email.split("@")[0]?.replace(/\+.*$/, "") ?? "";
+  const words = localPart.split(/[._-]+/).filter((word) => /[a-z]/i.test(word));
+  if (!words.length) return email;
+  return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
 }
 
 function normalizeAccessCode(accessCode: string): string {
