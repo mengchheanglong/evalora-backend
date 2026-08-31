@@ -31,3 +31,7 @@ Thumbs.db
 # prisma/local database
 *.db
 *.db-journal
+
+# Local startup helpers
+start-backend.*
+ecosystem.config.js
