@@ -103,6 +103,7 @@ interface SessionRow {
   report?: SessionReportRow | null;
   warningCount?: number;
   warningLimit?: number;
+  pointerDetectionEnabled?: boolean;
   createdById?: string | null;
   createdBy?: SessionCreatorRow | null;
   title?: string | null;
@@ -273,6 +274,7 @@ export interface IntegritySummaryDto {
   sessionId: string;
   warningCount: number;
   warningLimit: number;
+  pointerDetectionEnabled: boolean;
   status: SessionStatus;
   events: IntegrityEventDto[];
 }
@@ -729,7 +731,9 @@ export class SessionsService {
       throw new BadRequestException("returnedAt cannot be earlier than detectedAt.");
     }
     const durationMs = input.durationMs != null ? Math.round(input.durationMs) : undefined;
-    const counted = INTEGRITY_COUNTED_TYPES.has(type);
+    const counted = type === "pointer_exit"
+      ? session.pointerDetectionEnabled !== false
+      : INTEGRITY_COUNTED_TYPES.has(type);
     const reason = integrityReason(type, counted);
 
     // ------------------------------------------------------------
@@ -820,7 +824,7 @@ export class SessionsService {
     const session = await findFirst({
       relationLoadStrategy: "join",
       where: mergeWhere({ id: sessionId }, buildSessionOwnershipWhere(access)),
-      select: { id: true, status: true, warningCount: true, warningLimit: true },
+      select: { id: true, status: true, warningCount: true, warningLimit: true, pointerDetectionEnabled: true },
     });
     if (!session) throw forbiddenResourceError("Session");
 
@@ -836,6 +840,7 @@ export class SessionsService {
       sessionId: session.id,
       warningCount: session.warningCount ?? 0,
       warningLimit: session.warningLimit ?? DEFAULT_WARNING_LIMIT,
+      pointerDetectionEnabled: session.pointerDetectionEnabled !== false,
       status: fromPrismaSessionStatus(session.status),
       events: events.map(toIntegrityEventDto),
     };
@@ -940,6 +945,30 @@ export class SessionsService {
     } catch {
       // Swallowed on purpose — clients recover via REST or the re-join snapshot.
     }
+  }
+
+  async updateIntegrityPolicy(id: string, pointerDetectionEnabled: boolean, access: AccessContext): Promise<{ sessionId: string; pointerDetectionEnabled: boolean }> {
+    const current = await this.getSession(id, access);
+    if (!current) throw forbiddenResourceError("Session");
+
+    const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
+    const updated = await update({
+      where: { id: current.id },
+      data: { pointerDetectionEnabled },
+      select: { id: true, pointerDetectionEnabled: true, updatedAt: true },
+    }) as { id: string; pointerDetectionEnabled: boolean; updatedAt?: Date };
+
+    try {
+      this.events?.emitToSession(updated.id, INTERVIEW_EVENTS.integrityPolicyUpdated, {
+        sessionId: updated.id,
+        pointerDetectionEnabled: updated.pointerDetectionEnabled,
+        updatedAt: toIso(updated.updatedAt) ?? this.now().toISOString(),
+      });
+    } catch {
+      // The persisted policy is authoritative; clients recover it on rejoin.
+    }
+
+    return { sessionId: updated.id, pointerDetectionEnabled: updated.pointerDetectionEnabled };
   }
 
   private async resolveCandidateId(input: CreateSessionInput, organizationId: string | undefined, access?: AccessContext): Promise<string> {
@@ -1083,6 +1112,7 @@ function toSessionDto(session: SessionRow): InterviewSessionDto {
     accessCode: session.accessCode,
     warningCount: session.warningCount ?? 0,
     warningLimit: session.warningLimit ?? DEFAULT_WARNING_LIMIT,
+    pointerDetectionEnabled: session.pointerDetectionEnabled !== false,
     overallScore: session.report?.overallScore,
     reportReady: Boolean(session.report),
     startedAt: toIso(session.startedAt),

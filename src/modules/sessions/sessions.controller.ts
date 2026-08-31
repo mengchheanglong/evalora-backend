@@ -9,6 +9,7 @@ import {
   NotFoundException,
   Param,
   Post,
+  Patch,
   Put,
   Query,
   Req,
@@ -22,6 +23,7 @@ import { LiveKitService } from "../livekit/livekit.service";
 import { ValidateDto } from "../../common/pipes/validate-dto.pipe";
 import { CandidateAccessRateLimitGuard } from "./access-rate-limit.guard";
 import { ReportIntegrityEventDto } from "./dto/report-integrity-event.dto";
+import { UpdateIntegrityPolicyDto } from "./dto/update-integrity-policy.dto";
 import { type CreateSessionInput, type ListSessionsFilter, SessionsService } from "./sessions.service";
 
 @Controller("sessions")
@@ -82,6 +84,16 @@ export class SessionsController {
   @Roles("admin", "organization", "interviewer")
   getIntegrityEvents(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
     return this.sessionsService.getIntegrityEvents(id, toAccessContext(request.user));
+  }
+
+  @Patch(":id/integrity-policy")
+  @Roles("admin", "organization", "interviewer")
+  updateIntegrityPolicy(
+    @Param("id") id: string,
+    @Body(new ValidateDto(UpdateIntegrityPolicyDto)) body: UpdateIntegrityPolicyDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.sessionsService.updateIntegrityPolicy(id, body.pointerDetectionEnabled, toAccessContext(request.user));
   }
 
   @Put(":id/start")
