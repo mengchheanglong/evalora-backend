@@ -245,8 +245,8 @@ model InterviewSession {
   warningCount         Int                   @default(0) @map("warning_count")
   /// Two-strike integrity policy: the first counted violation warns, the second ends the session.
   warningLimit         Int                   @default(2) @map("warning_limit")
-  /// Interviewer-controlled policy for pointer-exit integrity signals.
-  pointerDetectionEnabled Boolean            @default(true) @map("pointer_detection_enabled")
+  /// Interviewer-controlled toggle to pause/resume all integrity event detection.
+  detectionEnabled    Boolean            @default(true) @map("detection_enabled")
   integrityEvents      IntegrityEvent[]
   createdAt            DateTime              @default(now()) @map("created_at")
   updatedAt            DateTime              @updatedAt @map("updated_at")
