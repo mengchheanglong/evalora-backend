@@ -282,6 +282,41 @@ test("createSession can create an invite-only candidate record from name and ema
   assert.equal(calls[3].args.data.organizationId, "org-1");
 });
 
+test("createSession derives the candidate name from the email when no name is given", async () => {
+  const calls: Array<{ method: string; args: any }> = [];
+  const service = new SessionsService(
+    {
+      assessmentTemplate: {
+        findFirst: async () => ({ id: "template-1", organizationId: "org-1" }),
+      },
+      user: {
+        findUnique: async () => null,
+        create: async (args: any) => {
+          calls.push({ method: "user.create", args });
+          return { id: "candidate-2", name: args.data.name, email: args.data.email, role: "CANDIDATE", organizationId: "org-1" };
+        },
+      },
+      interviewSession: {
+        create: async () => sessionRow,
+      },
+    } as any,
+    { generateAccessCode: () => "EV-123456", now: () => now },
+  );
+
+  await service.createSession(
+    {
+      candidateEmail: "Sok.Dara+jobs@Example.com",
+      templateId: "template-1",
+      expiresAt,
+    },
+    interviewerAccess,
+  );
+
+  assert.equal(calls[0].method, "user.create");
+  assert.equal(calls[0].args.data.name, "Sok Dara");
+  assert.equal(calls[0].args.data.email, "sok.dara+jobs@example.com");
+});
+
 test("candidate invite access code opens, starts, and completes only the assigned assessment", async () => {
   const calls: Array<{ method: string; args: any }> = [];
   let currentStatus = "NOT_STARTED";
