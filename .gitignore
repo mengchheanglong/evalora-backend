@@ -35,3 +35,6 @@ Thumbs.db
 # Local startup helpers
 start-backend.*
 ecosystem.config.js
+
+# Windows-specific
+prisma-generate.bat

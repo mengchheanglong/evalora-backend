@@ -93,7 +93,7 @@ export class SessionsController {
     @Body(new ValidateDto(UpdateIntegrityPolicyDto)) body: UpdateIntegrityPolicyDto,
     @Req() request: AuthenticatedRequest,
   ) {
-    return this.sessionsService.updateIntegrityPolicy(id, body.pointerDetectionEnabled, toAccessContext(request.user));
+    return this.sessionsService.updateIntegrityPolicy(id, body.detectionEnabled, toAccessContext(request.user));
   }
 
   @Put(":id/start")
