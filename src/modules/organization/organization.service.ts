@@ -453,17 +453,11 @@ export class OrganizationService {
       where: { email },
       select: { id: true, organizationId: true, role: true },
     });
-    if (existingUser) {
+    // A candidate account is not a workspace member — acceptInvite upgrades it to one, so
+    // a candidate email is always invitable regardless of which organization it was created under.
+    if (existingUser && existingUser.role !== "CANDIDATE") {
       if (existingUser.organizationId === organizationId) {
         throw new ConflictException("This person is already a member of your workspace.");
-      }
-      if (existingUser.role === "CANDIDATE") {
-        // acceptInvite refuses to upgrade an existing candidate account into a
-        // workspace member, so allowing the invite here would send a link that can
-        // never be accepted (a dead-end). Reject up front with clear guidance.
-        throw new ConflictException(
-          "This email is already registered as a candidate. Use a different work email for workspace access.",
-        );
       }
       throw new ConflictException("An account with this email already exists. Ask them to use a different work email.");
     }
@@ -582,37 +576,26 @@ export class OrganizationService {
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
     const user = await this.prisma.$transaction(async (tx) => {
-      // Candidate rows with the same email are rare; block rather than overwrite.
-      if (existingUser?.role === "CANDIDATE") {
-        throw new ConflictException(
-          "This email is already used for a candidate invitation. Use a different work email for workspace access.",
-        );
-      }
-
-      const created = await tx.user.create({
-        data: {
-          name,
-          email: invite.email,
-          emailVerified: true,
-          passwordHash,
-          role: "INTERVIEWER",
-          organizationId: invite.organizationId,
-        },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          role: true,
-          organizationId: true,
-        },
-      });
+      // A candidate account is upgraded in place to a workspace member rather than
+      // creating a second row — email is a single global identity across roles.
+      const select = { id: true, name: true, email: true, role: true, organizationId: true } as const;
+      const memberData = {
+        name,
+        emailVerified: true,
+        passwordHash,
+        role: "INTERVIEWER" as const,
+        organizationId: invite.organizationId,
+      };
+      const upgraded = existingUser
+        ? await tx.user.update({ where: { id: existingUser.id }, data: memberData, select })
+        : await tx.user.create({ data: { ...memberData, email: invite.email }, select });
 
       await tx.organizationInvite.update({
         where: { id: invite.id },
         data: { status: "ACCEPTED", acceptedAt: new Date() },
       });
 
-      return created;
+      return upgraded;
     });
 
     // Sign JWT via a lightweight path — OrganizationService should not depend on AuthService circularly.
