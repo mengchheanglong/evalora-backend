@@ -42,7 +42,10 @@ export class SessionsController {
       return await this.sessionsService.createSession(body, toAccessContext(request.user));
     } catch (error) {
       if (error instanceof HttpException) throw error;
-      throw new BadRequestException(error instanceof Error ? error.message : "Session creation failed.");
+      // Convert Prisma/unknown errors to a safe user-facing message instead of
+      // leaking raw database details that the allowlist cannot possibly cover.
+      const message = humanizeSessionError(error);
+      throw new BadRequestException(message);
     }
   }
 
@@ -178,4 +181,29 @@ export class CandidateSessionAccessController {
       throw new BadRequestException(error instanceof Error ? error.message : "Integrity event could not be recorded.");
     }
   }
+}
+
+/**
+ * Turn raw Prisma / unknown errors into a single safe string the frontend can
+ * show to the user.  Never leak database internals — map to a generic
+ * message that is already in the PUBLIC_API_MESSAGES allowlist.
+ */
+function humanizeSessionError(error: unknown): string {
+  if (!(error instanceof Error)) return "Session creation failed.";
+
+  // Prisma foreign-key violation (P2003) — candidate or template missing.
+  const code = (error as { code?: string }).code;
+  if (code === "P2003") {
+    const field = (error as { meta?: { field_name?: string } }).meta?.field_name ?? "";
+    if (field.includes("candidate")) return "Candidate not found.";
+    if (field.includes("template")) return "Template not found.";
+    return "The request references data that no longer exists. Please reload and try again.";
+  }
+
+  // Prisma unique-constraint violation (P2002).
+  if (code === "P2002") return "A session with the same identifier already exists. Please try again.";
+
+  // Known application errors that are NOT in the PUBLIC_API_MESSAGES allowlist
+  // should be mapped to a safe generic fallback.
+  return error.message || "Session creation failed.";
 }

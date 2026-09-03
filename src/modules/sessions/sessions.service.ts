@@ -993,9 +993,8 @@ export class SessionsService {
       if (existingCandidate.role !== "CANDIDATE") {
         throw new Error("Candidate email is already used by a platform account.");
       }
-      if (organizationId && existingCandidate.organizationId !== organizationId) {
-        throw new Error("This email already belongs to a candidate in another workspace. Use a different email address.");
-      }
+      // Allow candidates to participate across workspaces — the session itself
+      // is already scoped to the inviting organization.
       return existingCandidate.id;
     }
 
