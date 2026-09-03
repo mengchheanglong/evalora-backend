@@ -1,5 +1,6 @@
-import { Module } from "@nestjs/common";
+import { type MiddlewareConsumer, Module, type NestModule, RequestMethod } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
+import { RequestValidationMiddleware } from "./common/middleware/request-validation.middleware";
 import { AnalyticsController } from "./modules/analytics/analytics.controller";
 import { AnalyticsService } from "./modules/analytics/analytics.service";
 import { SystemHealthService } from "./modules/analytics/system-health.service";
@@ -135,4 +136,10 @@ import { LiveKitService } from "./modules/livekit/livekit.service";
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(RequestValidationMiddleware)
+      .forRoutes({ path: "*", method: RequestMethod.ALL });
+  }
+}

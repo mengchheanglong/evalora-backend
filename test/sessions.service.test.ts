@@ -317,17 +317,17 @@ test("createSession derives the candidate name from the email when no name is gi
   assert.equal(calls[0].args.data.email, "sok.dara+jobs@example.com");
 });
 
-test("createSession reuses an existing same-workspace candidate invited by email only", async () => {
+test("createSession reuses a candidate already invited by another workspace", async () => {
   const calls: Array<{ method: string; args: any }> = [];
   const service = new SessionsService(
     {
       assessmentTemplate: {
-        findFirst: async () => ({ id: "template-1", organizationId: "org-1" }),
+        findFirst: async () => ({ id: "template-1", organizationId: "org-2" }),
       },
       user: {
         findUnique: async () => ({ id: "candidate-1", role: "CANDIDATE", organizationId: "org-1" }),
         create: async () => {
-          throw new Error("existing candidate must not be recreated");
+          throw new Error("should not create a new candidate when one already exists");
         },
       },
       interviewSession: {
@@ -342,17 +342,17 @@ test("createSession reuses an existing same-workspace candidate invited by email
 
   const result = await service.createSession(
     {
-      candidateEmail: "lina@kit.edu.kh",
+      candidateEmail: "candidate@example.com",
       templateId: "template-1",
       expiresAt,
     },
-    interviewerAccess,
+    { ...interviewerAccess, organizationId: "org-2" },
   );
 
-  assert.equal(calls.length, 1);
+  assert.equal(result.candidateId, "candidate-1");
   assert.equal(calls[0].method, "session.create");
   assert.equal(calls[0].args.data.candidateId, "candidate-1");
-  assert.equal(result.candidateId, "candidate-1");
+  assert.equal(calls[0].args.data.organizationId, "org-2");
 });
 
 test("candidate invite access code opens, starts, and completes only the assigned assessment", async () => {

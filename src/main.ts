@@ -4,12 +4,15 @@ import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module";
 import { PrismaExceptionFilter } from "./common/filters/prisma-exception.filter";
+import { PayloadValidationFilter } from "./common/filters/payload-validation.filter";
+import { payloadSyntaxErrorHandler } from "./common/middleware/request-validation.middleware";
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   // Profile photos are resized in the browser before upload. Raise the JSON cap
   // above Express's default so the compressed data URL reaches validation.
   app.useBodyParser("json", { limit: "512kb" });
+  app.use(payloadSyntaxErrorHandler);
   const allowedOrigins = (process.env.FRONTEND_URL ?? "")
     .split(",")
     .map((origin) => origin.trim())
@@ -39,7 +42,10 @@ async function bootstrap() {
       transform: true,
     }),
   );
-  app.useGlobalFilters(new PrismaExceptionFilter());
+  app.useGlobalFilters(
+    new PrismaExceptionFilter(),
+    new PayloadValidationFilter(),
+  );
 
   // Drain Prisma connections / in-flight work on SIGTERM/SIGINT.
   app.enableShutdownHooks();

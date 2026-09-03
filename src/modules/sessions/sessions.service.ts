@@ -103,6 +103,7 @@ interface SessionRow {
   report?: SessionReportRow | null;
   warningCount?: number;
   warningLimit?: number;
+  detectionEnabled?: boolean;
   createdById?: string | null;
   createdBy?: SessionCreatorRow | null;
   title?: string | null;
@@ -273,6 +274,7 @@ export interface IntegritySummaryDto {
   sessionId: string;
   warningCount: number;
   warningLimit: number;
+  detectionEnabled: boolean;
   status: SessionStatus;
   events: IntegrityEventDto[];
 }
@@ -729,8 +731,9 @@ export class SessionsService {
       throw new BadRequestException("returnedAt cannot be earlier than detectedAt.");
     }
     const durationMs = input.durationMs != null ? Math.round(input.durationMs) : undefined;
-    const counted = INTEGRITY_COUNTED_TYPES.has(type);
-    const reason = integrityReason(type, counted);
+    const paused = session.detectionEnabled === false;
+    const counted = !paused && INTEGRITY_COUNTED_TYPES.has(type);
+    const reason = paused ? "Detection paused by interviewer." : integrityReason(type, counted);
 
     // ------------------------------------------------------------
     // Deduplicate before writing: retrying the same clientEventId must
@@ -820,7 +823,7 @@ export class SessionsService {
     const session = await findFirst({
       relationLoadStrategy: "join",
       where: mergeWhere({ id: sessionId }, buildSessionOwnershipWhere(access)),
-      select: { id: true, status: true, warningCount: true, warningLimit: true },
+      select: { id: true, status: true, warningCount: true, warningLimit: true, detectionEnabled: true },
     });
     if (!session) throw forbiddenResourceError("Session");
 
@@ -836,6 +839,7 @@ export class SessionsService {
       sessionId: session.id,
       warningCount: session.warningCount ?? 0,
       warningLimit: session.warningLimit ?? DEFAULT_WARNING_LIMIT,
+      detectionEnabled: session.detectionEnabled !== false,
       status: fromPrismaSessionStatus(session.status),
       events: events.map(toIntegrityEventDto),
     };
@@ -942,6 +946,30 @@ export class SessionsService {
     }
   }
 
+  async updateIntegrityPolicy(id: string, detectionEnabled: boolean, access: AccessContext): Promise<{ sessionId: string; detectionEnabled: boolean }> {
+    const current = await this.getSession(id, access);
+    if (!current) throw forbiddenResourceError("Session");
+
+    const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
+    const updated = await update({
+      where: { id: current.id },
+      data: { detectionEnabled },
+      select: { id: true, detectionEnabled: true, updatedAt: true },
+    }) as { id: string; detectionEnabled: boolean; updatedAt?: Date };
+
+    try {
+      this.events?.emitToSession(updated.id, INTERVIEW_EVENTS.integrityPolicyUpdated, {
+        sessionId: updated.id,
+        detectionEnabled: updated.detectionEnabled,
+        updatedAt: toIso(updated.updatedAt) ?? this.now().toISOString(),
+      });
+    } catch {
+      // The persisted policy is authoritative; clients recover it on rejoin.
+    }
+
+    return { sessionId: updated.id, detectionEnabled: updated.detectionEnabled };
+  }
+
   private async resolveCandidateId(input: CreateSessionInput, organizationId: string | undefined, access?: AccessContext): Promise<string> {
     if (input.candidateId?.trim()) {
       const candidateId = input.candidateId.trim();
@@ -965,7 +993,9 @@ export class SessionsService {
       if (existingCandidate.role !== "CANDIDATE") {
         throw new Error("Candidate email is already used by a platform account.");
       }
-      assertCandidateBelongsToOrganization(existingCandidate, organizationId);
+      // Candidate identity is global (one account per email); session access is scoped by
+      // InterviewSession.organizationId, not by the candidate row's original organizationId.
+      // So the same person can be invited by any workspace without a collision.
       return existingCandidate.id;
     }
 
@@ -1083,6 +1113,7 @@ function toSessionDto(session: SessionRow): InterviewSessionDto {
     accessCode: session.accessCode,
     warningCount: session.warningCount ?? 0,
     warningLimit: session.warningLimit ?? DEFAULT_WARNING_LIMIT,
+    detectionEnabled: session.detectionEnabled !== false,
     overallScore: session.report?.overallScore,
     reportReady: Boolean(session.report),
     startedAt: toIso(session.startedAt),

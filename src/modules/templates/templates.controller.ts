@@ -14,10 +14,17 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
+import { ValidateDto } from "../../common/pipes/validate-dto.pipe";
+import { ValidateQuery } from "../../common/validation/pipes/validate-query.pipe";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import {
-  type CloneFromCatalogInput,
+  CloneFromCatalogDto,
+  CreateTemplateDto,
+  ListTemplatesQueryDto,
+  UpdateTemplateDto,
+} from "./dto/template.dto";
+import {
   type CreateTemplateInput,
   TemplatesService,
   type UpdateTemplateInput,
@@ -44,7 +51,10 @@ export class TemplatesController {
   /** Clone a prebuilt into the caller's organization (ready to assign or edit). */
   @Post("from-catalog")
   @Roles("admin", "organization", "interviewer")
-  async cloneFromCatalog(@Body() body: CloneFromCatalogInput, @Req() request: AuthenticatedRequest) {
+  async cloneFromCatalog(
+    @Body(new ValidateDto(CloneFromCatalogDto)) body: CloneFromCatalogDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
     try {
       return await this.templatesService.cloneFromCatalog(body, toAccessContext(request.user));
     } catch (error) {
@@ -55,15 +65,27 @@ export class TemplatesController {
 
   @Get()
   @Roles("admin", "organization", "interviewer")
-  findAll(@Req() request: AuthenticatedRequest, @Query("organizationId") organizationId?: string) {
-    return this.templatesService.listTemplates({ organizationId, access: toAccessContext(request.user) });
+  findAll(
+    @Req() request: AuthenticatedRequest,
+    @Query(new ValidateQuery(ListTemplatesQueryDto)) query: ListTemplatesQueryDto,
+  ) {
+    return this.templatesService.listTemplates({
+      organizationId: query.organizationId,
+      access: toAccessContext(request.user),
+    });
   }
 
   @Post()
   @Roles("admin", "organization", "interviewer")
-  async create(@Body() body: CreateTemplateInput, @Req() request: AuthenticatedRequest) {
+  async create(
+    @Body(new ValidateDto(CreateTemplateDto)) body: CreateTemplateDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
     try {
-      return await this.templatesService.createTemplate(body, toAccessContext(request.user));
+      return await this.templatesService.createTemplate(
+        body as unknown as CreateTemplateInput,
+        toAccessContext(request.user),
+      );
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new BadRequestException(error instanceof Error ? error.message : "Template creation failed.");
@@ -91,9 +113,17 @@ export class TemplatesController {
 
   @Put(":id")
   @Roles("admin", "organization", "interviewer")
-  async update(@Param("id") id: string, @Body() body: UpdateTemplateInput, @Req() request: AuthenticatedRequest) {
+  async update(
+    @Param("id") id: string,
+    @Body(new ValidateDto(UpdateTemplateDto)) body: UpdateTemplateDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
     try {
-      return await this.templatesService.updateTemplate(id, body, toAccessContext(request.user));
+      return await this.templatesService.updateTemplate(
+        id,
+        body as unknown as UpdateTemplateInput,
+        toAccessContext(request.user),
+      );
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new BadRequestException(error instanceof Error ? error.message : "Template update failed.");

@@ -31,3 +31,10 @@ Thumbs.db
 # prisma/local database
 *.db
 *.db-journal
+
+# Local startup helpers
+start-backend.*
+ecosystem.config.js
+
+# Windows-specific
+prisma-generate.bat
