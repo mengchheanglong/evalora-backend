@@ -1,6 +1,7 @@
 import { Type } from "class-transformer";
 import {
   IsArray,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -10,7 +11,19 @@ import {
   Min,
   ValidateNested,
 } from "class-validator";
+import type { ModuleType } from "../../../domain/evalora.types";
 import { Trim } from "../../../common/validation/decorators/transform.decorators";
+
+export const VALID_MODULE_TYPES: readonly ModuleType[] = [
+  "ai_interview",
+  "coding",
+  "debugging",
+  "work_style",
+  "behavioral",
+  "leadership",
+  "communication",
+  "problem_solving",
+] as const;
 
 const TITLE_MAX_LENGTH = 200;
 const DESCRIPTION_MAX_LENGTH = 2000;
@@ -79,9 +92,11 @@ export class CreateTemplateModuleDto {
 
   @IsString()
   @IsNotEmpty({ message: "type is required." })
-  @MaxLength(64)
+  @IsIn(VALID_MODULE_TYPES, {
+    message: `type must be one of: ${VALID_MODULE_TYPES.join(", ")}.`,
+  })
   @Trim()
-  type!: string;
+  type!: ModuleType;
 
   @IsOptional()
   @IsString()

@@ -24,7 +24,11 @@ import {
   ListTemplatesQueryDto,
   UpdateTemplateDto,
 } from "./dto/template.dto";
-import { TemplatesService } from "./templates.service";
+import {
+  type CreateTemplateInput,
+  TemplatesService,
+  type UpdateTemplateInput,
+} from "./templates.service";
 
 @Controller("templates")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -78,7 +82,10 @@ export class TemplatesController {
     @Req() request: AuthenticatedRequest,
   ) {
     try {
-      return await this.templatesService.createTemplate(body, toAccessContext(request.user));
+      return await this.templatesService.createTemplate(
+        body as unknown as CreateTemplateInput,
+        toAccessContext(request.user),
+      );
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new BadRequestException(error instanceof Error ? error.message : "Template creation failed.");
@@ -112,7 +119,11 @@ export class TemplatesController {
     @Req() request: AuthenticatedRequest,
   ) {
     try {
-      return await this.templatesService.updateTemplate(id, body, toAccessContext(request.user));
+      return await this.templatesService.updateTemplate(
+        id,
+        body as unknown as UpdateTemplateInput,
+        toAccessContext(request.user),
+      );
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new BadRequestException(error instanceof Error ? error.message : "Template update failed.");

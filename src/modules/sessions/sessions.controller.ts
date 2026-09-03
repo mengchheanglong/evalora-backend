@@ -15,7 +15,6 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
-import type { SessionStatus } from "../../domain/evalora.types";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { ReportsService } from "../reports/reports.service";
