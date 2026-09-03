@@ -993,9 +993,9 @@ export class SessionsService {
       if (existingCandidate.role !== "CANDIDATE") {
         throw new Error("Candidate email is already used by a platform account.");
       }
-      if (organizationId && existingCandidate.organizationId !== organizationId) {
-        throw new Error("This email already belongs to a candidate in another workspace. Use a different email address.");
-      }
+      // Candidate identity is global (one account per email); session access is scoped by
+      // InterviewSession.organizationId, not by the candidate row's original organizationId.
+      // So the same person can be invited by any workspace without a collision.
       return existingCandidate.id;
     }
 
