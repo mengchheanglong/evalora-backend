@@ -15,16 +15,17 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
-import type { SessionStatus } from "../../domain/evalora.types";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { ReportsService } from "../reports/reports.service";
 import { LiveKitService } from "../livekit/livekit.service";
 import { ValidateDto } from "../../common/pipes/validate-dto.pipe";
+import { ValidateQuery } from "../../common/validation/pipes/validate-query.pipe";
 import { CandidateAccessRateLimitGuard } from "./access-rate-limit.guard";
+import { CreateSessionDto, ListSessionsQueryDto } from "./dto/session.dto";
 import { ReportIntegrityEventDto } from "./dto/report-integrity-event.dto";
 import { UpdateIntegrityPolicyDto } from "./dto/update-integrity-policy.dto";
-import { type CreateSessionInput, type ListSessionsFilter, SessionsService } from "./sessions.service";
+import { SessionsService } from "./sessions.service";
 
 @Controller("sessions")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -37,7 +38,10 @@ export class SessionsController {
 
   @Post()
   @Roles("admin", "organization", "interviewer")
-  async create(@Body() body: CreateSessionInput, @Req() request: AuthenticatedRequest) {
+  async create(
+    @Body(new ValidateDto(CreateSessionDto)) body: CreateSessionDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
     try {
       return await this.sessionsService.createSession(body, toAccessContext(request.user));
     } catch (error) {
@@ -50,13 +54,9 @@ export class SessionsController {
   @Roles("admin", "organization", "interviewer")
   findAll(
     @Req() request: AuthenticatedRequest,
-    @Query("organizationId") organizationId?: string,
-    @Query("candidateId") candidateId?: string,
-    @Query("templateId") templateId?: string,
-    @Query("status") status?: SessionStatus,
+    @Query(new ValidateQuery(ListSessionsQueryDto)) query: ListSessionsQueryDto,
   ) {
-    const filter: ListSessionsFilter = { organizationId, candidateId, templateId, status };
-    return this.sessionsService.listSessions(filter, toAccessContext(request.user));
+    return this.sessionsService.listSessions(query, toAccessContext(request.user));
   }
 
   @Get(":id")
