@@ -101,12 +101,28 @@ test("CreateSessionDto validates candidate email format and strips unknown prope
     candidateName: "  Bob Tester  ",
     candidateEmail: "  bob@test.com  ",
     expiresAt: "2026-10-01T00:00:00.000Z",
+    title: "  Frontend Engineer Assessment  ",
+    notes: "Follow up on React performance.",
+    targetRole: "Frontend Engineer",
+    department: "Engineering",
+    interviewType: "technical",
+    interviewers: ["Alice Interviewer", "Bob Reviewer"],
+    scheduledAt: "2026-10-05T14:00:00.000Z",
+    sessionDate: "2026-10-05",
+    startTime: "14:00",
+    durationMin: 60,
+    language: "en",
+    timeZone: "America/New_York",
   });
 
   assert.equal(valid.templateId, "tmpl-12345");
   assert.equal(valid.candidateName, "Bob Tester");
   assert.equal(valid.candidateEmail, "bob@test.com");
   assert.equal(valid.expiresAt, "2026-10-01T00:00:00.000Z");
+  assert.equal(valid.title, "Frontend Engineer Assessment");
+  assert.equal(valid.targetRole, "Frontend Engineer");
+  assert.equal(valid.department, "Engineering");
+  assert.equal(valid.durationMin, 60);
 
   // Invalid email format
   assert.throws(
