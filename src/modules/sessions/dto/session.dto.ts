@@ -57,6 +57,71 @@ export class CreateSessionDto {
   @IsISO8601({ strict: false }, { message: "expiresAt must be a valid ISO-8601 date string." })
   @Trim()
   expiresAt?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(NAME_MAX_LENGTH)
+  @Trim()
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Trim()
+  interviewType?: string;
+
+  @IsOptional()
+  interviewers?: string[] | string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  @Trim()
+  notes?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(NAME_MAX_LENGTH)
+  @Trim()
+  targetRole?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(NAME_MAX_LENGTH)
+  @Trim()
+  department?: string;
+
+  @IsOptional()
+  @IsString()
+  @Trim()
+  scheduledAt?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  @Trim()
+  sessionDate?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  @Trim()
+  startTime?: string;
+
+  @IsOptional()
+  durationMin?: number | string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  @Trim()
+  language?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Trim()
+  timeZone?: string;
 }
 
 export class ListSessionsQueryDto {
