@@ -41,6 +41,7 @@ export class SessionsController {
     try {
       return await this.sessionsService.createSession(body, toAccessContext(request.user));
     } catch (error) {
+      console.error("[sessions.controller] create error:", error);
       if (error instanceof HttpException) throw error;
       // Convert Prisma/unknown errors to a safe user-facing message instead of
       // leaking raw database details that the allowlist cannot possibly cover.
@@ -202,6 +203,14 @@ function humanizeSessionError(error: unknown): string {
 
   // Prisma unique-constraint violation (P2002).
   if (code === "P2002") return "A session with the same identifier already exists. Please try again.";
+
+  // Prisma record-not-found (P2025).
+  if (code === "P2025") return "The request references data that no longer exists. Please reload and try again.";
+
+  // Any other Prisma driver error — map to a safe message.
+  if (code && typeof code === "string" && code.startsWith("P")) {
+    return "Session creation failed. Please try again.";
+  }
 
   // Known application errors that are NOT in the PUBLIC_API_MESSAGES allowlist
   // should be mapped to a safe generic fallback.
