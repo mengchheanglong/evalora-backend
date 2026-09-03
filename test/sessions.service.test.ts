@@ -282,6 +282,79 @@ test("createSession can create an invite-only candidate record from name and ema
   assert.equal(calls[3].args.data.organizationId, "org-1");
 });
 
+test("createSession derives the candidate name from the email when no name is given", async () => {
+  const calls: Array<{ method: string; args: any }> = [];
+  const service = new SessionsService(
+    {
+      assessmentTemplate: {
+        findFirst: async () => ({ id: "template-1", organizationId: "org-1" }),
+      },
+      user: {
+        findUnique: async () => null,
+        create: async (args: any) => {
+          calls.push({ method: "user.create", args });
+          return { id: "candidate-2", name: args.data.name, email: args.data.email, role: "CANDIDATE", organizationId: "org-1" };
+        },
+      },
+      interviewSession: {
+        create: async () => sessionRow,
+      },
+    } as any,
+    { generateAccessCode: () => "EV-123456", now: () => now },
+  );
+
+  await service.createSession(
+    {
+      candidateEmail: "Sok.Dara+jobs@Example.com",
+      templateId: "template-1",
+      expiresAt,
+    },
+    interviewerAccess,
+  );
+
+  assert.equal(calls[0].method, "user.create");
+  assert.equal(calls[0].args.data.name, "Sok Dara");
+  assert.equal(calls[0].args.data.email, "sok.dara+jobs@example.com");
+});
+
+test("createSession reuses an existing same-workspace candidate invited by email only", async () => {
+  const calls: Array<{ method: string; args: any }> = [];
+  const service = new SessionsService(
+    {
+      assessmentTemplate: {
+        findFirst: async () => ({ id: "template-1", organizationId: "org-1" }),
+      },
+      user: {
+        findUnique: async () => ({ id: "candidate-1", role: "CANDIDATE", organizationId: "org-1" }),
+        create: async () => {
+          throw new Error("existing candidate must not be recreated");
+        },
+      },
+      interviewSession: {
+        create: async (args: any) => {
+          calls.push({ method: "session.create", args });
+          return sessionRow;
+        },
+      },
+    } as any,
+    { generateAccessCode: () => "EV-123456", now: () => now },
+  );
+
+  const result = await service.createSession(
+    {
+      candidateEmail: "lina@kit.edu.kh",
+      templateId: "template-1",
+      expiresAt,
+    },
+    interviewerAccess,
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, "session.create");
+  assert.equal(calls[0].args.data.candidateId, "candidate-1");
+  assert.equal(result.candidateId, "candidate-1");
+});
+
 test("candidate invite access code opens, starts, and completes only the assigned assessment", async () => {
   const calls: Array<{ method: string; args: any }> = [];
   let currentStatus = "NOT_STARTED";
