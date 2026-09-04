@@ -5,27 +5,22 @@ import {
   HttpStatus,
   Injectable,
 } from "@nestjs/common";
-import type { Request } from "express";
-
-interface WindowState {
-  count: number;
-  resetAt: number;
-}
+import type { Request, Response } from "express";
+import { SlidingWindowRateLimitStore } from "../../../common/rate-limiting/rate-limit-store";
 
 /**
- * Lightweight in-memory fixed-window rate limiter for the code-execution
- * endpoints. These proxy untrusted code to the sandbox, are currently
- * unauthenticated, and must not be usable as a free compute amplifier.
+ * Sliding-window rate limiter for the code-execution endpoints.
+ * These proxy untrusted code to the sandbox, are currently unauthenticated,
+ * and must not be usable as a free compute amplifier.
  *
- * Kept dependency-free on purpose; swap for @nestjs/throttler + a shared store
- * (Redis) once the API runs multiple instances.
+ * Uses a sliding window algorithm to strictly prevent boundary burst attacks
+ * and resource exhaustion of the execution runner.
  */
 @Injectable()
 export class CodeRateLimitGuard implements CanActivate {
   private readonly windowMs: number;
   private readonly maxRequests: number;
-  private readonly buckets = new Map<string, WindowState>();
-  private lastSweep = 0;
+  private readonly store = new SlidingWindowRateLimitStore();
 
   constructor() {
     this.windowMs = this.readPositiveInt(process.env.CODE_RATE_LIMIT_WINDOW_MS, 60_000);
@@ -33,33 +28,34 @@ export class CodeRateLimitGuard implements CanActivate {
   }
 
   canActivate(context: ExecutionContext): boolean {
-    const request = context.switchToHttp().getRequest<Request>();
-    const now = Date.now();
+    const http = context.switchToHttp();
+    const request = http.getRequest<Request>();
+    const response = typeof http.getResponse === "function" ? http.getResponse<Response>() : undefined;
     const key = this.resolveClientKey(request);
 
-    this.sweepExpired(now);
+    const result = this.store.consume(key, this.maxRequests, this.windowMs);
 
-    const bucket = this.buckets.get(key);
-
-    if (!bucket || bucket.resetAt <= now) {
-      this.buckets.set(key, { count: 1, resetAt: now + this.windowMs });
-      return true;
+    if (response?.setHeader) {
+      response.setHeader("X-RateLimit-Limit", result.limit);
+      response.setHeader("X-RateLimit-Remaining", result.remaining);
+      response.setHeader("X-RateLimit-Reset", Math.ceil(result.resetAt / 1000));
     }
 
-    if (bucket.count >= this.maxRequests) {
-      const retryAfterSeconds = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+    if (!result.allowed) {
+      if (response?.setHeader) {
+        response.setHeader("Retry-After", result.retryAfterSeconds);
+      }
       throw new HttpException(
         {
           statusCode: HttpStatus.TOO_MANY_REQUESTS,
           error: "Too Many Requests",
           message: "Too many code execution requests. Please slow down and try again shortly.",
-          retryAfter: retryAfterSeconds,
+          retryAfter: result.retryAfterSeconds,
         },
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
 
-    bucket.count += 1;
     return true;
   }
 
@@ -70,20 +66,6 @@ export class CodeRateLimitGuard implements CanActivate {
     // client could rotate X-Forwarded-For to mint a fresh bucket per request and
     // bypass the limit entirely.
     return request.ip || request.socket?.remoteAddress || "unknown";
-  }
-
-  private sweepExpired(now: number): void {
-    // Bound memory: reclaim expired buckets at most once per window.
-    if (now - this.lastSweep < this.windowMs) {
-      return;
-    }
-
-    this.lastSweep = now;
-    for (const [key, bucket] of this.buckets) {
-      if (bucket.resetAt <= now) {
-        this.buckets.delete(key);
-      }
-    }
   }
 
   private readPositiveInt(raw: string | undefined, fallback: number): number {

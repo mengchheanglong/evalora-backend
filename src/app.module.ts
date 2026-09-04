@@ -7,6 +7,7 @@ import { AnalyticsService } from "./modules/analytics/analytics.service";
 import { SystemHealthService } from "./modules/analytics/system-health.service";
 import { AppController } from "./app.controller";
 import { AiController, CandidateAiController } from "./modules/ai/ai.controller";
+import { AiRateLimitGuard } from "./modules/ai/guards/ai-rate-limit.guard";
 import { AiService } from "./modules/ai/ai.service";
 import { CandidateAiService } from "./modules/ai/candidate-ai.service";
 import { createDeepSeekProviderFromEnv } from "./modules/ai/deepseek.provider";
@@ -70,6 +71,7 @@ import { LiveKitService } from "./modules/livekit/livekit.service";
   providers: [
     AnalyticsService,
     SystemHealthService,
+    AiRateLimitGuard,
     AuthRateLimitGuard,
     CandidateAccessRateLimitGuard,
     CandidateAiService,
