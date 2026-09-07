@@ -60,9 +60,22 @@ enum TemplateDraftSource {
   PROMPT
 }
 
+enum SubscriptionPlan {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
 model Organization {
   id             String                    @id @default(uuid())
   name           String
+  /// Billing tier managed from the platform admin dashboard; the upcoming
+  /// subscription feature reads the same field.
+  plan           SubscriptionPlan          @default(FREE)
+  /// Platform-level suspension. While true, every owner/interviewer member is
+  /// rejected by the auth guard on their next request; platform admins are exempt.
+  isSuspended    Boolean                   @default(false) @map("is_suspended")
+  suspendedAt    DateTime?                 @map("suspended_at")
   users          User[]
   invites        OrganizationInvite[]
   templates      AssessmentTemplate[]
@@ -91,9 +104,13 @@ model User {
   reviewerNotes        ReviewerNote[]
   interviewerFollowUps InterviewerFollowUp[]     @relation("InterviewerFollowUpAuthor")
   sentInvites          OrganizationInvite[]      @relation("InviteSender")
+  /// Platform-level suspension. Existing JWTs stop working on the next request.
+  isSuspended          Boolean                   @default(false) @map("is_suspended")
+  suspendedAt          DateTime?                 @map("suspended_at")
   createdAt            DateTime                  @default(now()) @map("created_at")
   updatedAt            DateTime                  @updatedAt @map("updated_at")
 
+  @@index([role, createdAt])
   @@map("users")
 }
 

@@ -44,10 +44,11 @@ import { createEmailServiceFromEnv, EmailService } from "./modules/email/email.s
 import { PrismaService } from "./prisma/prisma.service";
 import { PrismaModule } from "./prisma/prisma.module";
 import { LiveKitService } from "./modules/livekit/livekit.service";
+import { AdminModule } from "./modules/admin/admin.module";
 
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, RealtimeModule, CodeModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, RealtimeModule, CodeModule, AdminModule],
   controllers: [
     AppController,
     AuthController,

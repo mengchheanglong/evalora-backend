@@ -1,7 +1,7 @@
-import { BadRequestException, Body, Controller, Get, Inject, Post, Put, Req, UnauthorizedException, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Inject, Post, Put, Req, UnauthorizedException, UseGuards } from "@nestjs/common";
 import { AuthRateLimitGuard } from "./auth-rate-limit.guard";
 import { JwtAuthGuard, Roles, RolesGuard, type AuthenticatedRequest, tryExtractAuthUserFromHeader } from "./auth.guard";
-import { AuthService, EmailVerificationRequiredError } from "./auth.service";
+import { AccountSuspendedError, AuthService, EmailVerificationRequiredError } from "./auth.service";
 import {
   ForgotPasswordDto,
   GoogleAuthDto,
@@ -40,6 +40,11 @@ export class AuthController {
       if (error instanceof EmailVerificationRequiredError) {
         throw new UnauthorizedException(error.message);
       }
+      // A suspended account presented valid credentials; telling them why is
+      // safer than a misleading "invalid password" that invites resets.
+      if (error instanceof AccountSuspendedError) {
+        throw new ForbiddenException(error.message);
+      }
       throw new UnauthorizedException("Invalid email or password.");
     }
   }
@@ -72,6 +77,9 @@ export class AuthController {
       const result = await this.authService.loginWithGoogle(body);
       return { ...result, message: "Google sign-in successful." };
     } catch (error) {
+      if (error instanceof AccountSuspendedError) {
+        throw new ForbiddenException(error.message);
+      }
       const message = error instanceof Error ? error.message : "Google sign-in failed.";
       if (/not configured|credential is required|missing an email/i.test(message)) {
         throw new BadRequestException(message);

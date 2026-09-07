@@ -2,6 +2,8 @@ import { CanActivate, ExecutionContext, ForbiddenException, Inject, Injectable, 
 import { Reflector } from "@nestjs/core";
 import * as jwt from "jsonwebtoken";
 import type { UserRole } from "../../domain/evalora.types";
+import { PrismaService } from "../../prisma/prisma.service";
+import { resolveActiveUser } from "./account-status";
 
 const DEFAULT_JWT_SECRET = "evalora-development-secret-change-me";
 export const ROLES_KEY = "roles";
@@ -53,9 +55,15 @@ export const Roles = (...roles: UserRole[]) => SetMetadata(ROLES_KEY, roles);
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    request.user = extractAuthUserFromHeader(request.headers.authorization);
+    const tokenUser = extractAuthUserFromHeader(request.headers.authorization);
+    // The token proves who is calling; the database decides what they may do
+    // right now. Suspension and role changes made in the Admin Hub therefore
+    // apply on the very next request rather than at token expiry.
+    request.user = await resolveActiveUser(this.prisma, tokenUser);
     return true;
   }
 }

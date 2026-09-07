@@ -174,3 +174,23 @@ Endpoints:
 - `GET /api/analytics/themes`
 
 Analytics are computed from persisted sessions, evaluations, reports, and report evidence. Workspace roles are organization-scoped; admins receive platform scope. Summary/activity reads first reconcile past-due, not-started invitations to `EXPIRED`. Summary responses expose all-time scope/freshness metadata, active/closed pipeline counts, report readiness and coverage, and nullable denominator-based rates. Quality analytics use completed sessions for one required template ID, preserve assessed zero scores, aggregate module performance by module type, and report sample sizes. Historical template revisions are not yet versioned and are disclosed as a comparison caveat. No static demo values are returned.
+
+## Admin
+
+Endpoints (all `@Roles("admin")`, class-level):
+
+- `GET /api/admin/overview`
+- `GET /api/admin/organizations`
+- `PATCH /api/admin/organizations/:id/status`
+- `PATCH /api/admin/organizations/:id/plan`
+- `GET /api/admin/users`
+- `PATCH /api/admin/users/:id/status`
+- `PATCH /api/admin/users/:id/role`
+
+Implemented platform-administration slice (`src/modules/admin/`):
+
+- `admin.module.ts` is a self-contained Nest module (imports `RealtimeModule` for the gateway stats its own `SystemHealthService` instance needs) and is imported by `AppModule`.
+- `admin.service.ts` aggregates platform totals with Prisma `count`/`groupBy` calls, lists organizations and users with search/filter/pagination (`pageSize` capped at 100), and applies the guardrails role checks cannot express: an admin cannot deactivate themselves, change their own role, or suspend their own workspace; candidate records cannot be given a staff role; the only owner of a workspace cannot be demoted to interviewer; staff without a workspace can only become platform admins.
+- AI cost is an estimate: `(assistant interview turns tagged provider "deepseek" + drafts with provider "deepseek") x AI_COST_PER_TURN_USD` (default `0.002`). Fallback output is free and is reported separately as `interviewTurns`.
+- `src/modules/auth/account-status.ts` is the enforcement side. `JwtAuthGuard` now re-reads role, workspace, and both suspension flags on every authenticated request (`resolveActiveUser`), so a suspension or role change applies on the target's next call. Platform admins are exempt from workspace-level suspension. `AuthService.login`, Google sign-in, `GET /auth/me`, and the realtime handshake apply the same rule.
+- `scripts/grant-admin.ts` (`pnpm admin:grant <email>`) promotes the first platform admin; public registration never creates one.

@@ -6,8 +6,8 @@ Evalora uses PostgreSQL on Neon with Prisma.
 
 | Entity | Purpose |
 | --- | --- |
-| User | Platform account or invite-only candidate record, email, password hash, role, optional organization. Workspace roles: `organization` (owner) and `interviewer` (invited teammate). |
-| Organization | Company/client workspace. Multiple users share one organization. |
+| User | Platform account or invite-only candidate record, email, password hash, role, optional organization. Workspace roles: `organization` (owner) and `interviewer` (invited teammate). `isSuspended`/`suspendedAt` record a platform-level suspension set from the Admin Hub. |
+| Organization | Company/client workspace. Multiple users share one organization. Carries the subscription `plan` (`FREE`, `PRO`, `ENTERPRISE`; default `FREE`) and a platform-level `isSuspended`/`suspendedAt` pair. |
 | OrganizationInvite | Pending/accepted/cancelled teammate invites (email, token, expiry, invitedBy). |
 | AssessmentTemplate | Reusable assessment structure for a role/job. |
 | AssessmentTemplateDraft | AI-proposed assessment awaiting human confirmation. Holds the uploaded source text, the original AI proposal, and the reviewer's edited draft. Never assigned to a candidate. |
@@ -53,6 +53,7 @@ InterviewSession 1---N IntegrityEvent
 - `InterviewSession.warningCount` and `warningLimit` (default 2) are the official integrity counters. Two-strike policy: the first counted event increments `warningCount` to 1 and keeps the session active; the second counted event reaches the limit and the backend expires the session. Only the backend increments/reads them; the browser reports signals and receives the decision back.
 - `IntegrityEvent` rows are immutable audit records. `(sessionId, clientEventId)` is unique so retries can never double-count; `counted` is decided server-side from the event type (`visibilitychange` counts; `blur`/`pagehide`/`beforeunload` are supporting evidence only).
 - Use enums for roles, session status, module type, and question type.
+- Suspension is a flag, never a delete. `User.isSuspended` blocks one account; `Organization.isSuspended` blocks every owner/interviewer in the workspace (platform admins are exempt so the action can be reversed). The auth guard re-reads both flags and the role on every request, so a change applies immediately without token revocation. `Organization.plan` is the billing tier the subscription feature builds on.
 - Store AI evidence as JSON so reports can quote response-backed justification.
 - `AssessmentTemplateDraft` is the confirmation gate for AI-assisted template generation. Generation writes only a draft row; a draft becomes an `AssessmentTemplate` solely through the confirm endpoint, which stamps `status = PUBLISHED` and `publishedTemplateId`. `publishedTemplateId` is a plain id rather than a relation so deleting a template is never blocked by the draft that produced it.
 - A draft stores `aiProposal` (as generated) and `draft` (as edited) separately, so a reviewer can compare what the AI suggested against what was published, and confirmation always reads the edited version.
