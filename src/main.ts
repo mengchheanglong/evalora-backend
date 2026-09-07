@@ -44,7 +44,9 @@ async function bootstrap() {
   // Drain Prisma connections / in-flight work on SIGTERM/SIGINT.
   app.enableShutdownHooks();
 
-  const port = Number(process.env.PORT ?? 4000);
+  // Number('0') is 0 (falsy), which tells Node to pick a random port.
+  // Use || so that both '0' and undefined fall back to the default.
+  const port = Number(process.env.PORT) || 4000;
   const host = process.env.HOST?.trim() || "0.0.0.0";
   await app.listen(port, host);
 }
