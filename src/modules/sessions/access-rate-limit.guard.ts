@@ -1,44 +1,46 @@
-import { type CanActivate, type ExecutionContext, HttpException, HttpStatus, Injectable } from "@nestjs/common";
-import type { Request } from "express";
+import { type CanActivate, type ExecutionContext, Injectable } from "@nestjs/common";
+import type { Request, Response } from "express";
+import { SlidingWindowRateLimitStore } from "../../common/rate-limiting/rate-limit-store";
+import { resolveClientIp } from "../../common/rate-limiting/client-ip.util";
+import { applyRateLimitHeaders, createRateLimitException } from "../../common/rate-limiting/headers.util";
 
-interface WindowState {
-  count: number;
-  resetAt: number;
-}
-
+/**
+ * Sliding-window rate limiter for candidate access code endpoints.
+ * Protects public candidate session entry and heartbeat polling against
+ * access code brute-forcing and denial-of-service attempts.
+ */
 @Injectable()
 export class CandidateAccessRateLimitGuard implements CanActivate {
-  private readonly buckets = new Map<string, WindowState>();
-  private readonly windowMs = positiveInt(process.env.ACCESS_CODE_RATE_LIMIT_WINDOW_MS, 60_000);
-  private readonly maxRequests = positiveInt(process.env.ACCESS_CODE_RATE_LIMIT_MAX, 120);
-  private lastSweep = 0;
+  private readonly store = new SlidingWindowRateLimitStore();
+  private readonly windowMs: number;
+  private readonly maxRequests: number;
 
-  canActivate(context: ExecutionContext): boolean {
-    const request = context.switchToHttp().getRequest<Request>();
-    const now = Date.now();
-    const key = request.ip || request.socket?.remoteAddress || "unknown";
-    this.sweep(now);
-    const bucket = this.buckets.get(key);
-
-    if (!bucket || bucket.resetAt <= now) {
-      this.buckets.set(key, { count: 1, resetAt: now + this.windowMs });
-      return true;
-    }
-    if (bucket.count >= this.maxRequests) {
-      const retryAfter = Math.max(1, Math.ceil((bucket.resetAt - now) / 1_000));
-      throw new HttpException(
-        { statusCode: HttpStatus.TOO_MANY_REQUESTS, error: "Too Many Requests", message: "Too many candidate access requests. Please wait and try again.", retryAfter },
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
-    bucket.count += 1;
-    return true;
+  constructor() {
+    this.windowMs = positiveInt(process.env.ACCESS_CODE_RATE_LIMIT_WINDOW_MS, 60_000);
+    this.maxRequests = positiveInt(process.env.ACCESS_CODE_RATE_LIMIT_MAX, 120);
   }
 
-  private sweep(now: number) {
-    if (now - this.lastSweep < this.windowMs) return;
-    this.lastSweep = now;
-    for (const [key, bucket] of this.buckets) if (bucket.resetAt <= now) this.buckets.delete(key);
+  canActivate(context: ExecutionContext): boolean {
+    const http = context.switchToHttp();
+    const request = http.getRequest<Request>();
+
+    // Preflight CORS requests must never consume rate limit quota
+    if (request.method === "OPTIONS") {
+      return true;
+    }
+
+    const response = typeof http.getResponse === "function" ? http.getResponse<Response>() : undefined;
+    const key = resolveClientIp(request);
+
+    const result = this.store.consume(key, this.maxRequests, this.windowMs);
+
+    applyRateLimitHeaders(response, result);
+
+    if (!result.allowed) {
+      throw createRateLimitException("Too many candidate access requests. Please wait and try again", result);
+    }
+
+    return true;
   }
 }
 
