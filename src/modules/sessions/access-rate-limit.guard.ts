@@ -1,6 +1,7 @@
 import { type CanActivate, type ExecutionContext, Injectable } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { SlidingWindowRateLimitStore } from "../../common/rate-limiting/rate-limit-store";
+import { resolveClientIp } from "../../common/rate-limiting/client-ip.util";
 import { applyRateLimitHeaders, createRateLimitException } from "../../common/rate-limiting/headers.util";
 
 /**
@@ -22,8 +23,14 @@ export class CandidateAccessRateLimitGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const http = context.switchToHttp();
     const request = http.getRequest<Request>();
+
+    // Preflight CORS requests must never consume rate limit quota
+    if (request.method === "OPTIONS") {
+      return true;
+    }
+
     const response = typeof http.getResponse === "function" ? http.getResponse<Response>() : undefined;
-    const key = request.ip || request.socket?.remoteAddress || "unknown";
+    const key = resolveClientIp(request);
 
     const result = this.store.consume(key, this.maxRequests, this.windowMs);
 

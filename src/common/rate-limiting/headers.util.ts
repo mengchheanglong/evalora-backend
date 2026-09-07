@@ -32,14 +32,15 @@ export function applyRateLimitHeaders(
   response: Response | undefined,
   result: RateLimitResult,
 ): void {
-  if (!response?.setHeader) return;
+  if (!response?.setHeader || response.headersSent) return;
 
   response.setHeader(RATE_LIMIT_HEADERS.LIMIT, result.limit);
   response.setHeader(RATE_LIMIT_HEADERS.REMAINING, result.remaining);
   response.setHeader(RATE_LIMIT_HEADERS.RESET, Math.ceil(result.resetAt / 1000));
 
   if (!result.allowed) {
-    response.setHeader(RATE_LIMIT_HEADERS.RETRY_AFTER, result.retryAfterSeconds);
+    const retryAfter = Math.max(1, result.retryAfterSeconds);
+    response.setHeader(RATE_LIMIT_HEADERS.RETRY_AFTER, retryAfter);
   }
 }
 
@@ -50,7 +51,7 @@ export function buildRateLimitPayload(
   baseMessage: string,
   result: RateLimitResult,
 ): RateLimitExceededResponse {
-  const seconds = result.retryAfterSeconds;
+  const seconds = Math.max(1, result.retryAfterSeconds);
   const unit = seconds === 1 ? "second" : "seconds";
   const trimmed = baseMessage.trim().replace(/\.+$/, "");
   const instructionalMessage = `${trimmed}. Please retry in ${seconds} ${unit}.`;

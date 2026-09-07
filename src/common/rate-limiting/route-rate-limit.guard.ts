@@ -38,6 +38,12 @@ export class BaseRouteRateLimitGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const http = context.switchToHttp();
     const request = http.getRequest<Request>();
+
+    // Preflight CORS requests must never consume rate limit quota
+    if (request.method === "OPTIONS") {
+      return true;
+    }
+
     const response = typeof http.getResponse === "function" ? http.getResponse<Response>() : undefined;
 
     const key = this.resolveKey(request);
