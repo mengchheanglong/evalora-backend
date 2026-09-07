@@ -1,13 +1,12 @@
 import {
   type CanActivate,
   type ExecutionContext,
-  HttpException,
-  HttpStatus,
   Injectable,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { resolveClientIp } from "./client-ip.util";
 import { SlidingWindowRateLimitStore, type RateLimitStore } from "./rate-limit-store";
+import { applyRateLimitHeaders, createRateLimitException } from "./headers.util";
 
 export interface RouteRateLimitConfig {
   windowMs: number;
@@ -44,25 +43,11 @@ export class BaseRouteRateLimitGuard implements CanActivate {
     const key = this.resolveKey(request);
     const result = this.store.consume(key, this.maxRequests, this.windowMs);
 
-    if (response?.setHeader) {
-      response.setHeader("X-RateLimit-Limit", result.limit);
-      response.setHeader("X-RateLimit-Remaining", result.remaining);
-      response.setHeader("X-RateLimit-Reset", Math.ceil(result.resetAt / 1000));
-    }
+    // Apply standard headers (X-RateLimit-* & Retry-After)
+    applyRateLimitHeaders(response, result);
 
     if (!result.allowed) {
-      if (response?.setHeader) {
-        response.setHeader("Retry-After", result.retryAfterSeconds);
-      }
-      throw new HttpException(
-        {
-          statusCode: HttpStatus.TOO_MANY_REQUESTS,
-          error: "Too Many Requests",
-          message: this.message,
-          retryAfter: result.retryAfterSeconds,
-        },
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
+      throw createRateLimitException(this.message, result);
     }
 
     return true;

@@ -7,6 +7,7 @@ import type { Request, Response, NextFunction } from "express";
 import { resolveClientIp } from "./client-ip.util";
 import { InMemoryRateLimitStore, type RateLimitStore } from "./rate-limit-store";
 import type { RateLimitOptions } from "./rate-limit.types";
+import { applyRateLimitHeaders, buildRateLimitPayload } from "./headers.util";
 
 const DEFAULT_WINDOW_MS = 60_000; // 1 minute
 const DEFAULT_MAX_REQUESTS = 100; // 100 requests / minute per IP
@@ -39,20 +40,12 @@ export class GlobalRateLimitMiddleware implements NestMiddleware {
     // 3. Consume token
     const result = this.store.consume(clientIp, this.maxRequests, this.windowMs);
 
-    // 4. Attach standard rate limiting headers
-    res.setHeader("X-RateLimit-Limit", result.limit);
-    res.setHeader("X-RateLimit-Remaining", result.remaining);
-    res.setHeader("X-RateLimit-Reset", Math.ceil(result.resetAt / 1000));
+    // 4. Attach standard rate limiting headers (X-RateLimit-*)
+    applyRateLimitHeaders(res, result);
 
-    // 5. Handle exceeded threshold
+    // 5. Handle exceeded threshold with informative 429 payload and Retry-After
     if (!result.allowed) {
-      res.setHeader("Retry-After", result.retryAfterSeconds);
-      res.status(HttpStatus.TOO_MANY_REQUESTS).json({
-        statusCode: HttpStatus.TOO_MANY_REQUESTS,
-        error: "Too Many Requests",
-        message: this.message,
-        retryAfter: result.retryAfterSeconds,
-      });
+      res.status(HttpStatus.TOO_MANY_REQUESTS).json(buildRateLimitPayload(this.message, result));
       return;
     }
 

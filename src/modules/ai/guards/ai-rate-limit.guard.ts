@@ -1,13 +1,12 @@
 import {
   type CanActivate,
   type ExecutionContext,
-  HttpException,
-  HttpStatus,
   Injectable,
 } from "@nestjs/common";
 import type { Response } from "express";
 import type { AuthenticatedRequest } from "../../auth/auth.guard";
 import { SlidingWindowRateLimitStore } from "../../../common/rate-limiting/rate-limit-store";
+import { applyRateLimitHeaders, createRateLimitException } from "../../../common/rate-limiting/headers.util";
 
 /**
  * Sliding-window rate limiter for resource-heavy AI inference endpoints.
@@ -33,25 +32,10 @@ export class AiRateLimitGuard implements CanActivate {
     const key = request.user?.id ?? request.ip ?? "unknown";
     const result = this.store.consume(key, this.maxRequests, this.windowMs);
 
-    if (response?.setHeader) {
-      response.setHeader("X-RateLimit-Limit", result.limit);
-      response.setHeader("X-RateLimit-Remaining", result.remaining);
-      response.setHeader("X-RateLimit-Reset", Math.ceil(result.resetAt / 1000));
-    }
+    applyRateLimitHeaders(response, result);
 
     if (!result.allowed) {
-      if (response?.setHeader) {
-        response.setHeader("Retry-After", result.retryAfterSeconds);
-      }
-      throw new HttpException(
-        {
-          statusCode: HttpStatus.TOO_MANY_REQUESTS,
-          error: "Too Many Requests",
-          message: "Too many AI generation requests. Please slow down and try again shortly.",
-          retryAfter: result.retryAfterSeconds,
-        },
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
+      throw createRateLimitException("Too many AI generation requests. Please slow down and try again shortly", result);
     }
 
     return true;

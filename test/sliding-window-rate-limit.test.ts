@@ -103,8 +103,11 @@ test("BaseRouteRateLimitGuard applies route-specific limits and sets standard he
       assert.ok(err instanceof HttpException);
       assert.equal(err.getStatus(), HttpStatus.TOO_MANY_REQUESTS);
       const res = err.getResponse() as any;
-      assert.equal(res?.message, "Route limit reached.");
+      assert.match(res?.message, /Route limit reached\. Please retry in \d+ seconds\./);
       assert.ok(res?.retryAfter >= 1);
+      assert.equal(res?.limit, 2);
+      assert.equal(res?.remaining, 0);
+      assert.ok(res?.resetAt);
       return true;
     },
   );

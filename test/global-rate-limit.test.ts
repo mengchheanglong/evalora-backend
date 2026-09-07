@@ -152,10 +152,15 @@ test("GlobalRateLimitMiddleware rejects requests exceeding budget with HTTP 429 
   assert.equal(res3.statusCode, HttpStatus.TOO_MANY_REQUESTS);
   assert.equal(res3.body.statusCode, 429);
   assert.equal(res3.body.error, "Too Many Requests");
-  assert.equal(res3.body.message, "IP rate limit exceeded.");
+  assert.match(res3.body.message, /IP rate limit exceeded\. Please retry in \d+ seconds\./i);
   assert.ok(res3.body.retryAfter >= 1);
+  assert.equal(res3.body.limit, 2);
+  assert.equal(res3.body.remaining, 0);
+  assert.ok(res3.body.resetAt);
   assert.ok(res3.headers["retry-after"] >= 1);
   assert.equal(res3.headers["x-ratelimit-remaining"], 0);
+  assert.equal(res3.headers["x-ratelimit-limit"], 2);
+  assert.ok(res3.headers["x-ratelimit-reset"] > 0);
 
   // Another IP should still be allowed through
   const reqOther: any = { ip: "10.0.0.100", method: "POST" };
