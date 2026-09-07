@@ -14,6 +14,8 @@ export type ModuleType =
 
 export type QuestionType = "mcq" | "scale" | "short_answer" | "coding" | "scenario" | "roleplay";
 
+export type RecruiterVerdict = "STRONG_HIRE" | "HIRE" | "NEUTRAL" | "NO_HIRE";
+
 export type JsonValue = any;
 
 export interface QuestionDto {

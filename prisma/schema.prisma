@@ -60,6 +60,13 @@ enum TemplateDraftSource {
   PROMPT
 }
 
+enum RecruiterVerdict {
+  STRONG_HIRE
+  HIRE
+  NEUTRAL
+  NO_HIRE
+}
+
 model Organization {
   id             String                    @id @default(uuid())
   name           String
@@ -91,6 +98,7 @@ model User {
   reviewerNotes        ReviewerNote[]
   interviewerFollowUps InterviewerFollowUp[]     @relation("InterviewerFollowUpAuthor")
   sentInvites          OrganizationInvite[]      @relation("InviteSender")
+  decidedReports       CandidateReport[]         @relation("ReportDecidedBy")
   createdAt            DateTime                  @default(now()) @map("created_at")
   updatedAt            DateTime                  @updatedAt @map("updated_at")
 
@@ -342,6 +350,12 @@ model CandidateReport {
   improvementAreas Json             @map("improvement_areas")
   evidence         Json
   reviewerSummary  String?          @map("reviewer_summary")
+  recruiterVerdict RecruiterVerdict? @map("recruiter_verdict")
+  recruiterTags    Json?             @map("recruiter_tags")
+  recruiterScore   Float?            @map("recruiter_score")
+  decidedAt        DateTime?         @map("decided_at")
+  decidedById      String?           @map("decided_by_id")
+  decidedBy        User?             @relation("ReportDecidedBy", fields: [decidedById], references: [id])
   createdAt        DateTime         @default(now()) @map("created_at")
   updatedAt        DateTime         @updatedAt @map("updated_at")
 

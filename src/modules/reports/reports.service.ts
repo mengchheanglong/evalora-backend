@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { readStructuredAiFollowUp, splitEmbeddedFollowUp } from "../../common/embedded-follow-up";
 import { basedOnQuestionByAssistantId } from "../../common/ai-message-provenance";
-import type { JsonValue, ModuleType } from "../../domain/evalora.types";
+import type { JsonValue, ModuleType, RecruiterVerdict } from "../../domain/evalora.types";
 import type { AiService } from "../ai/ai.service";
 import { evaluateResponse, generateCandidateReport, type EvaluateResponseInput, type EvaluationResultDto, type GeneratedCandidateReport } from "../ai/evaluation.service";
 import { buildSessionOwnershipWhere, forbiddenResourceError, mergeWhere, type AccessContext } from "../auth/access-control";
@@ -18,7 +18,9 @@ interface ReportPersistenceClient {
   };
   candidateReport: {
     findUnique?(args: unknown): Promise<unknown | null>;
+    findFirst?(args: unknown): Promise<unknown | null>;
     upsert(args: unknown): Promise<unknown>;
+    update?(args: unknown): Promise<unknown>;
   };
   reviewerNote?: {
     findMany(args: unknown): Promise<unknown[]>;
@@ -305,6 +307,71 @@ export class ReportsService {
     return mapReviewerNote(row);
   }
 
+  /**
+   * Persists the recruiter's hiring verdict, optional tags, optional score override,
+   * and optional reviewer note. The AI advisory fields are never modified.
+   */
+  async updateRecruiterVerdict(
+    sessionId: string,
+    dto: { verdict: RecruiterVerdict; tags?: string[]; score?: number; notes?: string },
+    access?: AccessContext,
+  ) {
+    await this.assertReportAccess(sessionId, access);
+    if (!access) throw forbiddenResourceError("Recruiter verdict");
+
+    const findFirst = requireMethod(this.prisma?.candidateReport?.findFirst, "candidateReport.findFirst");
+    const report = (await findFirst({
+      where: { sessionId },
+      include: {
+        session: { select: { organizationId: true } },
+      },
+    })) as { session?: { organizationId?: string } | null } | null;
+
+    if (!report) throw new NotFoundException("Report not found. Generate the report first.");
+
+    // Enforce organization scoping: the caller's org must own the session.
+    const sessionOrgId = report.session?.organizationId;
+    if (access.role !== "admin" && sessionOrgId && sessionOrgId !== access.organizationId) {
+      throw forbiddenResourceError("Recruiter verdict");
+    }
+
+    const update = requireMethod(this.prisma?.candidateReport?.update, "candidateReport.update");
+    const updateData: Record<string, unknown> = {
+      where: { sessionId },
+      data: {
+        recruiterVerdict: dto.verdict,
+        recruiterTags: dto.tags ?? null,
+        recruiterScore: dto.score ?? null,
+        decidedAt: new Date(),
+        decidedById: access.userId,
+      },
+      include: {
+        decidedBy: { select: { id: true, name: true, email: true } },
+      },
+    };
+
+    const updated = await update(updateData);
+
+    // Create reviewer note if notes text is provided.
+    let reviewerNote: ReviewerNoteRow | null = null;
+    if (dto.notes?.trim()) {
+      const createNote = requireMethod(this.prisma?.reviewerNote?.create, "reviewerNote.create");
+      reviewerNote = (await createNote({
+        data: {
+          sessionId,
+          reviewerId: access.userId,
+          note: dto.notes.trim(),
+        },
+        include: { reviewer: { select: { id: true, name: true } } },
+      })) as ReviewerNoteRow;
+    }
+
+    return {
+      ...mapPersistedVerdict(updated as Record<string, unknown>),
+      notes: reviewerNote ? [mapReviewerNote(reviewerNote)] : [],
+    };
+  }
+
   async persistReport({ report, evaluations }: PersistReportInput): Promise<ReportPersistenceResult> {
     if (!this.prisma) {
       return { status: "skipped", reason: "database client unavailable" };
@@ -567,6 +634,19 @@ function mapPersistedReport(row: PersistedCandidateReportRow): GeneratedCandidat
     evidence: stringArray(row.evidence),
     reviewerSummary: optionalString(row.reviewerSummary),
     advisoryNotice: REPORT_ADVISORY_NOTICE,
+  };
+}
+
+function mapPersistedVerdict(row: Record<string, unknown>) {
+  return {
+    sessionId: stringValue(row.sessionId, ""),
+    recruiterVerdict: optionalString(row.recruiterVerdict) ?? null,
+    recruiterTags: Array.isArray(row.recruiterTags) ? row.recruiterTags : null,
+    recruiterScore: typeof row.recruiterScore === "number" ? row.recruiterScore : null,
+    decidedAt: isoDateString(row.decidedAt),
+    decidedBy: row.decidedBy && typeof row.decidedBy === "object"
+      ? { id: stringValue((row.decidedBy as Record<string, unknown>).id, ""), name: stringValue((row.decidedBy as Record<string, unknown>).name, ""), email: stringValue((row.decidedBy as Record<string, unknown>).email, "") }
+      : null,
   };
 }
 
