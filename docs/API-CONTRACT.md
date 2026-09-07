@@ -238,6 +238,7 @@ Errors: `400` for an unreadable or unsupported file and for a draft with no modu
 | PUT | `/sessions/:id/complete` | Workspace | Complete a session and queue report generation. |
 | DELETE | `/sessions/:id` | Workspace | Permanently delete a scoped session and its cascaded responses, submissions, evaluations, report, and notes. |
 | GET | `/sessions/:id/integrity-events` | Workspace | Official integrity summary (warning count, warning limit, status) plus the event timeline for one session. |
+| PATCH | `/sessions/:id/integrity-policy` | Workspace | Enable or pause all integrity detection for one session. The body is `{ "detectionEnabled": boolean }`. When paused, no events are counted and warningCount is unchanged. |
 | GET | `/sessions/access/:accessCode` | Candidate link | Read the sanitized assigned assessment while access is open. |
 | PUT | `/sessions/access/:accessCode/start` | Candidate link | Start the assigned assessment. |
 | PUT | `/sessions/access/:accessCode/complete` | Candidate link | Complete the assessment and immediately return `reportStatus: "pending"`. |

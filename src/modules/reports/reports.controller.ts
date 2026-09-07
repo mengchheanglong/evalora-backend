@@ -1,6 +1,8 @@
 import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Req, UseGuards } from "@nestjs/common";
+import { ValidateDto } from "../../common/pipes/validate-dto.pipe";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
+import { AddReviewerNoteDto } from "./dto/report.dto";
 import { ReportsService } from "./reports.service";
 
 @Controller("reports")
@@ -36,7 +38,7 @@ export class ReportsController {
   @Roles("admin", "organization", "interviewer")
   async addNote(
     @Param("sessionId") sessionId: string,
-    @Body() body: { note?: string },
+    @Body(new ValidateDto(AddReviewerNoteDto)) body: AddReviewerNoteDto,
     @Req() request: AuthenticatedRequest,
   ) {
     try {

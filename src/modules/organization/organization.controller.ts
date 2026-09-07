@@ -13,10 +13,17 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
+import { ValidateDto } from "../../common/pipes/validate-dto.pipe";
 import type { AuthenticatedRequest } from "../auth/auth.guard";
 import { JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { toAccessContext } from "../auth/access-control";
 import { AuthService } from "../auth/auth.service";
+import {
+  AcceptInviteDto,
+  CreateInviteDto,
+  DeleteWorkspaceDataDto,
+  UpdateWorkspaceDto,
+} from "./dto/organization.dto";
 import { OrganizationService } from "./organization.service";
 
 @Controller("organization")
@@ -36,7 +43,10 @@ export class OrganizationController {
   @Put()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("organization", "admin")
-  async updateWorkspace(@Req() request: AuthenticatedRequest, @Body() body: { name?: string }) {
+  async updateWorkspace(
+    @Req() request: AuthenticatedRequest,
+    @Body(new ValidateDto(UpdateWorkspaceDto)) body: UpdateWorkspaceDto,
+  ) {
     try {
       return await this.organizationService.updateWorkspace(toAccessContext(request.user), body);
     } catch (error) {
@@ -68,7 +78,10 @@ export class OrganizationController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("organization", "admin")
   @HttpCode(200)
-  async deleteWorkspaceData(@Req() request: AuthenticatedRequest, @Body() body: { confirmName?: string }) {
+  async deleteWorkspaceData(
+    @Req() request: AuthenticatedRequest,
+    @Body(new ValidateDto(DeleteWorkspaceDataDto)) body: DeleteWorkspaceDataDto,
+  ) {
     try {
       return await this.organizationService.deleteWorkspaceData(toAccessContext(request.user), body);
     } catch (error) {
@@ -95,7 +108,10 @@ export class OrganizationController {
   @Post("invites")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("organization", "admin")
-  createInvite(@Req() request: AuthenticatedRequest, @Body() body: { email?: string }) {
+  createInvite(
+    @Req() request: AuthenticatedRequest,
+    @Body(new ValidateDto(CreateInviteDto)) body: CreateInviteDto,
+  ) {
     return this.organizationService.createInvite(toAccessContext(request.user), body);
   }
 
@@ -120,12 +136,12 @@ export class OrganizationController {
 
   @Post("invites/accept")
   @HttpCode(200)
-  async acceptInvite(@Body() body: { token?: string; name?: string; password?: string }) {
+  async acceptInvite(@Body(new ValidateDto(AcceptInviteDto)) body: AcceptInviteDto) {
     const accepted = await this.organizationService.acceptInvite(body);
     // Issue JWT the same way as login/register.
     const auth = await this.authService.login({
       email: accepted.user.email,
-      password: body.password,
+      password: body.password ?? "",
     });
     return {
       token: auth.token,

@@ -47,7 +47,11 @@ function candidateSessionRow(overrides: Record<string, unknown> = {}) {
     // Two-strike policy: the default warning limit is 2 counted violations.
     warningCount: 0,
     warningLimit: 2,
+<<<<<<< HEAD
     pointerDetectionEnabled: true,
+=======
+    detectionEnabled: true,
+>>>>>>> 947ba6e02bf239b43cee3d87daa1dcc512dcdca2
     createdAt: now,
     updatedAt: now,
     ...overrides,
@@ -485,6 +489,7 @@ test("integrity.updated is emitted only into the authorized session room", () =>
   ]);
 });
 
+<<<<<<< HEAD
 // ------------------------------------------------------------------
 // pointerDetectionEnabled toggle tests
 // ------------------------------------------------------------------
@@ -558,4 +563,51 @@ test("updateIntegrityPolicy emits integrity.policy.updated to the authorized roo
   assert.equal(payload.sessionId, "session-1");
   assert.equal(payload.pointerDetectionEnabled, false);
   assert.equal(typeof payload.updatedAt, "string", "updatedAt must be an ISO string");
+=======
+test("integrity event while detectionEnabled = false is not counted and does not change warningCount", async () => {
+  const { prisma } = createFakePrisma(candidateSessionRow({ detectionEnabled: false }));
+  const service = createService(prisma);
+
+  const result = await service.recordIntegrityEvent("EV-123456", visibilityEvent);
+  assert.equal(result.counted, false, "event must not be counted while detection is paused");
+  assert.equal(result.warningCount, 0, "warningCount must stay at 0");
+  assert.equal(result.sessionStatus, "in_progress", "session remains ACTIVE");
+  assert.match(result.reason, /detection paused by interviewer/i);
+});
+
+test("visibility_hidden while detectionEnabled = false is not counted (pauses ALL events)", async () => {
+  const { prisma } = createFakePrisma(candidateSessionRow({ detectionEnabled: false }));
+  const service = createService(prisma);
+
+  const result = await service.recordIntegrityEvent("EV-123456", visibilityEvent);
+  assert.equal(result.counted, false, "visibility_hidden must not count when detection is paused");
+  assert.equal(result.warningCount, 0);
+});
+
+test("re-enabling detection resumes counting while preserving previous warningCount", async () => {
+  const { prisma } = createFakePrisma(candidateSessionRow({ warningCount: 1, detectionEnabled: false }));
+  const service = createService(prisma);
+
+  // While paused, event is not counted.
+  const paused = await service.recordIntegrityEvent("EV-123456", visibilityEvent);
+  assert.equal(paused.counted, false);
+  assert.equal(paused.warningCount, 1, "warningCount preserved from before pause");
+
+  // Simulate re-enabling: the PATCH endpoint would set detectionEnabled = true.
+  const originalFindFirst = prisma.interviewSession.findFirst as any;
+  prisma.interviewSession.findFirst = (async (...args: any[]) => {
+    const row = await originalFindFirst(...args);
+    if (row) row.detectionEnabled = true;
+    return row;
+  }) as any;
+
+  // New event with a fresh clientEventId should now count.
+  const resumed = await service.recordIntegrityEvent("EV-123456", {
+    ...visibilityEvent,
+    clientEventId: "resumed-event-0001",
+  });
+  assert.equal(resumed.counted, true, "event counts after re-enabling");
+  assert.equal(resumed.warningCount, 2, "second strike ends the session");
+  assert.equal(resumed.sessionStatus, "expired", "session is terminated on the second strike");
+>>>>>>> 947ba6e02bf239b43cee3d87daa1dcc512dcdca2
 });

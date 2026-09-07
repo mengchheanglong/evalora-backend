@@ -1,10 +1,13 @@
-import { Module } from "@nestjs/common";
+import { type MiddlewareConsumer, Module, type NestModule, RequestMethod } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
+import { RequestValidationMiddleware } from "./common/middleware/request-validation.middleware";
+import { GlobalRateLimitMiddleware } from "./common/rate-limiting";
 import { AnalyticsController } from "./modules/analytics/analytics.controller";
 import { AnalyticsService } from "./modules/analytics/analytics.service";
 import { SystemHealthService } from "./modules/analytics/system-health.service";
 import { AppController } from "./app.controller";
 import { AiController, CandidateAiController } from "./modules/ai/ai.controller";
+import { AiRateLimitGuard } from "./modules/ai/guards/ai-rate-limit.guard";
 import { AiService } from "./modules/ai/ai.service";
 import { CandidateAiService } from "./modules/ai/candidate-ai.service";
 import { createDeepSeekProviderFromEnv } from "./modules/ai/deepseek.provider";
@@ -68,6 +71,7 @@ import { LiveKitService } from "./modules/livekit/livekit.service";
   providers: [
     AnalyticsService,
     SystemHealthService,
+    AiRateLimitGuard,
     AuthRateLimitGuard,
     CandidateAccessRateLimitGuard,
     CandidateAiService,
@@ -135,4 +139,10 @@ import { LiveKitService } from "./modules/livekit/livekit.service";
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(GlobalRateLimitMiddleware, RequestValidationMiddleware)
+      .forRoutes({ path: "*", method: RequestMethod.ALL });
+  }
+}

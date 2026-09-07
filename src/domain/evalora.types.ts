@@ -86,7 +86,11 @@ export interface InterviewSessionDto {
   reportReady?: boolean;
   warningCount?: number;
   warningLimit?: number;
+<<<<<<< HEAD
   pointerDetectionEnabled?: boolean;
+=======
+  detectionEnabled?: boolean;
+>>>>>>> 947ba6e02bf239b43cee3d87daa1dcc512dcdca2
   startedAt?: string;
   completedAt?: string;
   expiresAt?: string;
