@@ -44,7 +44,7 @@ import { createEmailServiceFromEnv, EmailService } from "./modules/email/email.s
 import { PrismaService } from "./prisma/prisma.service";
 import { PrismaModule } from "./prisma/prisma.module";
 import { LiveKitService } from "./modules/livekit/livekit.service";
-import { CachingModule } from "./common/caching";
+import { CachingModule, CacheService } from "./common/caching";
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, RealtimeModule, CodeModule, CachingModule],
@@ -107,8 +107,8 @@ import { CachingModule } from "./common/caching";
     },
     {
       provide: TemplatesService,
-      useFactory: (prisma: PrismaService) => new TemplatesService(prisma),
-      inject: [PrismaService],
+      useFactory: (prisma: PrismaService, cache: CacheService) => new TemplatesService(prisma, cache),
+      inject: [PrismaService, CacheService],
     },
     {
       provide: TemplateDraftsService,
@@ -118,9 +118,9 @@ import { CachingModule } from "./common/caching";
     },
     {
       provide: SessionsService,
-      useFactory: (prisma: PrismaService, email: EmailService, gateway: InterviewGateway) =>
-        new SessionsService(prisma, { emailService: email, events: gateway }),
-      inject: [PrismaService, EmailService, InterviewGateway],
+      useFactory: (prisma: PrismaService, email: EmailService, gateway: InterviewGateway, cache: CacheService) =>
+        new SessionsService(prisma, { emailService: email, events: gateway, cache }),
+      inject: [PrismaService, EmailService, InterviewGateway, CacheService],
     },
     {
       provide: ResponsesService,
