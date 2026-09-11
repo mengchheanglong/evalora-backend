@@ -96,4 +96,8 @@ export const CacheKeys = {
   /** Live system health snapshot */
   systemHealth: () =>
     buildCacheKey(CacheNamespace.SYSTEM, "health"),
+
+  /** Candidate report detail */
+  report: (sessionId: string) =>
+    buildCacheKey(CacheNamespace.REPORTS, "detail", sessionId),
 } as const;

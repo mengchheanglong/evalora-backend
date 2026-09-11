@@ -9,6 +9,7 @@ export enum CacheNamespace {
   USERS = "users",
   ANALYTICS = "analytics",
   SYSTEM = "system",
+  REPORTS = "reports",
 }
 
 /**
