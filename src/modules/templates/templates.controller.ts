@@ -13,11 +13,13 @@ import {
   Query,
   Req,
   UseGuards,
+  UseInterceptors,
 } from "@nestjs/common";
 import { ValidateDto } from "../../common/pipes/validate-dto.pipe";
 import { ValidateQuery } from "../../common/validation/pipes/validate-query.pipe";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
+import { CacheInvalidationInterceptor, InvalidateCache } from "../../common/caching";
 import {
   CloneFromCatalogDto,
   CreateTemplateDto,
@@ -32,6 +34,7 @@ import {
 
 @Controller("templates")
 @UseGuards(JwtAuthGuard, RolesGuard)
+@UseInterceptors(CacheInvalidationInterceptor)
 export class TemplatesController {
   constructor(@Inject(TemplatesService) private readonly templatesService: TemplatesService) {}
 
@@ -51,6 +54,7 @@ export class TemplatesController {
   /** Clone a prebuilt into the caller's organization (ready to assign or edit). */
   @Post("from-catalog")
   @Roles("admin", "organization", "interviewer")
+  @InvalidateCache({ entities: ["templates"] })
   async cloneFromCatalog(
     @Body(new ValidateDto(CloneFromCatalogDto)) body: CloneFromCatalogDto,
     @Req() request: AuthenticatedRequest,
@@ -77,6 +81,7 @@ export class TemplatesController {
 
   @Post()
   @Roles("admin", "organization", "interviewer")
+  @InvalidateCache({ entities: ["templates"] })
   async create(
     @Body(new ValidateDto(CreateTemplateDto)) body: CreateTemplateDto,
     @Req() request: AuthenticatedRequest,
@@ -94,6 +99,7 @@ export class TemplatesController {
 
   @Post(":id/duplicate")
   @Roles("admin", "organization", "interviewer")
+  @InvalidateCache({ entities: ["templates"] })
   async duplicate(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
     try {
       return await this.templatesService.duplicateTemplate(id, toAccessContext(request.user));
@@ -113,6 +119,7 @@ export class TemplatesController {
 
   @Put(":id")
   @Roles("admin", "organization", "interviewer")
+  @InvalidateCache({ entities: ["templates"] })
   async update(
     @Param("id") id: string,
     @Body(new ValidateDto(UpdateTemplateDto)) body: UpdateTemplateDto,
@@ -132,6 +139,7 @@ export class TemplatesController {
 
   @Delete(":id")
   @Roles("admin", "organization", "interviewer")
+  @InvalidateCache({ entities: ["templates"] })
   async remove(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
     try {
       return await this.templatesService.deleteTemplate(id, toAccessContext(request.user));

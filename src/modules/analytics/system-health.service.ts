@@ -1,7 +1,8 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { buildSessionOwnershipWhere, mergeWhere, type AccessContext } from "../auth/access-control";
 import { InterviewGateway } from "../realtime/interview.gateway";
+import { buildCacheKey, CacheNamespace, CACHE_TTL, CacheService } from "../../common/caching";
 
 export type ServiceStatus = "operational" | "degraded" | "unavailable";
 
@@ -54,81 +55,93 @@ export class SystemHealthService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(InterviewGateway) private readonly gateway: InterviewGateway,
+    @Optional() @Inject(CacheService) private readonly cache?: CacheService,
   ) {}
 
   async snapshot(access?: AccessContext): Promise<SystemHealthDto> {
-    const scope = buildSessionOwnershipWhere(access);
-    const since = startOfToday();
+    const scopeKey = access?.role === "admin" ? "admin" : (access?.organizationId ?? "platform");
+    const cacheKey = buildCacheKey(CacheNamespace.SYSTEM, "health", scopeKey);
 
-    const [dbHealth, workload] = await Promise.all([
-      this.checkDatabase(),
-      this.loadWorkload(scope, since),
-    ]);
+    const compute = async () => {
+      const scope = buildSessionOwnershipWhere(access);
+      const since = startOfToday();
 
-    const realtimeStats = this.gateway.getRealtimeStats();
-    const joinAttempts = realtimeStats.joins + realtimeStats.rejectedJoins;
+      const [dbHealth, workload] = await Promise.all([
+        this.checkDatabase(),
+        this.loadWorkload(scope, since),
+      ]);
 
-    const services: ServiceHealth[] = [
-      {
-        key: "realtime",
-        name: "Live session gateway",
-        detail: "WebSocket rooms, presence, and event delivery",
-        // The transport is in-process: if the API answered, it is up.
-        status: "operational",
-        latencyMs: 0,
-        note: `${realtimeStats.connectedSockets} socket(s) in ${realtimeStats.activeSessionRooms} room(s)`,
-      },
-      dbHealth,
-      this.describeProvider({
-        key: "ai",
-        name: "AI interview service",
-        detail: "Question generation, follow-ups, and evaluation",
-        configured: Boolean(process.env.DEEPSEEK_API_KEY?.trim()),
-        fallbackNote: "Deterministic rubric evaluation is used when no provider is configured.",
-      }),
-      this.describeProvider({
-        key: "sandbox",
-        name: "Code execution sandbox",
-        detail: "Isolated compile and test runs",
-        configured: Boolean(process.env.JUDGE0_API_URL?.trim() || process.env.PISTON_URL?.trim()),
-        fallbackNote: "Set JUDGE0_API_URL or PISTON_URL to enable code execution.",
-      }),
-      this.describeProvider({
-        key: "email",
-        name: "Email delivery",
-        detail: "Invites, verification, and password resets",
-        configured: Boolean(process.env.RESEND_API_KEY?.trim() || process.env.SMTP_USER?.trim()),
-        fallbackNote: "Links are surfaced in the UI when email is not configured.",
-      }),
-      this.describeProvider({
-        key: "livekit",
-        name: "Live video & WebRTC (LiveKit)",
-        detail: "Candidate live camera, screen share, and interviewer audio",
-        configured: Boolean(
-          process.env.LIVEKIT_URL?.trim() &&
-            process.env.LIVEKIT_API_KEY?.trim() &&
-            process.env.LIVEKIT_API_SECRET?.trim(),
-        ),
-        fallbackNote: "Set LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET to enable live video.",
-      }),
-    ];
+      const realtimeStats = this.gateway.getRealtimeStats();
+      const joinAttempts = realtimeStats.joins + realtimeStats.rejectedJoins;
 
-    const memory = process.memoryUsage();
-    return {
-      capturedAt: new Date().toISOString(),
-      realtime: {
-        ...realtimeStats,
-        joinSuccessRate: joinAttempts ? Math.round((realtimeStats.joins / joinAttempts) * 100) : 100,
-      },
-      workload,
-      services,
-      process: {
-        uptimeSeconds: Math.round(process.uptime()),
-        heapUsedMb: Math.round((memory.heapUsed / 1024 / 1024) * 10) / 10,
-        rssMb: Math.round((memory.rss / 1024 / 1024) * 10) / 10,
-        nodeVersion: process.version,
-      },
+      const services: ServiceHealth[] = [
+        {
+          key: "realtime",
+          name: "Live session gateway",
+          detail: "WebSocket rooms, presence, and event delivery",
+          // The transport is in-process: if the API answered, it is up.
+          status: "operational",
+          latencyMs: 0,
+          note: `${realtimeStats.connectedSockets} socket(s) in ${realtimeStats.activeSessionRooms} room(s)`,
+        },
+        dbHealth,
+        this.describeProvider({
+          key: "ai",
+          name: "AI interview service",
+          detail: "Question generation, follow-ups, and evaluation",
+          configured: Boolean(process.env.DEEPSEEK_API_KEY?.trim()),
+          fallbackNote: "Deterministic rubric evaluation is used when no provider is configured.",
+        }),
+        this.describeProvider({
+          key: "sandbox",
+          name: "Code execution sandbox",
+          detail: "Isolated compile and test runs",
+          configured: Boolean(process.env.JUDGE0_API_URL?.trim() || process.env.PISTON_URL?.trim()),
+          fallbackNote: "Set JUDGE0_API_URL or PISTON_URL to enable code execution.",
+        }),
+        this.describeProvider({
+          key: "email",
+          name: "Email delivery",
+          detail: "Invites, verification, and password resets",
+          configured: Boolean(process.env.RESEND_API_KEY?.trim() || process.env.SMTP_USER?.trim()),
+          fallbackNote: "Links are surfaced in the UI when email is not configured.",
+        }),
+        this.describeProvider({
+          key: "livekit",
+          name: "Live video & WebRTC (LiveKit)",
+          detail: "Candidate live camera, screen share, and interviewer audio",
+          configured: Boolean(
+            process.env.LIVEKIT_URL?.trim() &&
+              process.env.LIVEKIT_API_KEY?.trim() &&
+              process.env.LIVEKIT_API_SECRET?.trim(),
+          ),
+          fallbackNote: "Set LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET to enable live video.",
+        }),
+      ];
+
+      const memory = process.memoryUsage();
+      return {
+        capturedAt: new Date().toISOString(),
+        realtime: {
+          ...realtimeStats,
+          joinSuccessRate: joinAttempts ? Math.round((realtimeStats.joins / joinAttempts) * 100) : 100,
+        },
+        workload,
+        services,
+        process: {
+          uptimeSeconds: Math.round(process.uptime()),
+          heapUsedMb: Math.round((memory.heapUsed / 1024 / 1024) * 10) / 10,
+          rssMb: Math.round((memory.rss / 1024 / 1024) * 10) / 10,
+          nodeVersion: process.version,
+        },
+      };
     };
+
+    if (!this.cache) {
+      return compute();
+    }
+
+    return this.cache.getOrSet(cacheKey, compute, CACHE_TTL.REALTIME);
   }
 
   /** Round-trips a trivial query so the reported latency is real, not cached. */
