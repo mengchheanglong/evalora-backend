@@ -103,11 +103,7 @@ interface SessionRow {
   report?: SessionReportRow | null;
   warningCount?: number;
   warningLimit?: number;
-<<<<<<< HEAD
-  pointerDetectionEnabled?: boolean;
-=======
   detectionEnabled?: boolean;
->>>>>>> 947ba6e02bf239b43cee3d87daa1dcc512dcdca2
   createdById?: string | null;
   createdBy?: SessionCreatorRow | null;
   title?: string | null;
@@ -278,11 +274,7 @@ export interface IntegritySummaryDto {
   sessionId: string;
   warningCount: number;
   warningLimit: number;
-<<<<<<< HEAD
-  pointerDetectionEnabled: boolean;
-=======
   detectionEnabled: boolean;
->>>>>>> 947ba6e02bf239b43cee3d87daa1dcc512dcdca2
   status: SessionStatus;
   events: IntegrityEventDto[];
 }
@@ -739,19 +731,9 @@ export class SessionsService {
       throw new BadRequestException("returnedAt cannot be earlier than detectedAt.");
     }
     const durationMs = input.durationMs != null ? Math.round(input.durationMs) : undefined;
-<<<<<<< HEAD
-    let counted = INTEGRITY_COUNTED_TYPES.has(type);
-    // When the interviewer has paused pointer detection, pointer_exit events
-    // are stored as supporting evidence but never counted toward the warning.
-    if (type === "pointer_exit" && session.pointerDetectionEnabled === false) {
-      counted = false;
-    }
-    const reason = integrityReason(type, counted);
-=======
     const paused = session.detectionEnabled === false;
     const counted = !paused && INTEGRITY_COUNTED_TYPES.has(type);
     const reason = paused ? "Detection paused by interviewer." : integrityReason(type, counted);
->>>>>>> 947ba6e02bf239b43cee3d87daa1dcc512dcdca2
 
     // ------------------------------------------------------------
     // Deduplicate before writing: retrying the same clientEventId must
@@ -841,11 +823,7 @@ export class SessionsService {
     const session = await findFirst({
       relationLoadStrategy: "join",
       where: mergeWhere({ id: sessionId }, buildSessionOwnershipWhere(access)),
-<<<<<<< HEAD
-      select: { id: true, status: true, warningCount: true, warningLimit: true, pointerDetectionEnabled: true },
-=======
       select: { id: true, status: true, warningCount: true, warningLimit: true, detectionEnabled: true },
->>>>>>> 947ba6e02bf239b43cee3d87daa1dcc512dcdca2
     });
     if (!session) throw forbiddenResourceError("Session");
 
@@ -861,51 +839,10 @@ export class SessionsService {
       sessionId: session.id,
       warningCount: session.warningCount ?? 0,
       warningLimit: session.warningLimit ?? DEFAULT_WARNING_LIMIT,
-<<<<<<< HEAD
-      pointerDetectionEnabled: session.pointerDetectionEnabled ?? true,
-=======
       detectionEnabled: session.detectionEnabled !== false,
->>>>>>> 947ba6e02bf239b43cee3d87daa1dcc512dcdca2
       status: fromPrismaSessionStatus(session.status),
       events: events.map(toIntegrityEventDto),
     };
-  }
-
-  /**
-   * Toggles pointer-exit detection for a session. Only staff (interviewer/
-   * admin/organization) may call this. The candidate cannot change it.
-   *
-   * Emits `integrity.policy.updated` to the authorized session room so both
-   * the candidate hook and the reviewer toggle stay in sync without polling.
-   */
-  async updateIntegrityPolicy(sessionId: string, pointerDetectionEnabled: boolean, access?: AccessContext): Promise<{ sessionId: string; pointerDetectionEnabled: boolean }> {
-    const findFirst = requireMethod(this.prisma.interviewSession.findFirst, "interviewSession.findFirst");
-    const session = await findFirst({
-      where: mergeWhere({ id: sessionId }, buildSessionOwnershipWhere(access)),
-      select: { id: true },
-    });
-    if (!session) throw forbiddenResourceError("Session");
-
-    const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
-    const updated = await update({
-      where: { id: session.id },
-      data: { pointerDetectionEnabled },
-      select: { id: true, pointerDetectionEnabled: true },
-    });
-
-    const enabled = updated.pointerDetectionEnabled ?? true;
-    const payload = {
-      sessionId: updated.id,
-      pointerDetectionEnabled: enabled,
-      updatedAt: new Date().toISOString(),
-    };
-    try {
-      this.events?.emitToSession(updated.id, INTERVIEW_EVENTS.integrityPolicyUpdated, payload);
-    } catch {
-      // Fire-and-forget — see publishSessionUpdated.
-    }
-
-    return { sessionId: updated.id, pointerDetectionEnabled: enabled };
   }
 
   /**
@@ -1176,11 +1113,7 @@ function toSessionDto(session: SessionRow): InterviewSessionDto {
     accessCode: session.accessCode,
     warningCount: session.warningCount ?? 0,
     warningLimit: session.warningLimit ?? DEFAULT_WARNING_LIMIT,
-<<<<<<< HEAD
-    pointerDetectionEnabled: session.pointerDetectionEnabled ?? true,
-=======
     detectionEnabled: session.detectionEnabled !== false,
->>>>>>> 947ba6e02bf239b43cee3d87daa1dcc512dcdca2
     overallScore: session.report?.overallScore,
     reportReady: Boolean(session.report),
     startedAt: toIso(session.startedAt),

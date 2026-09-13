@@ -8,7 +8,6 @@ import {
   Inject,
   NotFoundException,
   Param,
-  Patch,
   Post,
   Patch,
   Put,
@@ -26,11 +25,7 @@ import { CandidateAccessRateLimitGuard } from "./access-rate-limit.guard";
 import { CreateSessionDto, ListSessionsQueryDto } from "./dto/session.dto";
 import { ReportIntegrityEventDto } from "./dto/report-integrity-event.dto";
 import { UpdateIntegrityPolicyDto } from "./dto/update-integrity-policy.dto";
-<<<<<<< HEAD
-import { type CreateSessionInput, type ListSessionsFilter, SessionsService } from "./sessions.service";
-=======
 import { SessionsService } from "./sessions.service";
->>>>>>> 947ba6e02bf239b43cee3d87daa1dcc512dcdca2
 
 @Controller("sessions")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -98,11 +93,7 @@ export class SessionsController {
     @Body(new ValidateDto(UpdateIntegrityPolicyDto)) body: UpdateIntegrityPolicyDto,
     @Req() request: AuthenticatedRequest,
   ) {
-<<<<<<< HEAD
-    return this.sessionsService.updateIntegrityPolicy(id, body.pointerDetectionEnabled, toAccessContext(request.user));
-=======
     return this.sessionsService.updateIntegrityPolicy(id, body.detectionEnabled, toAccessContext(request.user));
->>>>>>> 947ba6e02bf239b43cee3d87daa1dcc512dcdca2
   }
 
   @Put(":id/start")
