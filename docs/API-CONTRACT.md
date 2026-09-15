@@ -392,3 +392,106 @@ When a route changes:
 2. Update frontend API type and consumer.
 3. Update both repositories' `docs/API-CONTRACT.md`.
 4. Run each repository's required verification commands.
+
+## Organization subscription and payment
+
+Billing is **prepaid with manual renewal**. One verified ABA PayWay payment buys exactly one billing cycle (one month or one year). There is no stored card credential, no recurring token charge, and no automatic renewal worker: the customer pays again when the period ends. `renewalMode` is therefore `MANUAL` on every paid period.
+
+The backend owns the price catalog. The browser sends a plan and a cycle, never an amount.
+
+| Plan | Monthly | Annual (prepaid year) |
+| --- | --- | --- |
+| PLUS | $29 | $276 |
+| PRO | $79 | $756 |
+| BUSINESS | $199 | $1908 |
+
+Currency is `USD`. Amounts are stored as integer minor units (cents).
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/api/subscriptions/current` | Stored subscription for the authenticated workspace, or JSON `null`. |
+| POST | `/api/subscriptions/checkout` | Start a prepaid checkout for one plan/cycle. Workspace owner only. |
+| GET | `/api/subscriptions/attempts/:tranId` | Payment status for the return screen; verifies with PayWay. |
+| POST | `/api/subscriptions/cancel` | Cancel at period end. Workspace owner only. |
+| POST | `/api/subscriptions/payway/callback` | ABA PayWay payment pushback. HMAC-authenticated, no session. |
+
+`GET /api/subscriptions/current` requires a valid session JWT and role `organization`, `interviewer`, or `admin`. Scope comes exclusively from the authenticated `organizationId`; even admins cannot use query parameters to read another workspace. Missing authentication returns 401; candidate access or missing organization membership returns 403.
+
+HTTP 200 returns the stored current subscription record, including non-active statuses:
+
+```json
+{
+  "plan": "PRO",
+  "status": "ACTIVE",
+  "billingCycle": "MONTHLY",
+  "renewalMode": "MANUAL",
+  "currentPeriodStart": "2026-09-01T00:00:00.000Z",
+  "currentPeriodEnd": "2026-10-01T00:00:00.000Z",
+  "cancelAtPeriodEnd": false,
+  "pendingPlan": null,
+  "pendingBillingCycle": null,
+  "createdAt": "2026-09-01T00:00:00.000Z",
+  "updatedAt": "2026-09-01T00:00:00.000Z"
+}
+```
+
+These are example values, not seeded account data. With no stored subscription, HTTP 200 returns JSON `null` (not an empty body or a default plan). Database errors remain errors. Responses use `Cache-Control: no-store`. Provider customer/subscription IDs are never exposed. Dates are UTC ISO strings. Status is returned as stored, except that a paid plan change whose effective date has passed is applied first (see below).
+
+Enums: plan `PLUS | PRO | BUSINESS`; status `ACTIVE | TRIALING | PAST_DUE | CANCELLED | EXPIRED`; billingCycle `MONTHLY | ANNUAL`; renewalMode `MANUAL | AUTOMATIC`.
+
+### POST /api/subscriptions/checkout
+
+Only the workspace owner (`organization` role) may start a payment; a platform `admin`, an `interviewer`, or a `candidate` receives 403. The body carries only the selection:
+
+```json
+{ "plan": "PRO", "billingCycle": "MONTHLY" }
+```
+
+An invalid plan or cycle is 400. When PayWay is not configured for the environment the response is 503 and no attempt is created. HTTP 201 returns the signed hosted-checkout data the browser must submit, and nothing that is not safe to show:
+
+```json
+{
+  "attemptId": "…",
+  "tranId": "EVL…",
+  "plan": "PRO",
+  "billingCycle": "MONTHLY",
+  "amountMinor": 7900,
+  "amountDisplay": "79.00",
+  "currency": "USD",
+  "purpose": "NEW_SUBSCRIPTION",
+  "paidPeriod": "1 month",
+  "checkout": {
+    "actionUrl": "https://checkout-sandbox.payway.com.kh/api/payment-gateway/v1/payments/purchase",
+    "method": "POST",
+    "fields": { "hash": "…", "tran_id": "EVL…", "amount": "79.00", "…": "…" }
+  }
+}
+```
+
+`purpose` is `NEW_SUBSCRIPTION` when there is no running period, `RENEWAL` when the same plan/cycle is paid again or the previous period already ended, and `PLAN_CHANGE` when a different plan/cycle is paid while a period is still running. The merchant hash key is never returned. A repeated identical checkout inside a 15-minute window reuses the same `tranId` instead of creating a second chargeable transaction.
+
+### GET /api/subscriptions/attempts/:tranId
+
+Any workspace viewer may poll this for the "Confirming payment…" screen. The attempt is always resolved from its own stored `tran_id` and must belong to the caller's workspace, otherwise 404. A still-unresolved attempt triggers a Check Transaction call and returns `PENDING` with `subscription: null`; a verified one returns `VERIFIED` plus the subscription. Redirect or query parameters are never accepted as proof of payment.
+
+### POST /api/subscriptions/cancel
+
+Workspace owner only. Cancels at period end: `cancelAtPeriodEnd` becomes true and access runs to `currentPeriodEnd`, after which the workspace simply has no active period (there is no future charge to stop). Returns 404 with no subscription, 409 when the period already ended, and 409 when a plan change has already been paid for — that period is never silently forfeited.
+
+### POST /api/subscriptions/payway/callback
+
+Unauthenticated by design: ABA PayWay cannot present a session JWT. The `X-PAYWAY-HMAC-SHA512` header is verified against the merchant hash key before anything is read (base64 HMAC-SHA512 over the callback values with keys sorted ascending). Invalid or missing signature is 401. Unknown `tran_id` is 404. A body that does not include `tran_id` is 400.
+
+The pushback body is a trigger, not a verdict: the attempt's stored `tran_id` identifies the payment, the amount and currency are compared with the stored attempt, and the outcome comes from PayWay's Check Transaction API. A mismatched amount or currency is recorded as `FAILED` and never activates anything. A workspace identifier in the payload is ignored entirely. Repeated callbacks are idempotent — the `PENDING → VERIFIED` transition is a single conditional update, so a duplicate can never extend a period twice.
+
+### Periods, renewals, and plan changes
+
+- A new period starts at the verified payment time; a renewal starts at the later of `currentPeriodEnd` and the verified payment time.
+- One month means the same UTC day next month, one year the same day next year, clamping to the last day when the target month is shorter.
+- A plan change paid mid-period is stored as `pendingPlan`/`pendingBillingCycle` and applied when the current period ends; the workspace keeps the plan it already paid for until then. No proration, credits, or mid-period switching exist.
+- A paid period change whose effective date has passed is applied on the next read, and the workspace is marked `EXPIRED` if that already-paid period has also run out.
+- Failed or declined payments leave the subscription untouched; there is no automatic retry, and an uncertain (timeout) transaction stays `PENDING` for a later callback or poll to reconcile.
+
+### Sandbox billing testers
+
+`GET /api/subscriptions/permissions` returns `{ canManageBilling: boolean }` for the authenticated workspace viewer (no-store). Billing checkout and cancellation allow owners, plus interviewer emails in the server-only comma-separated `BILLING_TESTER_EMAILS` when `PAYWAY_ENV=sandbox` and `NODE_ENV` is `development` or `test`. Email matching trims whitespace and ignores case. In production the allowlist has no effect. Workspace membership is always required; other permissions are unchanged.
