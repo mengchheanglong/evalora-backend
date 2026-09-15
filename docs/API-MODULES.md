@@ -174,3 +174,11 @@ Endpoints:
 - `GET /api/analytics/themes`
 
 Analytics are computed from persisted sessions, evaluations, reports, and report evidence. Workspace roles are organization-scoped; admins receive platform scope. Summary/activity reads first reconcile past-due, not-started invitations to `EXPIRED`. Summary responses expose all-time scope/freshness metadata, active/closed pipeline counts, report readiness and coverage, and nullable denominator-based rates. Quality analytics use completed sessions for one required template ID, preserve assessed zero scores, aggregate module performance by module type, and report sample sizes. Historical template revisions are not yet versioned and are disclosed as a comparison caveat. No static demo values are returned.
+
+## Subscriptions
+
+`src/modules/subscriptions/` owns the workspace subscription record and prepaid ABA PayWay checkout. `subscriptions.controller.ts` (JWT + role guarded) exposes `GET current`, `POST checkout`, `GET attempts/:tranId`, and `POST cancel`; `payway/payway-callback.controller.ts` is the deliberately guard-free payment pushback. `subscriptions.service.ts` holds the billing invariants: backend-owned pricing, provider-verified activation, one paid cycle per verified payment, cancel-at-period-end, and paid plan changes applied at period end.
+
+`plan-catalog.ts` is the authoritative price list plus UTC calendar-cycle math. `payway/` is the isolated ABA contract surface: `payway.config.ts` reads backend-only environment variables, `payway.signature.ts` implements the documented HMAC-SHA512 signing and callback verification, `payway.client.ts` builds the signed hosted-checkout form and calls Check Transaction, and `payway.verification.ts` is the pure status/amount rule set.
+
+Only documented customer-initiated APIs are used. There is no recurring-credential storage, no token charging, no scheduled payment, and no annual automatic renewal. `billing-store.ts` is the narrow Prisma seam the flows use, which is what lets the specs drive them through an in-memory store. All providers are wired in `src/app.module.ts`.
