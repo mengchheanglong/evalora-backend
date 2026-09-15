@@ -18,7 +18,9 @@ interface ReportPersistenceClient {
   };
   candidateReport: {
     findUnique?(args: unknown): Promise<unknown | null>;
+    findFirst?(args: unknown): Promise<unknown | null>;
     upsert(args: unknown): Promise<unknown>;
+    update?(args: unknown): Promise<unknown>;
   };
   reviewerNote?: {
     findMany(args: unknown): Promise<unknown[]>;
@@ -36,6 +38,11 @@ interface PersistedCandidateReportRow {
   improvementAreas?: unknown;
   evidence?: unknown;
   reviewerSummary?: unknown;
+  recruiterVerdict?: unknown;
+  recruiterTags?: unknown;
+  recruiterScore?: unknown;
+  decidedAt?: unknown;
+  decidedById?: unknown;
   session?: {
     completedAt?: unknown;
     candidate?: { name?: unknown } | null;
@@ -303,6 +310,64 @@ export class ReportsService {
     })) as ReviewerNoteRow;
 
     return mapReviewerNote(row);
+  }
+
+  async updateRecruiterVerdict(
+    sessionId: string,
+    dto: { verdict: string; tags?: string[]; score?: number; notes?: string },
+    access?: AccessContext,
+  ) {
+    if (!access) throw forbiddenResourceError("Recruiter verdict");
+
+    // Verify the report exists and the caller has access
+    const findReport = requireMethod(this.prisma?.candidateReport?.findFirst, "candidateReport.findFirst");
+    const report = await findReport({
+      where: { sessionId },
+    }) as { id?: unknown } | null;
+    if (!report) throw new NotFoundException("Report not found for this session.");
+
+    // Org-scoping: verify the session belongs to the caller's organization
+    await this.assertReportAccess(sessionId, access);
+
+    // Update the verdict fields
+    const updateReport = requireMethod(this.prisma?.candidateReport?.update, "candidateReport.update");
+    const updatedReport = await updateReport({
+      where: { sessionId },
+      data: {
+        recruiterVerdict: dto.verdict,
+        recruiterTags: dto.tags ?? null,
+        recruiterScore: dto.score ?? null,
+        decidedAt: new Date(),
+        decidedById: access.userId,
+      },
+    }) as PersistedCandidateReportRow;
+
+    // If notes are provided, create a ReviewerNote
+    let savedNote: ReviewerNoteRow | undefined;
+    if (dto.notes && dto.notes.trim()) {
+      const create = requireMethod(this.prisma?.reviewerNote?.create, "reviewerNote.create");
+      savedNote = (await create({
+        data: {
+          sessionId,
+          reviewerId: access.userId,
+          note: dto.notes.trim(),
+        },
+        include: { reviewer: { select: { id: true, name: true } } },
+      })) as ReviewerNoteRow;
+    }
+
+    // Return the updated report and notes
+    const notes = await this.listReviewerNotes(sessionId, access);
+
+    return {
+      ...mapPersistedReport(updatedReport),
+      recruiterVerdict: dto.verdict,
+      recruiterTags: dto.tags ?? [],
+      recruiterScore: dto.score ?? null,
+      decidedAt: new Date().toISOString(),
+      decidedById: access.userId,
+      notes: savedNote ? [mapReviewerNote(savedNote), ...notes] : notes,
+    };
   }
 
   async persistReport({ report, evaluations }: PersistReportInput): Promise<ReportPersistenceResult> {

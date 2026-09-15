@@ -90,6 +90,7 @@ model User {
   createdSessions      InterviewSession[]        @relation("SessionCreator")
   reviewerNotes        ReviewerNote[]
   interviewerFollowUps InterviewerFollowUp[]     @relation("InterviewerFollowUpAuthor")
+  decidedReports       CandidateReport[]         @relation("ReportDecidedBy")
   sentInvites          OrganizationInvite[]      @relation("InviteSender")
   createdAt            DateTime                  @default(now()) @map("created_at")
   updatedAt            DateTime                  @updatedAt @map("updated_at")
@@ -331,6 +332,13 @@ model Evaluation {
   @@map("evaluations")
 }
 
+enum RecruiterVerdict {
+  STRONG_HIRE
+  HIRE
+  NEUTRAL
+  NO_HIRE
+}
+
 model CandidateReport {
   id               String           @id @default(uuid())
   sessionId        String           @unique @map("session_id")
@@ -342,6 +350,12 @@ model CandidateReport {
   improvementAreas Json             @map("improvement_areas")
   evidence         Json
   reviewerSummary  String?          @map("reviewer_summary")
+  recruiterVerdict RecruiterVerdict? @map("recruiter_verdict")
+  recruiterTags    Json?             @map("recruiter_tags")
+  recruiterScore   Float?            @map("recruiter_score")
+  decidedAt        DateTime?         @map("decided_at")
+  decidedById      String?           @map("decided_by_id")
+  decidedBy        User?             @relation("ReportDecidedBy", fields: [decidedById], references: [id])
   createdAt        DateTime         @default(now()) @map("created_at")
   updatedAt        DateTime         @updatedAt @map("updated_at")
 
