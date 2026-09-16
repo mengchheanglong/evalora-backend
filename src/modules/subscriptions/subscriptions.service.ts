@@ -61,6 +61,21 @@ export class SubscriptionsService {
     private readonly clock: () => Date = () => new Date(),
   ) {}
 
+  async getUsage(access: AccessContext) {
+    const organizationId = this.requireViewer(access);
+    const now = this.clock();
+    const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const periodEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+    const subscription = await this.applyDuePlanChange(organizationId, now);
+    const active = subscription?.status === "ACTIVE" && subscription.currentPeriodEnd > now;
+    const limits = { PLUS: 50, PRO: 250, BUSINESS: null };
+    const sessionsUsed = await this.prisma.interviewSession.count({
+      where: { organizationId, startedAt: { gte: periodStart, lt: periodEnd } },
+    });
+    return { sessionsUsed, sessionLimit: active ? limits[subscription.plan] : 0,
+      periodStart: periodStart.toISOString(), periodEnd: periodEnd.toISOString() };
+  }
+
   getBillingPermissions(access: AccessContext) {
     this.requireViewer(access);
     return { canManageBilling: this.canManageBilling(access) };
@@ -73,12 +88,18 @@ export class SubscriptionsService {
       && ["development", "test"].includes(process.env.NODE_ENV ?? "")
       && process.env.PAYWAY_ENV === "sandbox"
       && Boolean(email && (process.env.BILLING_TESTER_EMAILS ?? "")
-        .split(",").some((entry) => entry.trim().toLowerCase() === email));
+        .split(",").some((entry) => entry.trim() === "*" || entry.trim().toLowerCase() === email));
   }
 
   /** Read-only view. Reconciles a paid plan change that is now due, then returns stored state. */
   async getCurrent(access: AccessContext) {
     const organizationId = this.requireViewer(access);
+    // Recover a missed callback/return redirect using provider verification only.
+    const pending = await this.prisma.paymentAttempt.findFirst({
+      where: { organizationId, status: "PENDING" },
+      orderBy: { createdAt: "desc" },
+    });
+    if (pending && this.payway.isConfigured()) await this.reconcileAttempt(pending);
     const subscription = await this.applyDuePlanChange(organizationId);
     return subscription ? serializeSubscription(subscription) : null;
   }
@@ -287,8 +308,7 @@ export class SubscriptionsService {
       const subscription = await this.applyDuePlanChange(attempt.organizationId, verifiedAt, db);
       const effect = resolvePaidEffect(subscription, attempt, verifiedAt);
 
-      // A paid plan change is recorded, not applied: the workspace keeps its
-      // current plan until the period it already paid for runs out.
+      // Upgrades apply immediately; downgrades and cycle-only changes are scheduled.
       const saved = subscription
         ? await db.subscription.update({
             where: { id: subscription.id },
@@ -536,6 +556,12 @@ export function resolvePaidEffect(
 ): PaidEffect {
   const plan = attempt.plan as SubscriptionPlanName;
   const billingCycle = attempt.billingCycle as BillingCycleName;
+
+  const rank = { PLUS: 0, PRO: 1, BUSINESS: 2 };
+  if (subscription && subscription.currentPeriodEnd > verifiedAt && rank[plan] > rank[subscription.plan]) {
+    return { kind: "apply", plan, billingCycle, periodStart: verifiedAt,
+      periodEnd: addBillingCycle(subscription.currentPeriodEnd, billingCycle) };
+  }
 
   if (subscription && subscription.currentPeriodEnd > verifiedAt && decidePurpose(subscription, plan, billingCycle, verifiedAt) === "PLAN_CHANGE") {
     return {

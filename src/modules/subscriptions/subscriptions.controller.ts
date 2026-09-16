@@ -17,6 +17,13 @@ export class SubscriptionsController {
     response.status(200).json(permissions);
   }
 
+  @Get("usage")
+  async usage(@Req() request: AuthenticatedRequest, @Res() response: Response) {
+    const usage = await this.subscriptions.getUsage(toAccessContext(request.user));
+    response.setHeader("Cache-Control", "no-store");
+    response.status(200).json(usage);
+  }
+
   @Get("current")
   async current(@Req() request: AuthenticatedRequest, @Res() response: Response) {
     const subscription = await this.subscriptions.getCurrent(toAccessContext(request.user));
