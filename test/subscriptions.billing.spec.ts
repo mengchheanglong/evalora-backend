@@ -760,8 +760,8 @@ describe("immediate paid upgrades", () => {
     expect(fake.subscription("org-a")?.plan).toBe(from);
     harness.respond(tranId, approvedPayment(tranId, { amount }));
     expect(await (await callback({ tran_id: tranId, status: "0" })).json()).toMatchObject({ status: "activated" });
-    expect(fake.subscription("org-a")).toMatchObject({ plan: to, pendingPlan: null, currentPeriodStart: new Date(NOW), currentPeriodEnd: new Date("2026-11-01T00:00:00.000Z") });
+    expect(fake.subscription("org-a")).toMatchObject({ plan: to, pendingPlan: null, currentPeriodStart: new Date(NOW), currentPeriodEnd: new Date("2026-10-13T09:00:00.000Z") });
     await callback({ tran_id: tranId, status: "0" });
-    expect(fake.subscription("org-a")?.currentPeriodEnd.toISOString()).toBe("2026-11-01T00:00:00.000Z");
+    expect(fake.subscription("org-a")?.currentPeriodEnd.toISOString()).toBe("2026-10-13T09:00:00.000Z");
   });
 });

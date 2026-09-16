@@ -70,7 +70,7 @@ export class SubscriptionsService {
     const active = subscription?.status === "ACTIVE" && subscription.currentPeriodEnd > now;
     const limits = { PLUS: 50, PRO: 250, BUSINESS: null };
     const sessionsUsed = await this.prisma.interviewSession.count({
-      where: { organizationId, startedAt: { gte: periodStart, lt: periodEnd } },
+      where: { organizationId, createdAt: { gte: periodStart, lt: periodEnd } },
     });
     return { sessionsUsed, sessionLimit: active ? limits[subscription.plan] : 0,
       periodStart: periodStart.toISOString(), periodEnd: periodEnd.toISOString() };
@@ -560,7 +560,7 @@ export function resolvePaidEffect(
   const rank = { PLUS: 0, PRO: 1, BUSINESS: 2 };
   if (subscription && subscription.currentPeriodEnd > verifiedAt && rank[plan] > rank[subscription.plan]) {
     return { kind: "apply", plan, billingCycle, periodStart: verifiedAt,
-      periodEnd: addBillingCycle(subscription.currentPeriodEnd, billingCycle) };
+      periodEnd: addBillingCycle(verifiedAt, billingCycle) };
   }
 
   if (subscription && subscription.currentPeriodEnd > verifiedAt && decidePurpose(subscription, plan, billingCycle, verifiedAt) === "PLAN_CHANGE") {
