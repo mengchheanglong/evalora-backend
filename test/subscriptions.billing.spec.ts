@@ -556,27 +556,27 @@ describe("renewal", () => {
 });
 
 describe("plan changes", () => {
-  it("records a paid change and applies it only when the paid period ends", async () => {
-    fake.seedSubscription({ organizationId: "org-a", plan: "PRO", billingCycle: "MONTHLY", currentPeriodEnd: new Date(MONTH_END) });
-    const { body } = await checkout("BUSINESS", "MONTHLY");
+  it("records a paid downgrade and applies it only when the paid period ends", async () => {
+    fake.seedSubscription({ organizationId: "org-a", plan: "BUSINESS", billingCycle: "MONTHLY", currentPeriodEnd: new Date(MONTH_END) });
+    const { body } = await checkout("PLUS", "MONTHLY");
     expect(body.purpose).toBe("PLAN_CHANGE");
 
     const tranId = String(body.tranId);
-    harness.respond(tranId, approvedPayment(tranId, { amount: 199 }));
+    harness.respond(tranId, approvedPayment(tranId, { amount: 29 }));
     expect(await (await callback({ tran_id: tranId, status: "0" })).json()).toMatchObject({ status: "scheduled" });
 
     const beforeEnd = fake.subscription("org-a")!;
-    expect(beforeEnd).toMatchObject({ plan: "PRO", billingCycle: "MONTHLY", pendingPlan: "BUSINESS", pendingBillingCycle: "MONTHLY" });
+    expect(beforeEnd).toMatchObject({ plan: "BUSINESS", billingCycle: "MONTHLY", pendingPlan: "PLUS", pendingBillingCycle: "MONTHLY" });
     expect(beforeEnd.currentPeriodEnd.toISOString()).toBe(MONTH_END);
     expect(fake.attempt(tranId)!.periodStart?.toISOString()).toBe(MONTH_END);
 
     // Still the old plan right up to the end of the period that was paid for.
     fake.setNow("2026-09-30T23:00:00.000Z");
-    expect(await (await get("/subscriptions/current")).json()).toMatchObject({ plan: "PRO", pendingPlan: "BUSINESS" });
+    expect(await (await get("/subscriptions/current")).json()).toMatchObject({ plan: "BUSINESS", pendingPlan: "PLUS" });
 
     fake.setNow(MONTH_END);
     const applied = (await (await get("/subscriptions/current")).json()) as Record<string, unknown>;
-    expect(applied).toMatchObject({ plan: "BUSINESS", billingCycle: "MONTHLY", pendingPlan: null, pendingBillingCycle: null });
+    expect(applied).toMatchObject({ plan: "PLUS", billingCycle: "MONTHLY", pendingPlan: null, pendingBillingCycle: null });
     expect(applied.currentPeriodStart).toBe(MONTH_END);
     expect(applied.currentPeriodEnd).toBe("2026-11-01T00:00:00.000Z");
   });
@@ -696,11 +696,72 @@ describe("sandbox billing tester authorization", () => {
     if (!allowed) expect((await post("/subscriptions/cancel", {}, auth)).status).toBe(403);
   });
 
+  it.each([
+    ["interviewer", "sandbox", "development", "org-a", true],
+    ["interviewer", "sandbox", "test", "org-a", true],
+    ["interviewer", "production", "development", "org-a", false],
+    ["interviewer", "sandbox", "production", "org-a", false],
+    ["interviewer", "sandbox", "development", null, false],
+    ["candidate", "sandbox", "development", "org-a", false],
+    ["admin", "sandbox", "development", "org-a", false],
+  ])("wildcard: %s %s %s workspace=%s allowed=%s", async (role, environment, nodeEnv, organizationId, allowed) => {
+    process.env.BILLING_TESTER_EMAILS = " * ";
+    process.env.PAYWAY_ENV = environment;
+    process.env.NODE_ENV = nodeEnv;
+    for (const email of ["new-interviewer@example.invalid", "another@example.invalid"]) {
+      const auth = token(role, organizationId, email);
+      const result = await checkout("PLUS", "MONTHLY", auth);
+      expect(result.response.status).toBe(allowed ? 201 : 403);
+      const permission = await get("/subscriptions/permissions", auth);
+      if (role === "candidate" || !organizationId) expect(permission.status).toBe(403);
+      else expect(await permission.json()).toEqual({ canManageBilling: allowed });
+    }
+  });
+
   it("requires workspace membership and an explicit allowlist", async () => {
     process.env.NODE_ENV = "development";
     process.env.PAYWAY_ENV = "sandbox";
     expect((await checkout("PLUS", "MONTHLY", token("interviewer", null, "jingjingmiffy@gmail.com"))).response.status).toBe(403);
     delete process.env.BILLING_TESTER_EMAILS;
     expect((await checkout("PLUS", "MONTHLY", token("interviewer", "org-a", "jingjingmiffy@gmail.com"))).response.status).toBe(403);
+  });
+});
+
+
+describe("subscription recovery after a missed payment return", () => {
+  it("verifies a paid Plus attempt when loading the profile, without double activation", async () => {
+    const { body } = await checkout("PLUS", "MONTHLY");
+    const tranId = String(body.tranId);
+    harness.respond(tranId, approvedPayment(tranId, { amount: 29 }));
+    const response = await get("/subscriptions/current", token("interviewer"));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ plan: "PLUS", status: "ACTIVE" });
+    expect(fake.attempt(tranId)?.status).toBe("VERIFIED");
+    const end = fake.subscription("org-a")?.currentPeriodEnd.toISOString();
+    await get("/subscriptions/current");
+    expect(fake.subscription("org-a")?.currentPeriodEnd.toISOString()).toBe(end);
+  });
+
+  it("does not activate an unconfirmed payment or another workspace's payment", async () => {
+    const { body } = await checkout("PLUS", "MONTHLY");
+    expect(await (await get("/subscriptions/current")).json()).toBeNull();
+    harness.respond(String(body.tranId), approvedPayment(String(body.tranId), { amount: 29 }));
+    expect(await (await get("/subscriptions/current", token("interviewer", "org-b"))).json()).toBeNull();
+    expect(fake.attempt(String(body.tranId))?.status).toBe("PENDING");
+  });
+});
+
+
+describe("immediate paid upgrades", () => {
+  it.each([["PLUS", "PRO", 79], ["PLUS", "BUSINESS", 199], ["PRO", "BUSINESS", 199]] as const)("activates %s to %s only after verification", async (from, to, amount) => {
+    fake.seedSubscription({ organizationId: "org-a", plan: from, currentPeriodEnd: new Date(MONTH_END) });
+    const { body } = await checkout(to, "MONTHLY");
+    const tranId = String(body.tranId);
+    expect(fake.subscription("org-a")?.plan).toBe(from);
+    harness.respond(tranId, approvedPayment(tranId, { amount }));
+    expect(await (await callback({ tran_id: tranId, status: "0" })).json()).toMatchObject({ status: "activated" });
+    expect(fake.subscription("org-a")).toMatchObject({ plan: to, pendingPlan: null, currentPeriodStart: new Date(NOW), currentPeriodEnd: new Date("2026-11-01T00:00:00.000Z") });
+    await callback({ tran_id: tranId, status: "0" });
+    expect(fake.subscription("org-a")?.currentPeriodEnd.toISOString()).toBe("2026-11-01T00:00:00.000Z");
   });
 });
