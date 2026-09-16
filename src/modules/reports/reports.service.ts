@@ -632,6 +632,11 @@ function mapPersistedReport(row: PersistedCandidateReportRow): GeneratedCandidat
     evidence: stringArray(row.evidence),
     reviewerSummary: optionalString(row.reviewerSummary),
     advisoryNotice: REPORT_ADVISORY_NOTICE,
+    recruiterVerdict: optionalString(row.recruiterVerdict) as "STRONG_HIRE" | "HIRE" | "NEUTRAL" | "NO_HIRE" | undefined,
+    recruiterTags: Array.isArray(row.recruiterTags) ? (row.recruiterTags as string[]) : undefined,
+    recruiterScore: typeof row.recruiterScore === "number" ? row.recruiterScore : undefined,
+    decidedAt: typeof row.decidedAt === "string" ? row.decidedAt : row.decidedAt instanceof Date ? row.decidedAt.toISOString() : undefined,
+    decidedById: optionalString(row.decidedById),
   };
 }
 
