@@ -193,6 +193,43 @@ async function run() {
   const missing = await api(`/admin/users/00000000-0000-4000-8000-000000000000/status`, { method: "PATCH", token: adminToken, body: { isSuspended: true } });
   check("unknown user answers 404", missing.status === 404, `status ${missing.status}`);
 
+  // Dashboard additions: activity series, comparisons, attention, detail views, sorting.
+  const activity = overview.json?.activity;
+  check(
+    "overview carries a 30-day activity series with comparisons and attention",
+    Array.isArray(activity?.days) && activity.days.length === 30 && activity.sessionsStarted.length === 30
+      && typeof overview.json.comparisons?.sessionsStarted?.current === "number"
+      && typeof overview.json.attention?.workspacesWithoutOwner === "number"
+      && typeof overview.json.ai?.projectedMonthCostUsd === "number",
+    `days ${activity?.days?.length}`,
+  );
+  const organizationDetail = await api(`/admin/organizations/${seeded.targetOrg.id}`, { token: adminToken });
+  check(
+    "organization detail lists members, session breakdown, and recent sessions",
+    organizationDetail.status === 200
+      && organizationDetail.json.members.length === 2
+      && typeof organizationDetail.json.sessionsByStatus?.completed === "number"
+      && Array.isArray(organizationDetail.json.recentSessions)
+      && typeof organizationDetail.json.draftCount === "number",
+    `status ${organizationDetail.status}, members ${organizationDetail.json?.members?.length}`,
+  );
+  const userDetail = await api(`/admin/users/${seeded.owner.id}`, { token: adminToken });
+  check(
+    "user detail carries activity counts",
+    userDetail.status === 200 && typeof userDetail.json.createdSessionCount === "number" && typeof userDetail.json.templateCount === "number" && Array.isArray(userDetail.json.recentSessions),
+    `status ${userDetail.status}`,
+  );
+  const missingDetail = await api(`/admin/organizations/00000000-0000-4000-8000-000000000000`, { token: adminToken });
+  check("unknown organization detail answers 404", missingDetail.status === 404, `status ${missingDetail.status}`);
+  const sortedByName = await api(`/admin/organizations?sort=name&order=asc&pageSize=100`, { token: adminToken });
+  const names: string[] = sortedByName.json?.items?.map((item: any) => item.name) ?? [];
+  check("organizations sort by name ascending", sortedByName.status === 200 && names.every((name, index) => index === 0 || names[index - 1].localeCompare(name) <= 0), `status ${sortedByName.status}, ${names.length} rows`);
+  const sortedBySessions = await api(`/admin/organizations?sort=sessions&pageSize=100`, { token: adminToken });
+  const counts: number[] = sortedBySessions.json?.items?.map((item: any) => item.sessionCount) ?? [];
+  check("organizations sort by sessions descending", sortedBySessions.status === 200 && counts.every((count, index) => index === 0 || counts[index - 1] >= count), `status ${sortedBySessions.status}`);
+  const badSort = await api(`/admin/users?sort=password`, { token: adminToken });
+  check("unknown sort key is rejected", badSort.status === 400, `status ${badSort.status}`);
+
   return seeded;
 }
 

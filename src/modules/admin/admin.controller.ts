@@ -36,6 +36,11 @@ export class AdminController {
     return this.adminService.listOrganizations(toAccessContext(request.user), query);
   }
 
+  @Get("organizations/:id")
+  getOrganization(@Req() request: AuthenticatedRequest, @Param("id") id: string) {
+    return this.adminService.getOrganizationDetail(toAccessContext(request.user), id);
+  }
+
   @Patch("organizations/:id/status")
   setOrganizationStatus(
     @Req() request: AuthenticatedRequest,
@@ -57,6 +62,11 @@ export class AdminController {
   @Get("users")
   listUsers(@Req() request: AuthenticatedRequest, @Query(new ValidateDto(AdminUsersQueryDto)) query: AdminUsersQueryDto) {
     return this.adminService.listUsers(toAccessContext(request.user), query);
+  }
+
+  @Get("users/:id")
+  getUser(@Req() request: AuthenticatedRequest, @Param("id") id: string) {
+    return this.adminService.getUserDetail(toAccessContext(request.user), id);
   }
 
   @Patch("users/:id/status")

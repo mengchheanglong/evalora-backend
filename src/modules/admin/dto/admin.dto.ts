@@ -6,6 +6,9 @@ export const ADMIN_STATUS_FILTERS = ["active", "suspended"] as const;
 export const ADMIN_USER_ROLE_FILTERS = ["admin", "organization", "interviewer", "candidate"] as const;
 /** Candidate is deliberately absent: an admin cannot turn a staff account into an invite-only record. */
 export const ADMIN_ASSIGNABLE_ROLES = ["admin", "organization", "interviewer"] as const;
+export const ADMIN_SORT_ORDERS = ["asc", "desc"] as const;
+export const ADMIN_ORGANIZATION_SORTS = ["createdAt", "name", "sessions"] as const;
+export const ADMIN_USER_SORTS = ["createdAt", "name", "email"] as const;
 
 export const ADMIN_MAX_PAGE_SIZE = 100;
 const SEARCH_MAX = 200;
@@ -23,6 +26,10 @@ export class AdminListQueryDto {
   @IsOptional()
   @IsIn(ADMIN_STATUS_FILTERS)
   status?: (typeof ADMIN_STATUS_FILTERS)[number];
+
+  @IsOptional()
+  @IsIn(ADMIN_SORT_ORDERS)
+  order?: (typeof ADMIN_SORT_ORDERS)[number];
 
   @IsOptional()
   @Type(() => Number)
@@ -43,12 +50,20 @@ export class AdminOrganizationsQueryDto extends AdminListQueryDto {
   @IsOptional()
   @IsIn(ADMIN_PLANS)
   plan?: (typeof ADMIN_PLANS)[number];
+
+  @IsOptional()
+  @IsIn(ADMIN_ORGANIZATION_SORTS)
+  sort?: (typeof ADMIN_ORGANIZATION_SORTS)[number];
 }
 
 export class AdminUsersQueryDto extends AdminListQueryDto {
   @IsOptional()
   @IsIn(ADMIN_USER_ROLE_FILTERS)
   role?: (typeof ADMIN_USER_ROLE_FILTERS)[number];
+
+  @IsOptional()
+  @IsIn(ADMIN_USER_SORTS)
+  sort?: (typeof ADMIN_USER_SORTS)[number];
 }
 
 export class UpdateSuspensionDto {

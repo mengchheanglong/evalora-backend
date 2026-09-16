@@ -5,6 +5,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from "@nes
 import { Reflector } from "@nestjs/core";
 import { AdminController } from "../src/modules/admin/admin.controller";
 import {
+  ACTIVITY_WINDOW_DAYS,
   ADMIN_MESSAGES,
   AdminService,
   DEFAULT_AI_COST_PER_TURN_USD,
@@ -14,6 +15,7 @@ import { JwtAuthGuard, RolesGuard } from "../src/modules/auth/auth.guard";
 
 type Role = "ADMIN" | "ORGANIZATION" | "INTERVIEWER" | "CANDIDATE";
 type Plan = "FREE" | "PRO" | "ENTERPRISE";
+const STAFF: Role[] = ["ADMIN", "ORGANIZATION", "INTERVIEWER"];
 
 interface OrgRow {
   id: string;
@@ -42,6 +44,8 @@ interface UserRow {
 const admin = { userId: "admin-1", role: "admin" as const, organizationId: "org-admin" };
 const FIXED_NOW = new Date("2026-09-07T10:00:00.000Z");
 const MONTH_START = "2026-09-01T00:00:00.000Z";
+const day = (offset: number) => new Date(FIXED_NOW.getTime() + offset * 86_400_000);
+const onlySelects = (args: any, key: string) => Boolean(args?.select?.[key]) && Object.keys(args.select).length === 1;
 
 function createFakePrisma() {
   const calls: Array<{ method: string; args: any }> = [];
@@ -69,7 +73,7 @@ function createFakePrisma() {
       .filter((user) => user.organizationId === org.id && user.role === "ORGANIZATION")
       .map((user) => ({ id: user.id, name: user.name, email: user.email })),
     _count: {
-      users: users.filter((user) => user.organizationId === org.id && (user.role === "ORGANIZATION" || user.role === "INTERVIEWER")).length,
+      users: users.filter((user) => user.organizationId === org.id && STAFF.includes(user.role)).length,
       sessions: org.sessions,
       templates: org.templates,
     },
@@ -85,14 +89,26 @@ function createFakePrisma() {
       isSuspended: user.isSuspended,
       suspendedAt: user.suspendedAt,
       createdAt: user.createdAt,
+      updatedAt: new Date("2026-08-01"),
       organization: org ? { id: org.id, name: org.name, isSuspended: org.isSuspended } : null,
     };
+  };
+  const recentSession = {
+    id: "s1",
+    title: "Backend loop",
+    status: "COMPLETED",
+    createdAt: day(-2),
+    completedAt: day(-1),
+    updatedAt: day(-1),
+    candidate: { name: "Cara Candidate" },
+    template: { title: "Node.js Engineer" },
   };
 
   const prisma = {
     organization: {
       count: async (args?: any) => {
         record("organization.count", args);
+        if (args?.where?.users?.none) return 1;
         if (args?.where?.isSuspended === true) return organizations.filter((org) => org.isSuspended).length;
         if (args?.where?.plan?.in) return 1;
         if (args?.where?.createdAt && !args.where.OR) return 1;
@@ -104,6 +120,7 @@ function createFakePrisma() {
       },
       findMany: async (args: any) => {
         record("organization.findMany", args);
+        if (onlySelects(args, "createdAt")) return [{ createdAt: day(-3) }];
         return organizations.map(orgRow);
       },
       findUnique: async (args: any) => {
@@ -122,6 +139,7 @@ function createFakePrisma() {
     user: {
       count: async (args?: any) => {
         record("user.count", args);
+        if (args?.where?.emailVerified === false) return 2;
         if (args?.where?.organizationId) {
           return users.filter((user) => user.organizationId === args.where.organizationId && user.role === args.where.role).length;
         }
@@ -139,6 +157,12 @@ function createFakePrisma() {
       },
       findMany: async (args: any) => {
         record("user.findMany", args);
+        if (onlySelects(args, "createdAt")) return [{ createdAt: day(-1) }, { createdAt: day(-45) }];
+        if (args?.where?.organizationId) {
+          return users
+            .filter((user) => user.organizationId === args.where.organizationId && args.where.role.in.includes(user.role))
+            .map((user) => ({ id: user.id, name: user.name, email: user.email, role: user.role, emailVerified: user.emailVerified, isSuspended: user.isSuspended, createdAt: user.createdAt }));
+        }
         return users.map(userRow);
       },
       findUnique: async (args: any) => {
@@ -159,6 +183,7 @@ function createFakePrisma() {
     interviewSession: {
       groupBy: async (args: any) => {
         record("session.groupBy", args);
+        if (args?.where?.organizationId) return [{ status: "COMPLETED", _count: { _all: 5 } }, { status: "IN_PROGRESS", _count: { _all: 1 } }];
         return [
           { status: "COMPLETED", _count: { _all: 60 } },
           { status: "IN_PROGRESS", _count: { _all: 3 } },
@@ -168,7 +193,19 @@ function createFakePrisma() {
       },
       count: async (args: any) => {
         record("session.count", args);
+        if (args?.where?.createdById) return 4;
+        if (args?.where?.candidateId) return 0;
         return args?.where?.status === "COMPLETED" ? 7 : 15;
+      },
+      findMany: async (args: any) => {
+        record("session.findMany", args);
+        if (onlySelects(args, "completedAt")) return [{ completedAt: day(-1) }, { completedAt: day(-40) }];
+        if (onlySelects(args, "createdAt")) return [{ createdAt: day(0) }, { createdAt: day(-2) }, { createdAt: day(-35) }];
+        return [recentSession];
+      },
+      findFirst: async (args: any) => {
+        record("session.findFirst", args);
+        return { updatedAt: day(-1) };
       },
     },
     aIMessage: {
@@ -179,11 +216,22 @@ function createFakePrisma() {
         if (billable) return month ? 4 : 10;
         return month ? 12 : 25;
       },
+      findMany: async (args: any) => {
+        record("aiMessage.findMany", args);
+        return [{ createdAt: day(0) }, { createdAt: day(-1) }, { createdAt: day(-31) }];
+      },
     },
     assessmentTemplateDraft: {
       count: async (args: any) => {
         record("draft.count", args);
+        if (args.where.organizationId) return 1;
         return args.where.createdAt ? 1 : 3;
+      },
+    },
+    assessmentTemplate: {
+      count: async (args: any) => {
+        record("template.count", args);
+        return 3;
       },
     },
   };
@@ -229,14 +277,39 @@ test("overview aggregates platform totals and prices only model-generated work",
   // (10 billable turns + 3 drafts) x 0.002 and (4 + 1) x 0.002 — fallback turns cost nothing.
   assert.deepEqual(overview.ai.estimatedCostUsd, { allTime: 0.026, thisMonth: 0.01 });
   assert.equal(overview.ai.costPerTurnUsd, 0.002);
+  // 0.01 over 7 elapsed days, projected across September's 30 days.
+  assert.equal(overview.ai.projectedMonthCostUsd, 0.0429);
 
   const billable = fake.calls.find((call) => call.method === "aiMessage.count" && call.args.where.metadata);
   assert.deepEqual(billable?.args.where, { role: "assistant", metadata: { path: ["provider"], equals: "deepseek" } });
-  const monthScoped = fake.calls.filter((call) => call.args?.where?.createdAt?.gte instanceof Date);
-  assert.ok(monthScoped.length >= 6);
+  const monthScoped = fake.calls.filter((call) => call.method.endsWith(".count") && call.args?.where?.createdAt?.gte instanceof Date && !call.args.where.role);
+  assert.ok(monthScoped.length >= 4);
   assert.ok(monthScoped.every((call) => call.args.where.createdAt.gte.toISOString() === MONTH_START));
   // The health snapshot runs with the admin's own (platform-wide) access context.
   assert.deepEqual(fake.calls.find((call) => call.method === "health.snapshot")?.args, admin);
+});
+
+test("overview buckets the last 30 days and compares them with the 30 days before", async () => {
+  const { service } = createService();
+
+  const { activity, comparisons, attention } = await service.overview(admin);
+
+  assert.equal(activity.days.length, ACTIVITY_WINDOW_DAYS);
+  assert.equal(activity.days[0], "2026-08-09");
+  assert.equal(activity.days.at(-1), "2026-09-07");
+  for (const key of ["sessionsStarted", "sessionsCompleted", "newUsers", "newOrganizations", "billableTurns"] as const) {
+    assert.equal(activity[key].length, ACTIVITY_WINDOW_DAYS, key);
+  }
+  // Today and two days ago fall in the current window; 35 days ago in the previous one.
+  assert.equal(activity.sessionsStarted.at(-1), 1);
+  assert.equal(activity.sessionsStarted.at(-3), 1);
+  assert.deepEqual(comparisons.sessionsStarted, { current: 2, previous: 1, changePct: 100 });
+  assert.deepEqual(comparisons.sessionsCompleted, { current: 1, previous: 1, changePct: 0 });
+  assert.deepEqual(comparisons.newUsers, { current: 1, previous: 1, changePct: 0 });
+  // No baseline at all reads as "no comparison", never as infinity.
+  assert.deepEqual(comparisons.newOrganizations, { current: 1, previous: 0, changePct: null });
+  assert.deepEqual(comparisons.billableTurns, { current: 2, previous: 1, changePct: 100 });
+  assert.deepEqual(attention, { suspendedOrganizations: 0, suspendedUsers: 0, unverifiedStaff: 2, workspacesWithoutOwner: 1, liveSessions: 3 });
 });
 
 test("cost per turn comes from the environment and falls back on junk", () => {
@@ -246,7 +319,7 @@ test("cost per turn comes from the environment and falls back on junk", () => {
   assert.equal(readAiCostPerTurnFromEnv({}), DEFAULT_AI_COST_PER_TURN_USD);
 });
 
-test("organizations list searches name or owner email, filters, and paginates", async () => {
+test("organizations list searches name or owner email, filters, sorts, and paginates", async () => {
   const { service, fake } = createService();
 
   const page = await service.listOrganizations(admin, { q: "  acme ", page: 2, pageSize: 10, plan: "free", status: "active" });
@@ -262,6 +335,7 @@ test("organizations list searches name or owner email, filters, and paginates", 
       { users: { some: { role: "ORGANIZATION", email: { contains: "acme", mode: "insensitive" } } } },
     ],
   });
+  assert.deepEqual(findMany.orderBy, [{ createdAt: "desc" }, { id: "asc" }]);
   assert.equal(page.page, 2);
   assert.equal(page.pageSize, 10);
   assert.equal(page.total, 2);
@@ -275,9 +349,15 @@ test("organizations list searches name or owner email, filters, and paginates", 
   assert.equal(acme.templateCount, 2);
   assert.equal(acme.isCurrentWorkspace, false);
   assert.equal(page.items.find((item) => item.id === "org-admin")!.isCurrentWorkspace, true);
+
+  await service.listOrganizations(admin, { sort: "sessions", order: "asc" });
+  await service.listOrganizations(admin, { sort: "name" });
+  const orders = fake.calls.filter((call) => call.method === "organization.findMany").map((call) => call.args.orderBy);
+  assert.deepEqual(orders[1], [{ sessions: { _count: "asc" } }, { createdAt: "desc" }]);
+  assert.deepEqual(orders[2], [{ name: "asc" }, { id: "asc" }]);
 });
 
-test("users list applies role, status, and search filters and caps the page size", async () => {
+test("users list applies role, status, search, and sort filters and caps the page size", async () => {
   const { service, fake } = createService();
 
   const result = await service.listUsers(admin, { q: "ada", role: "interviewer", status: "suspended", pageSize: 500 });
@@ -290,6 +370,7 @@ test("users list applies role, status, and search filters and caps the page size
   });
   assert.equal(findMany.take, 100);
   assert.equal(findMany.skip, 0);
+  assert.deepEqual(findMany.orderBy, [{ createdAt: "desc" }, { email: "asc" }]);
 
   const me = result.items.find((item) => item.id === "admin-1")!;
   assert.equal(me.isCurrentUser, true);
@@ -297,6 +378,56 @@ test("users list applies role, status, and search filters and caps the page size
   assert.deepEqual(result.items.find((item) => item.id === "owner-acme")!.organization, { id: "org-acme", name: "Acme Talent", isSuspended: false });
   assert.equal(result.items.find((item) => item.id === "cand-1")!.organization, undefined);
   assert.equal(result.items.find((item) => item.id === "cand-1")!.roleLabel, "Candidate");
+
+  await service.listUsers(admin, { sort: "email", order: "desc" });
+  await service.listUsers(admin, { sort: "name" });
+  const orders = fake.calls.filter((call) => call.method === "user.findMany").map((call) => call.args.orderBy);
+  assert.deepEqual(orders[1], [{ email: "desc" }]);
+  assert.deepEqual(orders[2], [{ name: "asc" }, { email: "asc" }]);
+});
+
+test("organization detail adds members, session breakdown, recent sessions, and last activity", async () => {
+  const { service } = createService();
+
+  const detail = await service.getOrganizationDetail(admin, "org-acme");
+
+  assert.equal(detail.name, "Acme Talent");
+  assert.deepEqual(detail.members.map((member) => [member.id, member.role, member.roleLabel]), [
+    ["owner-acme", "organization", "Owner"],
+    ["int-acme", "interviewer", "Interviewer"],
+  ]);
+  assert.deepEqual(detail.sessionsByStatus, { not_started: 0, in_progress: 1, completed: 5, expired: 0 });
+  assert.equal(detail.recentSessions.length, 1);
+  assert.deepEqual(detail.recentSessions[0], {
+    id: "s1",
+    title: "Backend loop",
+    candidateName: "Cara Candidate",
+    templateTitle: "Node.js Engineer",
+    status: "completed",
+    createdAt: day(-2).toISOString(),
+    completedAt: day(-1).toISOString(),
+  });
+  assert.equal(detail.draftCount, 1);
+  assert.equal(detail.lastActivityAt, day(-1).toISOString());
+  await assert.rejects(service.getOrganizationDetail(admin, "missing"), NotFoundException);
+});
+
+test("user detail adds activity counts and the sessions the account touched", async () => {
+  const { service, fake } = createService();
+
+  const detail = await service.getUserDetail(admin, "int-acme");
+
+  assert.equal(detail.email, "ian@acme.test");
+  assert.equal(detail.createdSessionCount, 4);
+  assert.equal(detail.candidateSessionCount, 0);
+  assert.equal(detail.templateCount, 3);
+  assert.equal(detail.recentSessions[0]?.templateTitle, "Node.js Engineer");
+  assert.equal(detail.lastActivityAt, day(-1).toISOString());
+  assert.equal(detail.updatedAt, new Date("2026-08-01").toISOString());
+  const recent = fake.calls.find((call) => call.method === "session.findMany" && call.args.where?.OR)!.args;
+  assert.deepEqual(recent.where, { OR: [{ createdById: "int-acme" }, { candidateId: "int-acme" }] });
+  assert.equal(recent.take, 5);
+  await assert.rejects(service.getUserDetail(admin, "missing"), NotFoundException);
 });
 
 test("an admin cannot deactivate themselves; suspension stamps and clears suspendedAt", async () => {
@@ -391,7 +522,17 @@ test("every admin route is guarded and rejects non-admin roles with 403", () => 
   assert.ok(guards.includes(RolesGuard));
 
   const guard = new RolesGuard(new Reflector());
-  const handlers = ["overview", "listOrganizations", "setOrganizationStatus", "setOrganizationPlan", "listUsers", "setUserStatus", "setUserRole"] as const;
+  const handlers = [
+    "overview",
+    "listOrganizations",
+    "getOrganization",
+    "setOrganizationStatus",
+    "setOrganizationPlan",
+    "listUsers",
+    "getUser",
+    "setUserStatus",
+    "setUserRole",
+  ] as const;
   for (const name of handlers) {
     const handler = AdminController.prototype[name];
     const contextFor = (role: string) =>

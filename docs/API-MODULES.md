@@ -181,9 +181,11 @@ Endpoints (all `@Roles("admin")`, class-level):
 
 - `GET /api/admin/overview`
 - `GET /api/admin/organizations`
+- `GET /api/admin/organizations/:id`
 - `PATCH /api/admin/organizations/:id/status`
 - `PATCH /api/admin/organizations/:id/plan`
 - `GET /api/admin/users`
+- `GET /api/admin/users/:id`
 - `PATCH /api/admin/users/:id/status`
 - `PATCH /api/admin/users/:id/role`
 

@@ -6,10 +6,17 @@ import { SystemHealthService } from "../analytics/system-health.service";
 import type { AccessContext } from "../auth/access-control";
 import type {
   AdminAccountStatus,
+  AdminOrganizationDetailDto,
   AdminOrganizationDto,
+  AdminOrganizationSort,
   AdminOverviewDto,
   AdminPageDto,
+  AdminSessionSummaryDto,
+  AdminSortOrder,
+  AdminUserDetailDto,
   AdminUserDto,
+  AdminUserSort,
+  ComparisonDto,
   SubscriptionPlanDto,
 } from "./admin.types";
 import { ADMIN_MAX_PAGE_SIZE } from "./dto/admin.dto";
@@ -19,6 +26,11 @@ type PrismaPlan = "FREE" | "PRO" | "ENTERPRISE";
 type PrismaSessionStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "EXPIRED";
 
 const DEFAULT_PAGE_SIZE = 25;
+const DAY_MS = 24 * 60 * 60 * 1_000;
+/** Rolling window behind the overview's activity chart and its period comparison. */
+export const ACTIVITY_WINDOW_DAYS = 30;
+const RECENT_SESSIONS_LIMIT = 5;
+const MEMBERS_LIMIT = 100;
 /**
  * Working estimate for one DeepSeek V4 Flash generation (prompt + completion)
  * at the token volumes an interview turn or draft produces. Override with
@@ -28,6 +40,8 @@ export const DEFAULT_AI_COST_PER_TURN_USD = 0.002;
 const AI_PROVIDER_TAG = "deepseek";
 const COST_METHODOLOGY =
   "Estimated as (billable interview turns + AI draft generations) x cost per turn. Only work produced by the configured model counts; deterministic fallback output is free.";
+/** Accounts that sign in and can be attached to a workspace; candidates are invite-only records. */
+const STAFF_ROLES: PrismaRole[] = ["ADMIN", "ORGANIZATION", "INTERVIEWER"];
 
 export const ADMIN_MESSAGES = {
   userNotFound: "User not found.",
@@ -43,16 +57,19 @@ export const ADMIN_MESSAGES = {
 export interface AdminListQuery {
   q?: string;
   status?: AdminAccountStatus;
+  order?: AdminSortOrder;
   page?: number;
   pageSize?: number;
 }
 
 export interface AdminOrganizationsQuery extends AdminListQuery {
   plan?: SubscriptionPlanDto;
+  sort?: AdminOrganizationSort;
 }
 
 export interface AdminUsersQuery extends AdminListQuery {
   role?: UserRole;
+  sort?: AdminUserSort;
 }
 
 export interface AdminServiceOptions {
@@ -76,7 +93,7 @@ const ORGANIZATION_SELECT = {
   },
   _count: {
     select: {
-      users: { where: { role: { in: ["ORGANIZATION", "INTERVIEWER"] } } },
+      users: { where: { role: { in: STAFF_ROLES } } },
       sessions: true,
       templates: true,
     },
@@ -95,8 +112,34 @@ const USER_SELECT = {
   organization: { select: { id: true, name: true, isSuspended: true } },
 } satisfies Prisma.UserSelect;
 
+const USER_DETAIL_SELECT = { ...USER_SELECT, updatedAt: true } satisfies Prisma.UserSelect;
+
+const MEMBER_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+  role: true,
+  emailVerified: true,
+  isSuspended: true,
+  createdAt: true,
+} satisfies Prisma.UserSelect;
+
+const SESSION_SUMMARY_SELECT = {
+  id: true,
+  title: true,
+  status: true,
+  createdAt: true,
+  completedAt: true,
+  updatedAt: true,
+  candidate: { select: { name: true } },
+  template: { select: { title: true } },
+} satisfies Prisma.InterviewSessionSelect;
+
 type OrganizationRow = Prisma.OrganizationGetPayload<{ select: typeof ORGANIZATION_SELECT }>;
 type UserRow = Prisma.UserGetPayload<{ select: typeof USER_SELECT }>;
+type UserDetailRow = Prisma.UserGetPayload<{ select: typeof USER_DETAIL_SELECT }>;
+type MemberRow = Prisma.UserGetPayload<{ select: typeof MEMBER_SELECT }>;
+type SessionSummaryRow = Prisma.InterviewSessionGetPayload<{ select: typeof SESSION_SUMMARY_SELECT }>;
 
 /** Reads the per-turn estimate from the environment, ignoring junk so a typo cannot zero or explode the dashboard. */
 export function readAiCostPerTurnFromEnv(env: NodeJS.ProcessEnv = process.env): number {
@@ -127,6 +170,11 @@ export class AdminService {
     const asOf = this.now();
     const monthStart = startOfUtcMonth(asOf);
     const thisMonth = { gte: monthStart };
+    // Two adjacent windows of equal length: the chart shows the current one and
+    // the comparison reads the change against the one before it.
+    const currentStart = addUtcDays(startOfUtcDay(asOf), -(ACTIVITY_WINDOW_DAYS - 1));
+    const previousStart = addUtcDays(currentStart, -ACTIVITY_WINDOW_DAYS);
+    const bothWindows = { gte: previousStart };
     const billableTurnWhere: Prisma.AIMessageWhereInput = {
       role: "assistant",
       metadata: { path: ["provider"], equals: AI_PROVIDER_TAG },
@@ -151,6 +199,13 @@ export class AdminService {
       draftsAllTime,
       draftsThisMonth,
       systemHealth,
+      sessionsStartedRows,
+      sessionsCompletedRows,
+      newUserRows,
+      newOrganizationRows,
+      billableTurnRows,
+      unverifiedStaff,
+      workspacesWithoutOwner,
     ] = await Promise.all([
       this.prisma.organization.count(),
       this.prisma.organization.count({ where: { isSuspended: true } }),
@@ -171,6 +226,15 @@ export class AdminService {
       this.prisma.assessmentTemplateDraft.count({ where: { provider: AI_PROVIDER_TAG, createdAt: thisMonth } }),
       // Admin access carries no workspace scope, so the snapshot covers the platform.
       this.systemHealth.snapshot(access),
+      // Timestamps only, for a 60-day window: small enough to bucket in memory
+      // and it keeps the whole overview to one round of parallel queries.
+      this.prisma.interviewSession.findMany({ where: { createdAt: bothWindows }, select: { createdAt: true } }),
+      this.prisma.interviewSession.findMany({ where: { completedAt: bothWindows }, select: { completedAt: true } }),
+      this.prisma.user.findMany({ where: { createdAt: bothWindows }, select: { createdAt: true } }),
+      this.prisma.organization.findMany({ where: { createdAt: bothWindows }, select: { createdAt: true } }),
+      this.prisma.aIMessage.findMany({ where: { ...billableTurnWhere, createdAt: bothWindows }, select: { createdAt: true } }),
+      this.prisma.user.count({ where: { emailVerified: false, role: { in: STAFF_ROLES } } }),
+      this.prisma.organization.count({ where: { users: { none: { role: "ORGANIZATION" } } } }),
     ]);
 
     const byPlan: Record<SubscriptionPlanDto, number> = { free: 0, pro: 0, enterprise: 0 };
@@ -183,16 +247,43 @@ export class AdminService {
       usersTotal += group._count._all;
     }
 
-    const byStatus: Record<SessionStatus, number> = { not_started: 0, in_progress: 0, completed: 0, expired: 0 };
-    let sessionsTotal = 0;
-    for (const group of sessionsByStatus) {
-      byStatus[fromPrismaStatus(group.status)] = group._count._all;
-      sessionsTotal += group._count._all;
-    }
+    const byStatus = statusCounts(sessionsByStatus);
+    const sessionsTotal = Object.values(byStatus).reduce((sum, count) => sum + count, 0);
+
+    const windows = { currentStart, previousStart, days: ACTIVITY_WINDOW_DAYS };
+    const sessionsStarted = bucketByDay(sessionsStartedRows.map((row) => row.createdAt), windows);
+    const sessionsCompleted = bucketByDay(sessionsCompletedRows.map((row) => row.completedAt), windows);
+    const newUsers = bucketByDay(newUserRows.map((row) => row.createdAt), windows);
+    const newOrganizations = bucketByDay(newOrganizationRows.map((row) => row.createdAt), windows);
+    const billableTurns = bucketByDay(billableTurnRows.map((row) => row.createdAt), windows);
+
+    const thisMonthCost = this.estimateCost(billableTurnsThisMonth + draftsThisMonth);
 
     return {
       asOf: asOf.toISOString(),
       monthStart: monthStart.toISOString(),
+      activity: {
+        days: Array.from({ length: ACTIVITY_WINDOW_DAYS }, (_, index) => addUtcDays(currentStart, index).toISOString().slice(0, 10)),
+        sessionsStarted: sessionsStarted.series,
+        sessionsCompleted: sessionsCompleted.series,
+        newUsers: newUsers.series,
+        newOrganizations: newOrganizations.series,
+        billableTurns: billableTurns.series,
+      },
+      comparisons: {
+        sessionsStarted: sessionsStarted.comparison,
+        sessionsCompleted: sessionsCompleted.comparison,
+        newUsers: newUsers.comparison,
+        newOrganizations: newOrganizations.comparison,
+        billableTurns: billableTurns.comparison,
+      },
+      attention: {
+        suspendedOrganizations: organizationSuspended,
+        suspendedUsers: usersSuspended,
+        unverifiedStaff,
+        workspacesWithoutOwner,
+        liveSessions: byStatus.in_progress,
+      },
       organizations: {
         total: organizationTotal,
         active: organizationTotal - organizationSuspended,
@@ -218,8 +309,9 @@ export class AdminService {
         draftGenerations: { allTime: draftsAllTime, thisMonth: draftsThisMonth },
         estimatedCostUsd: {
           allTime: this.estimateCost(billableTurnsAllTime + draftsAllTime),
-          thisMonth: this.estimateCost(billableTurnsThisMonth + draftsThisMonth),
+          thisMonth: thisMonthCost,
         },
+        projectedMonthCostUsd: projectMonthEnd(thisMonthCost, asOf),
         methodology: COST_METHODOLOGY,
       },
       systemHealth,
@@ -244,10 +336,42 @@ export class AdminService {
 
     const [total, rows] = await Promise.all([
       this.prisma.organization.count({ where }),
-      this.prisma.organization.findMany({ where, orderBy: { createdAt: "desc" }, skip, take: pageSize, select: ORGANIZATION_SELECT }),
+      this.prisma.organization.findMany({ where, orderBy: organizationOrder(query), skip, take: pageSize, select: ORGANIZATION_SELECT }),
     ]);
 
     return pageOf(rows.map((row) => toOrganizationDto(row, access)), page, pageSize, total);
+  }
+
+  async getOrganizationDetail(access: AccessContext, organizationId: string): Promise<AdminOrganizationDetailDto> {
+    const row = await this.prisma.organization.findUnique({ where: { id: organizationId }, select: ORGANIZATION_SELECT });
+    if (!row) throw new NotFoundException(ADMIN_MESSAGES.organizationNotFound);
+
+    const [members, statusGroups, recentSessions, draftCount, latestSession] = await Promise.all([
+      this.prisma.user.findMany({
+        where: { organizationId, role: { in: STAFF_ROLES } },
+        orderBy: [{ role: "asc" }, { createdAt: "asc" }],
+        take: MEMBERS_LIMIT,
+        select: MEMBER_SELECT,
+      }),
+      this.prisma.interviewSession.groupBy({ by: ["status"], where: { organizationId }, _count: { _all: true } }),
+      this.prisma.interviewSession.findMany({
+        where: { organizationId },
+        orderBy: { createdAt: "desc" },
+        take: RECENT_SESSIONS_LIMIT,
+        select: SESSION_SUMMARY_SELECT,
+      }),
+      this.prisma.assessmentTemplateDraft.count({ where: { organizationId } }),
+      this.prisma.interviewSession.findFirst({ where: { organizationId }, orderBy: { updatedAt: "desc" }, select: { updatedAt: true } }),
+    ]);
+
+    return {
+      ...toOrganizationDto(row, access),
+      members: members.map(toMemberDto),
+      sessionsByStatus: statusCounts(statusGroups),
+      recentSessions: recentSessions.map(toSessionSummary),
+      draftCount,
+      ...(latestSession ? { lastActivityAt: latestSession.updatedAt.toISOString() } : {}),
+    };
   }
 
   async setOrganizationStatus(access: AccessContext, organizationId: string, isSuspended: boolean): Promise<AdminOrganizationDto> {
@@ -295,10 +419,38 @@ export class AdminService {
 
     const [total, rows] = await Promise.all([
       this.prisma.user.count({ where }),
-      this.prisma.user.findMany({ where, orderBy: [{ createdAt: "desc" }, { email: "asc" }], skip, take: pageSize, select: USER_SELECT }),
+      this.prisma.user.findMany({ where, orderBy: userOrder(query), skip, take: pageSize, select: USER_SELECT }),
     ]);
 
     return pageOf(rows.map((row) => toUserDto(row, access)), page, pageSize, total);
+  }
+
+  async getUserDetail(access: AccessContext, userId: string): Promise<AdminUserDetailDto> {
+    const row = await this.prisma.user.findUnique({ where: { id: userId }, select: USER_DETAIL_SELECT });
+    if (!row) throw new NotFoundException(ADMIN_MESSAGES.userNotFound);
+
+    const [createdSessionCount, candidateSessionCount, templateCount, recentSessions] = await Promise.all([
+      this.prisma.interviewSession.count({ where: { createdById: userId } }),
+      this.prisma.interviewSession.count({ where: { candidateId: userId } }),
+      this.prisma.assessmentTemplate.count({ where: { createdById: userId } }),
+      this.prisma.interviewSession.findMany({
+        where: { OR: [{ createdById: userId }, { candidateId: userId }] },
+        orderBy: { updatedAt: "desc" },
+        take: RECENT_SESSIONS_LIMIT,
+        select: SESSION_SUMMARY_SELECT,
+      }),
+    ]);
+
+    const latest = recentSessions[0];
+    return {
+      ...toUserDto(row, access),
+      updatedAt: row.updatedAt.toISOString(),
+      createdSessionCount,
+      candidateSessionCount,
+      templateCount,
+      recentSessions: recentSessions.map(toSessionSummary),
+      ...(latest ? { lastActivityAt: latest.updatedAt.toISOString() } : {}),
+    };
   }
 
   async setUserStatus(access: AccessContext, userId: string, isSuspended: boolean): Promise<AdminUserDto> {
@@ -352,8 +504,22 @@ export class AdminService {
   }
 
   private estimateCost(units: number): number {
-    return Math.round(units * this.costPerTurnUsd * 10_000) / 10_000;
+    return round4(units * this.costPerTurnUsd);
   }
+}
+
+function organizationOrder(query: AdminOrganizationsQuery): Prisma.OrganizationOrderByWithRelationInput[] {
+  const order = query.order ?? (query.sort === "name" ? "asc" : "desc");
+  if (query.sort === "name") return [{ name: order }, { id: "asc" }];
+  if (query.sort === "sessions") return [{ sessions: { _count: order } }, { createdAt: "desc" }];
+  return [{ createdAt: order }, { id: "asc" }];
+}
+
+function userOrder(query: AdminUsersQuery): Prisma.UserOrderByWithRelationInput[] {
+  const order = query.order ?? (query.sort === "name" || query.sort === "email" ? "asc" : "desc");
+  if (query.sort === "name") return [{ name: order }, { email: "asc" }];
+  if (query.sort === "email") return [{ email: order }];
+  return [{ createdAt: order }, { email: "asc" }];
 }
 
 function toOrganizationDto(row: OrganizationRow, access: AccessContext): AdminOrganizationDto {
@@ -374,7 +540,7 @@ function toOrganizationDto(row: OrganizationRow, access: AccessContext): AdminOr
   };
 }
 
-function toUserDto(row: UserRow, access: AccessContext): AdminUserDto {
+function toUserDto(row: UserRow | UserDetailRow, access: AccessContext): AdminUserDto {
   const role = fromPrismaRole(row.role);
   return {
     id: row.id,
@@ -391,6 +557,76 @@ function toUserDto(row: UserRow, access: AccessContext): AdminUserDto {
       : {}),
     isCurrentUser: row.id === access.userId,
   };
+}
+
+function toMemberDto(row: MemberRow) {
+  const role = fromPrismaRole(row.role);
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    role,
+    roleLabel: roleLabel(role),
+    emailVerified: row.emailVerified,
+    isSuspended: row.isSuspended,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function toSessionSummary(row: SessionSummaryRow): AdminSessionSummaryDto {
+  return {
+    id: row.id,
+    ...(row.title?.trim() ? { title: row.title.trim() } : {}),
+    candidateName: row.candidate.name,
+    templateTitle: row.template.title,
+    status: fromPrismaStatus(row.status),
+    createdAt: row.createdAt.toISOString(),
+    ...(row.completedAt ? { completedAt: row.completedAt.toISOString() } : {}),
+  };
+}
+
+function statusCounts(groups: Array<{ status: PrismaSessionStatus; _count: { _all: number } }>): Record<SessionStatus, number> {
+  const counts: Record<SessionStatus, number> = { not_started: 0, in_progress: 0, completed: 0, expired: 0 };
+  for (const group of groups) counts[fromPrismaStatus(group.status)] = group._count._all;
+  return counts;
+}
+
+/**
+ * Splits timestamps into one bucket per day of the current window plus a single
+ * total for the previous window. Anything before the previous window is ignored;
+ * a timestamp after "today" clamps into the last bucket rather than being lost.
+ */
+function bucketByDay(
+  timestamps: Array<Date | null>,
+  windows: { currentStart: Date; previousStart: Date; days: number },
+): { series: number[]; comparison: ComparisonDto } {
+  const series = new Array<number>(windows.days).fill(0);
+  let previous = 0;
+  const currentStartMs = windows.currentStart.getTime();
+  const previousStartMs = windows.previousStart.getTime();
+  for (const timestamp of timestamps) {
+    if (!timestamp) continue;
+    const time = timestamp.getTime();
+    if (time >= currentStartMs) {
+      series[Math.min(windows.days - 1, Math.floor((time - currentStartMs) / DAY_MS))] += 1;
+    } else if (time >= previousStartMs) {
+      previous += 1;
+    }
+  }
+  const current = series.reduce((sum, count) => sum + count, 0);
+  return { series, comparison: { current, previous, changePct: percentChange(current, previous) } };
+}
+
+function percentChange(current: number, previous: number): number | null {
+  if (previous === 0) return current === 0 ? 0 : null;
+  return Math.round(((current - previous) / previous) * 1_000) / 10;
+}
+
+/** Linear month-end projection from month-to-date spend; day 1 projects itself times the month length. */
+function projectMonthEnd(monthToDate: number, asOf: Date): number {
+  const elapsedDays = Math.max(1, asOf.getUTCDate());
+  const daysInMonth = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth() + 1, 0)).getUTCDate();
+  return round4((monthToDate / elapsedDays) * daysInMonth);
 }
 
 function paginate(query: { page?: number; pageSize?: number }) {
@@ -411,6 +647,18 @@ function statusWhere(status: AdminAccountStatus | undefined): { isSuspended?: bo
 
 function startOfUtcMonth(date: Date): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+}
+
+function startOfUtcDay(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function addUtcDays(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * DAY_MS);
+}
+
+function round4(value: number): number {
+  return Math.round(value * 10_000) / 10_000;
 }
 
 function toPlanDto(plan: PrismaPlan): SubscriptionPlanDto {

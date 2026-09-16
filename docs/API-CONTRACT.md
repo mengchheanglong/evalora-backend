@@ -390,11 +390,13 @@ Super-admin routes behind the `/admin` dashboard. Every route requires a JWT who
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| GET | `/admin/overview` | Platform totals (organizations by plan, users by role, sessions all-time and this month), estimated AI spend, and a platform-scoped system health snapshot. |
-| GET | `/admin/organizations?q=&plan=&status=&page=&pageSize=` | Paginated workspaces with owner, plan, member/session/template counts, and suspension state. `q` matches the workspace name or the owner's email. |
+| GET | `/admin/overview` | Platform totals (organizations by plan, users by role, sessions all-time and this month), a 30-day daily `activity` series with `comparisons` against the previous 30 days, an `attention` block (suspended workspaces and accounts, unverified staff, workspaces without an owner, live sessions), estimated AI spend with a linear month-end projection, and a platform-scoped system health snapshot. |
+| GET | `/admin/organizations?q=&plan=&status=&sort=&order=&page=&pageSize=` | Paginated workspaces with owner, plan, member/session/template counts, and suspension state. `q` matches the workspace name or the owner's email. `sort` is `createdAt` (default, newest first), `name`, or `sessions`; `order` is `asc` or `desc`. |
+| GET | `/admin/organizations/:id` | One workspace plus its staff `members`, `sessionsByStatus`, the five most recent `recentSessions`, `draftCount`, and `lastActivityAt`. |
 | PATCH | `/admin/organizations/:id/status` | Body `{ "isSuspended": true \| false }`. Suspends or reactivates a workspace. An admin cannot suspend their own workspace. |
 | PATCH | `/admin/organizations/:id/plan` | Body `{ "plan": "free" \| "pro" \| "enterprise" }`. |
-| GET | `/admin/users?q=&role=&status=&page=&pageSize=` | Paginated accounts across all workspaces. `q` matches name or email; `role` is `admin`, `organization`, `interviewer`, or `candidate`. |
+| GET | `/admin/users?q=&role=&status=&sort=&order=&page=&pageSize=` | Paginated accounts across all workspaces. `q` matches name or email; `role` is `admin`, `organization`, `interviewer`, or `candidate`. `sort` is `createdAt` (default, newest first), `name`, or `email`. |
+| GET | `/admin/users/:id` | One account plus `createdSessionCount`, `candidateSessionCount`, `templateCount`, the five most recently updated `recentSessions` it created or sat, and `lastActivityAt`. |
 | PATCH | `/admin/users/:id/status` | Body `{ "isSuspended": true \| false }`. An admin cannot deactivate their own account. |
 | PATCH | `/admin/users/:id/role` | Body `{ "role": "admin" \| "organization" \| "interviewer" }`. Rejected for the acting admin, for candidate records, for accounts without a workspace (unless the new role is `admin`), and for the only owner of a workspace being demoted to interviewer. |
 
