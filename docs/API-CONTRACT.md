@@ -498,10 +498,10 @@ The pushback body is a trigger, not a verdict: the attempt's stored `tran_id` id
 
 ### Subscription usage
 
-`GET /api/subscriptions/usage` requires an authenticated workspace viewer and returns `{ sessionsUsed, sessionLimit, periodStart, periodEnd }`. Sessions are counted by their first start time (`startedAt`) in the current UTC calendar month, scoped to the authenticated organization. Unused invitations are excluded; started interviews count once, including interviews completed or expired afterward. Limits reflect the active plan: Plus 50, Pro 250, Business `null` (unlimited); without an active paid plan, the limit is 0. This endpoint reports usage and does not introduce quota enforcement. Renewal dates continue to come from `/subscriptions/current`.
+`GET /api/subscriptions/usage` requires an authenticated workspace viewer and returns `{ sessionsUsed, sessionLimit, periodStart, periodEnd }`. Sessions are counted by creation time (`createdAt`) in the current UTC calendar month, scoped to the authenticated organization. Invited sessions are included before candidates start; each session counts once regardless of its later status. Limits reflect the active plan: Plus 50, Pro 250, Business `null` (unlimited); without an active paid plan, the limit is 0. This endpoint reports usage and does not introduce quota enforcement. Renewal dates continue to come from `/subscriptions/current`.
 
 `BILLING_TESTER_EMAILS=*` enables billing tests for every authenticated interviewer with workspace membership, only when `PAYWAY_ENV=sandbox` and `NODE_ENV=development` or `test`. The wildcard grants no other permissions and has no effect in production.
 
 ### Immediate upgrades
 
-Verified upgrades (Plus → Pro/Business, Pro → Business) activate immediately. The new period starts at verification; the purchased cycle is added to the previous paid-through date, preserving remaining paid time. Downgrades and cycle-only changes remain scheduled for the current period end. Payment verification, workspace authorization, and idempotency are unchanged.
+Verified upgrades (Plus → Pro/Business, Pro → Business) activate immediately. The new period starts at verification and ends one purchased billing cycle later (one month or one year). Downgrades and cycle-only changes remain scheduled for the current period end. Payment verification, workspace authorization, and idempotency are unchanged.

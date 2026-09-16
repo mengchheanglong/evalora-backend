@@ -11,23 +11,23 @@ describe("subscription usage", () => {
     fake.seedSubscription({ plan, currentPeriodEnd: new Date("2026-10-15T12:00:00Z") });
     const result = await service.getUsage({ userId: "member", role: "interviewer", organizationId: "org-a" });
     expect(result).toEqual({ sessionsUsed: 12, sessionLimit: limit, periodStart: "2026-09-01T00:00:00.000Z", periodEnd: "2026-10-01T00:00:00.000Z" });
-    expect(count).toHaveBeenCalledWith({ where: { organizationId: "org-a", startedAt: { gte: new Date(result.periodStart), lt: new Date(result.periodEnd) } } });
+    expect(count).toHaveBeenCalledWith({ where: { organizationId: "org-a", createdAt: { gte: new Date(result.periodStart), lt: new Date(result.periodEnd) } } });
   });
-  it("excludes unused invitations and counts starts in this workspace and month", async () => {
+  it("includes invited sessions and counts creation in this workspace and month", async () => {
     const sessions = [
-      { organizationId: "org-a", startedAt: null },
-      { organizationId: "org-a", startedAt: new Date("2026-08-31T23:59:59Z") },
-      { organizationId: "org-a", startedAt: new Date("2026-09-01T00:00:00Z") },
-      { organizationId: "org-a", startedAt: new Date("2026-09-15T10:00:00Z") },
-      { organizationId: "org-a", startedAt: new Date("2026-10-01T00:00:00Z") },
-      { organizationId: "org-b", startedAt: new Date("2026-09-15T10:00:00Z") },
+      { organizationId: "org-a", createdAt: new Date("2026-09-12T10:00:00Z") },
+      { organizationId: "org-a", createdAt: new Date("2026-08-31T23:59:59Z") },
+      { organizationId: "org-a", createdAt: new Date("2026-09-01T00:00:00Z") },
+      { organizationId: "org-a", createdAt: new Date("2026-09-15T10:00:00Z") },
+      { organizationId: "org-a", createdAt: new Date("2026-10-01T00:00:00Z") },
+      { organizationId: "org-b", createdAt: new Date("2026-09-15T10:00:00Z") },
     ];
     count.mockImplementation(async ({ where }) => sessions.filter((session) =>
-      session.organizationId === where.organizationId && session.startedAt !== null
-      && session.startedAt >= where.startedAt.gte && session.startedAt < where.startedAt.lt,
+      session.organizationId === where.organizationId && session.createdAt !== null
+      && session.createdAt >= where.createdAt.gte && session.createdAt < where.createdAt.lt,
     ).length);
     fake.seedSubscription({ plan: "PRO", currentPeriodEnd: new Date("2026-10-15T12:00:00Z") });
-    expect((await service.getUsage({ userId: "member", role: "interviewer", organizationId: "org-a" })).sessionsUsed).toBe(2);
+    expect((await service.getUsage({ userId: "member", role: "interviewer", organizationId: "org-a" })).sessionsUsed).toBe(3);
   });
   it("does not expose usage without workspace authorization", async () => {
     await expect(service.getUsage({ userId: "outsider", role: "candidate", organizationId: "org-a" })).rejects.toThrow();
