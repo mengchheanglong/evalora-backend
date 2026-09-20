@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, UnauthorizedException } from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
 import { OAuth2Client } from "google-auth-library";
 import * as jwt from "jsonwebtoken";
@@ -431,7 +431,7 @@ export class AuthService {
       throw new Error("Invalid email or password.");
     }
     if (user.role === "candidate") {
-      throw new Error("Candidates access assessments through an invitation link or access code.");
+      throw new UnauthorizedException("Candidates access assessments through an invitation link or access code.");
     }
     if (!user.emailVerified) {
       throw new EmailVerificationRequiredError();
@@ -465,7 +465,7 @@ export class AuthService {
 
     if (user) {
       if (user.role === "candidate") {
-        throw new Error("This email is registered as a candidate invitation. Use a different Google account for workspace access.");
+        throw new UnauthorizedException("This email is registered as a candidate invitation. Use a different Google account for workspace access.");
       }
       if (!user.emailVerified) {
         if (!this.users.markEmailVerified) throw new Error("Email verification is unavailable.");
@@ -750,7 +750,7 @@ function resolvePublicRegistrationRole(role: UserRole | undefined): UserRole {
   if (role === "admin") {
     throw new Error("Platform admin accounts are not created through public registration.");
   }
-  throw new Error("Candidates access assessments through invitation links or access codes, not platform registration.");
+  throw new UnauthorizedException("Candidates access assessments through invitation links or access codes, not platform registration.");
 }
 
 function stripPasswordHash(user: AuthUserRecord): Omit<AuthUserRecord, "passwordHash"> {
