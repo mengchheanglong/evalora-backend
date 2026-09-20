@@ -5,6 +5,17 @@ import type { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module";
 import { PrismaExceptionFilter } from "./common/filters/prisma-exception.filter";
 
+// ── Process-level crash guards ────────────────────────────────────────────
+// Prevent the backend from dying silently.  Log the error and keep the
+// process alive so that transient DB / network blips do not take down the
+// entire server.
+process.on("uncaughtException", (err) => {
+  console.error("[FATAL] uncaughtException — keeping process alive:", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[WARN]  unhandledRejection — keeping process alive:", reason);
+});
+
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   // Profile photos are resized in the browser before upload. Raise the JSON cap
@@ -49,6 +60,11 @@ async function bootstrap() {
   const port = Number(process.env.PORT) || 4000;
   const host = process.env.HOST?.trim() || "0.0.0.0";
   await app.listen(port, host);
+
+  // Heartbeat log — helps detect silent crashes in logs.
+  setInterval(() => {
+    console.log(`[heartbeat] ${new Date().toISOString()} — port ${port} alive`);
+  }, 60_000);
 }
 
 void bootstrap();
