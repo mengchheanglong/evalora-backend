@@ -69,3 +69,21 @@ Public registration only creates workspace owners, so the first platform admin i
 - Keep AI evidence JSON attached to evaluations and reports.
 - Keep report access role-restricted.
 - `ReportsService.generateAndPersistReport()` evaluates saved session responses grouped by module, then `persistReport()` deletes old module evaluations for the session, writes fresh `Evaluation` rows, and upserts one `CandidateReport` for the same session.
+
+## Subscription schema rollout
+
+Step 1 adds `20260913000000_add_organization_subscription/migration.sql`, containing only new subscription enums, table, indexes, and its organization foreign key. Step 4 adds `20260913010000_add_manual_payment_attempts/migration.sql`, which creates the `payment_attempts` table with its two unique keys (`tran_id`, `idempotency_key`), its indexes and foreign keys, and adds `subscriptions.renewal_mode`, `subscriptions.pending_plan` and `subscriptions.pending_billing_cycle`.
+
+The plan enum is mapped to the database type `billing_plan` via `@@map("billing_plan")` in `schema.prisma`. Long-lived databases still contain a legacy `SubscriptionPlan` enum (`FREE`/`PRO`/`ENTERPRISE`, formerly backing a removed `organizations.plan` column); creating a database enum with that name fails with `type "SubscriptionPlan" already exists`. The Prisma Client name is unchanged (`SubscriptionPlan`, values `PLUS`/`PRO`/`BUSINESS`).
+
+Apply both through the environment's existing schema rollout process before serving billing. This repository has a partial migration history; do not run the whole history against an unbaselined existing database. On a database kept in sync with `prisma db push` (so it has no `_prisma_migrations` table), baseline once and then deploy only the pending billing migrations:
+
+```bash
+pnpm exec prisma migrate resolve --applied 20260825000000_rename_to_detection_enabled
+pnpm exec prisma migrate status   # expect only the two billing migrations pending
+pnpm exec prisma migrate deploy
+```
+
+The baseline step records a migration whose effect (`interview_sessions.detection_enabled`) the database already has; it runs no DDL and drops nothing. If a migration fails partway, recover with `prisma migrate resolve --rolled-back <migration_name>` after fixing it — never with `prisma migrate reset` against Neon. Validation and client generation do not apply database changes. No existing accounts receive a subscription automatically, and no subscription is created by the migration itself.
+
+PayWay is prepaid and manual: the schema deliberately stores no card data, no recurring token, and no billing worker state. `renewal_mode` defaults to `MANUAL` and is never written as `AUTOMATIC` by the current code.

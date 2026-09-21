@@ -5,19 +5,19 @@ import { PREBUILT_ASSESSMENT_TEMPLATES } from "../src/modules/templates/prebuilt
 
 const access = { userId: "owner-1", role: "organization" as const, organizationId: "org-1" };
 
-test("listCatalog returns all prebuilt blueprints with module counts", () => {
+test("listCatalog returns all prebuilt blueprints with module counts", async () => {
   const service = new TemplatesService({} as never);
-  const catalog = service.listCatalog();
+  const catalog = await service.listCatalog();
   assert.equal(catalog.length, PREBUILT_ASSESSMENT_TEMPLATES.length);
   assert.ok(catalog.every((item) => item.source === "prebuilt"));
   assert.ok(catalog.every((item) => item.moduleCount > 0 && item.questionCount > 0));
   assert.ok(catalog.some((item) => item.id.includes("software-engineer")));
 });
 
-test("getCatalogTemplate returns full nested modules for preview", () => {
+test("getCatalogTemplate returns full nested modules for preview", async () => {
   const service = new TemplatesService({} as never);
   const first = PREBUILT_ASSESSMENT_TEMPLATES[0];
-  const detail = service.getCatalogTemplate(first.id);
+  const detail = await service.getCatalogTemplate(first.id);
   assert.equal(detail.id, first.id);
   assert.equal(detail.modules.length, first.modules.length);
   assert.ok((detail.modules[0].questions?.length ?? 0) > 0);

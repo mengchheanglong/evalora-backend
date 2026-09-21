@@ -60,18 +60,133 @@ enum TemplateDraftSource {
   PROMPT
 }
 
-enum SubscriptionPlan {
+enum AdminOrgPlan {
   FREE
   PRO
   ENTERPRISE
+
+  @@map("SubscriptionPlan")
+}
+
+/// Plan bought through hosted checkout. Mapped to the database type
+/// "billing_plan" because an older, now-unused "SubscriptionPlan" database enum
+/// (FREE/PRO/ENTERPRISE, once backing organizations.plan) still exists in
+/// long-lived databases and would otherwise collide when this enum is created.
+/// The Prisma Client name stays SubscriptionPlan.
+enum SubscriptionPlan {
+  PLUS
+  PRO
+  BUSINESS
+
+  @@map("billing_plan")
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+}
+
+enum BillingCycle {
+  MONTHLY
+  ANNUAL
+}
+
+/// MVP billing is prepaid and manual: a verified payment buys exactly one
+/// billing cycle. AUTOMATIC is reserved for a future recurring integration and
+/// is never written by the current checkout flow.
+enum RenewalMode {
+  MANUAL
+  AUTOMATIC
+}
+
+/// Lifecycle of one hosted-checkout payment. PENDING is the only state a
+/// duplicate callback or a reconciling worker may claim from, which is what
+/// makes activation exactly-once.
+enum PaymentAttemptStatus {
+  PENDING
+  VERIFIED
+  FAILED
+}
+
+/// Which subscription outcome this payment buys. PLAN_CHANGE payments are
+/// collected while a period is still running and only take effect at that
+/// period's end.
+enum PaymentAttemptPurpose {
+  NEW_SUBSCRIPTION
+  RENEWAL
+  PLAN_CHANGE
+}
+
+model Subscription {
+  id                     String             @id @default(uuid())
+  organizationId         String             @unique @map("organization_id")
+  organization           Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan                   SubscriptionPlan
+  status                 SubscriptionStatus
+  billingCycle           BillingCycle       @map("billing_cycle")
+  renewalMode            RenewalMode        @default(MANUAL) @map("renewal_mode")
+  currentPeriodStart     DateTime           @map("current_period_start")
+  currentPeriodEnd       DateTime           @map("current_period_end")
+  cancelAtPeriodEnd      Boolean            @default(false) @map("cancel_at_period_end")
+  /// Paid plan change collected mid-period; applied only when the current
+  /// period ends. Both columns are set or cleared together.
+  pendingPlan            SubscriptionPlan?  @map("pending_plan")
+  pendingBillingCycle    BillingCycle?      @map("pending_billing_cycle")
+  providerCustomerId     String?            @map("provider_customer_id")
+  providerSubscriptionId String?            @unique @map("provider_subscription_id")
+  paymentAttempts        PaymentAttempt[]
+  createdAt              DateTime           @default(now()) @map("created_at")
+  updatedAt              DateTime           @updatedAt @map("updated_at")
+
+  @@map("subscriptions")
+}
+
+/// One attempt to buy one prepaid billing cycle through ABA PayWay hosted
+/// checkout. `tranId` is the merchant transaction id sent to PayWay and the
+/// only identity a callback is resolved with; `idempotencyKey` stops a repeated
+/// checkout click from creating a second chargeable transaction.
+model PaymentAttempt {
+  id                String               @id @default(uuid())
+  organizationId    String               @map("organization_id")
+  organization      Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subscriptionId    String?              @map("subscription_id")
+  subscription      Subscription?        @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  tranId            String               @unique @map("tran_id")
+  idempotencyKey    String               @unique @map("idempotency_key")
+  plan              SubscriptionPlan
+  billingCycle      BillingCycle         @map("billing_cycle")
+  purpose           PaymentAttemptPurpose
+  /// Authoritative backend-catalog price in minor units (USD cents).
+  amountMinor       Int                  @map("amount_minor")
+  currency          String
+  status            PaymentAttemptStatus
+  providerReference String?              @map("provider_reference")
+  providerStatus    String?              @map("provider_status")
+  failureReason     String?              @map("failure_reason")
+  /// PayWay-verified payment time. Never taken from a redirect or a callback body.
+  verifiedAt        DateTime?            @map("verified_at")
+  /// Period actually granted by this attempt, recorded for audit/idempotency.
+  periodStart       DateTime?            @map("period_start")
+  periodEnd         DateTime?            @map("period_end")
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+
+  @@index([organizationId, createdAt])
+  @@index([status, createdAt])
+  @@map("payment_attempts")
 }
 
 model Organization {
+  subscription   Subscription?
+  paymentAttempts PaymentAttempt[]
   id             String                    @id @default(uuid())
   name           String
   /// Billing tier managed from the platform admin dashboard; the upcoming
   /// subscription feature reads the same field.
-  plan           SubscriptionPlan          @default(FREE)
+  plan           AdminOrgPlan              @default(FREE)
   /// Platform-level suspension. While true, every owner/interviewer member is
   /// rejected by the auth guard on their next request; platform admins are exempt.
   isSuspended    Boolean                   @default(false) @map("is_suspended")

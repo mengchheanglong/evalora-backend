@@ -12,12 +12,14 @@ import {
   Put,
   Req,
   UseGuards,
+  UseInterceptors,
 } from "@nestjs/common";
 import { ValidateDto } from "../../common/pipes/validate-dto.pipe";
 import type { AuthenticatedRequest } from "../auth/auth.guard";
 import { JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { toAccessContext } from "../auth/access-control";
 import { AuthService } from "../auth/auth.service";
+import { CacheInvalidationInterceptor, InvalidateCache } from "../../common/caching";
 import {
   AcceptInviteDto,
   CreateInviteDto,
@@ -27,6 +29,7 @@ import {
 import { OrganizationService } from "./organization.service";
 
 @Controller("organization")
+@UseInterceptors(CacheInvalidationInterceptor)
 export class OrganizationController {
   constructor(
     @Inject(OrganizationService) private readonly organizationService: OrganizationService,
@@ -43,6 +46,7 @@ export class OrganizationController {
   @Put()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("organization", "admin")
+  @InvalidateCache({ entities: ["organization"] })
   async updateWorkspace(
     @Req() request: AuthenticatedRequest,
     @Body(new ValidateDto(UpdateWorkspaceDto)) body: UpdateWorkspaceDto,
@@ -78,6 +82,7 @@ export class OrganizationController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("organization", "admin")
   @HttpCode(200)
+  @InvalidateCache({ entities: ["organization"] })
   async deleteWorkspaceData(
     @Req() request: AuthenticatedRequest,
     @Body(new ValidateDto(DeleteWorkspaceDataDto)) body: DeleteWorkspaceDataDto,
@@ -125,6 +130,7 @@ export class OrganizationController {
   @Delete("members/:memberId")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("organization", "admin")
+  @InvalidateCache({ entities: ["organization"] })
   removeMember(@Req() request: AuthenticatedRequest, @Param("memberId") memberId: string) {
     return this.organizationService.removeMember(toAccessContext(request.user), memberId);
   }

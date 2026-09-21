@@ -14,9 +14,11 @@ import {
   Query,
   Req,
   UseGuards,
+  UseInterceptors,
 } from "@nestjs/common";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
+import { CacheInvalidationInterceptor, InvalidateCache } from "../../common/caching";
 import { ReportsService } from "../reports/reports.service";
 import { LiveKitService } from "../livekit/livekit.service";
 import { ValidateDto } from "../../common/pipes/validate-dto.pipe";
@@ -29,6 +31,7 @@ import { SessionsService } from "./sessions.service";
 
 @Controller("sessions")
 @UseGuards(JwtAuthGuard, RolesGuard)
+@UseInterceptors(CacheInvalidationInterceptor)
 export class SessionsController {
   constructor(
     @Inject(SessionsService) private readonly sessionsService: SessionsService,
@@ -38,6 +41,7 @@ export class SessionsController {
 
   @Post()
   @Roles("admin", "organization", "interviewer")
+  @InvalidateCache({ entities: ["sessions"] })
   async create(
     @Body(new ValidateDto(CreateSessionDto)) body: CreateSessionDto,
     @Req() request: AuthenticatedRequest,
@@ -88,6 +92,7 @@ export class SessionsController {
 
   @Patch(":id/integrity-policy")
   @Roles("admin", "organization", "interviewer")
+  @InvalidateCache({ entities: ["sessions"] })
   updateIntegrityPolicy(
     @Param("id") id: string,
     @Body(new ValidateDto(UpdateIntegrityPolicyDto)) body: UpdateIntegrityPolicyDto,
@@ -98,12 +103,14 @@ export class SessionsController {
 
   @Put(":id/start")
   @Roles("admin", "organization", "interviewer")
+  @InvalidateCache({ entities: ["sessions"] })
   start(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
     return this.sessionsService.startSession(id, toAccessContext(request.user));
   }
 
   @Put(":id/complete")
   @Roles("admin", "organization", "interviewer")
+  @InvalidateCache({ entities: ["sessions"] })
   async complete(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
     const access = toAccessContext(request.user);
     const session = await this.sessionsService.completeSession(id, access);
@@ -113,6 +120,7 @@ export class SessionsController {
 
   @Delete(":id")
   @Roles("admin", "organization", "interviewer")
+  @InvalidateCache({ entities: ["sessions"] })
   async remove(@Param("id") id: string, @Req() request: AuthenticatedRequest) {
     await this.sessionsService.deleteSession(id, toAccessContext(request.user));
     return { id, deleted: true };
@@ -125,6 +133,7 @@ export class SessionsController {
 
 @Controller("sessions/access")
 @UseGuards(CandidateAccessRateLimitGuard)
+@UseInterceptors(CacheInvalidationInterceptor)
 export class CandidateSessionAccessController {
   constructor(
     @Inject(SessionsService) private readonly sessionsService: SessionsService,
@@ -150,11 +159,13 @@ export class CandidateSessionAccessController {
   }
 
   @Put(":accessCode/start")
+  @InvalidateCache({ entities: ["sessions"] })
   startByAccessCode(@Param("accessCode") accessCode: string) {
     return this.sessionsService.startSessionByAccessCode(accessCode);
   }
 
   @Put(":accessCode/complete")
+  @InvalidateCache({ entities: ["sessions"] })
   async completeByAccessCode(@Param("accessCode") accessCode: string) {
     const session = await this.sessionsService.completeSessionByAccessCode(accessCode);
     void this.reportsService.generateAndPersistReport(session.id).catch(() => undefined);
@@ -162,11 +173,13 @@ export class CandidateSessionAccessController {
   }
 
   @Put(":accessCode/timeout")
+  @InvalidateCache({ entities: ["sessions"] })
   timeoutByAccessCode(@Param("accessCode") accessCode: string) {
     return this.sessionsService.expireSessionByAccessCode(accessCode);
   }
 
   @Post(":accessCode/integrity-events")
+  @InvalidateCache({ entities: ["sessions"] })
   async recordIntegrityEvent(
     @Param("accessCode") accessCode: string,
     @Body(new ValidateDto(ReportIntegrityEventDto)) body: ReportIntegrityEventDto,
