@@ -1,7 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import type { AssessmentModuleDto, AssessmentTemplateDto, JsonValue, ModuleType, QuestionDto, QuestionType } from "../../domain/evalora.types";
 import { DEFAULT_LIST_LIMIT } from "../../common/query.constants";
 import { assertCanWriteOrganizationResource, buildTemplateOwnershipWhere, forbiddenResourceError, mergeWhere, requireOrganizationId, type AccessContext } from "../auth/access-control";
+import { CacheKeys, CACHE_TTL, CacheNamespace, CacheService, buildCacheKey } from "../../common/caching";
 import {
   PREBUILT_ASSESSMENT_TEMPLATES,
   type PrebuiltAssessmentTemplateDefinition,
@@ -153,17 +154,38 @@ export const TEMPLATE_LIST_INCLUDE = {
 
 @Injectable()
 export class TemplatesService {
-  constructor(private readonly prisma: TemplatePrismaClient) {}
+  constructor(
+    private readonly prisma: TemplatePrismaClient,
+    @Optional() @Inject(CacheService) private readonly cache?: CacheService,
+  ) {}
 
   /** Read-only prebuilt blueprints (not org-owned DB rows). */
-  listCatalog(): CatalogTemplateSummaryDto[] {
-    return PREBUILT_ASSESSMENT_TEMPLATES.map(toCatalogSummary);
+  async listCatalog(): Promise<CatalogTemplateSummaryDto[]> {
+    if (!this.cache) {
+      return PREBUILT_ASSESSMENT_TEMPLATES.map(toCatalogSummary);
+    }
+    return this.cache.getOrSet(
+      CacheKeys.catalogTemplates(),
+      async () => PREBUILT_ASSESSMENT_TEMPLATES.map(toCatalogSummary),
+      CACHE_TTL.CATALOG,
+    );
   }
 
-  getCatalogTemplate(catalogId: string): AssessmentTemplateDto {
-    const template = findCatalogTemplate(catalogId);
-    if (!template) throw new NotFoundException("Catalog template not found.");
-    return prebuiltToTemplateDto(template);
+  async getCatalogTemplate(catalogId: string): Promise<AssessmentTemplateDto> {
+    const resolve = () => {
+      const template = findCatalogTemplate(catalogId);
+      if (!template) throw new NotFoundException("Catalog template not found.");
+      return prebuiltToTemplateDto(template);
+    };
+
+    if (!this.cache) {
+      return resolve();
+    }
+    return this.cache.getOrSet(
+      CacheKeys.catalogTemplate(catalogId),
+      async () => resolve(),
+      CACHE_TTL.CATALOG,
+    );
   }
 
   /**
@@ -242,37 +264,84 @@ export class TemplatesService {
 
   async listTemplates(options: string | ListTemplatesOptions = {}): Promise<AssessmentTemplateDto[]> {
     const normalized = typeof options === "string" ? { organizationId: options } : options;
-    const findMany = requireMethod(this.prisma.assessmentTemplate.findMany, "assessmentTemplate.findMany");
-    const templates = await findMany({
-      relationLoadStrategy: "join",
-      where: buildListTemplateWhere(normalized),
-      include: TEMPLATE_LIST_INCLUDE,
-      orderBy: { updatedAt: "desc" },
-      take: DEFAULT_LIST_LIMIT,
-    });
+    const orgId = normalized.organizationId ?? normalized.access?.organizationId;
+    const cacheKey = orgId ? CacheKeys.orgTemplates(orgId) : buildCacheKey(CacheNamespace.TEMPLATES, "all");
 
-    return templates.map(toTemplateDto);
+    const fetchFromDb = async () => {
+      const findMany = requireMethod(this.prisma.assessmentTemplate.findMany, "assessmentTemplate.findMany");
+      const templates = await findMany({
+        relationLoadStrategy: "join",
+        where: buildListTemplateWhere(normalized),
+        include: TEMPLATE_LIST_INCLUDE,
+        orderBy: { updatedAt: "desc" },
+        take: DEFAULT_LIST_LIMIT,
+      });
+
+      return templates.map(toTemplateDto);
+    };
+
+    if (!this.cache) {
+      return fetchFromDb();
+    }
+
+    return this.cache.getOrSet(cacheKey, fetchFromDb, CACHE_TTL.STANDARD);
   }
 
   async getTemplate(id: string, access?: AccessContext): Promise<AssessmentTemplateDto | null> {
-    if (access) {
-      const findFirst = requireMethod(this.prisma.assessmentTemplate.findFirst, "assessmentTemplate.findFirst");
-      const template = await findFirst({
+    const fetchFromDb = async () => {
+      if (access) {
+        const findFirst = requireMethod(this.prisma.assessmentTemplate.findFirst, "assessmentTemplate.findFirst");
+        const template = await findFirst({
+          relationLoadStrategy: "join",
+          where: mergeWhere({ id }, buildTemplateOwnershipWhere(access)),
+          include: TEMPLATE_INCLUDE,
+        });
+        return template ? toTemplateDto(template) : null;
+      }
+
+      const findUnique = requireMethod(this.prisma.assessmentTemplate.findUnique, "assessmentTemplate.findUnique");
+      const template = await findUnique({
         relationLoadStrategy: "join",
-        where: mergeWhere({ id }, buildTemplateOwnershipWhere(access)),
+        where: { id },
         include: TEMPLATE_INCLUDE,
       });
+
       return template ? toTemplateDto(template) : null;
+    };
+
+    if (!this.cache) {
+      return fetchFromDb();
     }
 
-    const findUnique = requireMethod(this.prisma.assessmentTemplate.findUnique, "assessmentTemplate.findUnique");
-    const template = await findUnique({
-      relationLoadStrategy: "join",
-      where: { id },
-      include: TEMPLATE_INCLUDE,
-    });
+    const template = await this.cache.getOrSet(
+      CacheKeys.template(id),
+      async () => {
+        const findUnique = this.prisma.assessmentTemplate.findUnique;
+        if (findUnique) {
+          const t = await findUnique({
+            relationLoadStrategy: "join",
+            where: { id },
+            include: TEMPLATE_INCLUDE,
+          });
+          return t ? toTemplateDto(t) : null;
+        }
+        return fetchFromDb();
+      },
+      CACHE_TTL.STANDARD,
+    );
 
-    return template ? toTemplateDto(template) : null;
+    if (!template) return null;
+
+    if (access && access.role !== "admin") {
+      if (access.role !== "organization" && access.role !== "interviewer") {
+        return null;
+      }
+      if (template.organizationId && access.organizationId && template.organizationId !== access.organizationId) {
+        return null;
+      }
+    }
+
+    return template;
   }
 
   async createTemplate(input: CreateTemplateInput, access?: AccessContext): Promise<AssessmentTemplateDto> {
@@ -292,7 +361,14 @@ export class TemplatesService {
       include: TEMPLATE_INCLUDE,
     });
 
-    return toTemplateDto(template);
+    const dto = toTemplateDto(template);
+    if (this.cache) {
+      if (dto.organizationId) {
+        await this.cache.delete(CacheKeys.orgTemplates(dto.organizationId));
+      }
+      await this.cache.delete(buildCacheKey(CacheNamespace.TEMPLATES, "all"));
+    }
+    return dto;
   }
 
   async updateTemplate(id: string, input: UpdateTemplateInput, access?: AccessContext): Promise<AssessmentTemplateDto> {
@@ -320,7 +396,15 @@ export class TemplatesService {
       include: TEMPLATE_INCLUDE,
     });
 
-    return toTemplateDto(template);
+    const dto = toTemplateDto(template);
+    if (this.cache) {
+      await this.cache.delete(CacheKeys.template(id));
+      if (dto.organizationId) {
+        await this.cache.delete(CacheKeys.orgTemplates(dto.organizationId));
+      }
+      await this.cache.delete(buildCacheKey(CacheNamespace.TEMPLATES, "all"));
+    }
+    return dto;
   }
 
   async deleteTemplate(id: string, access?: AccessContext): Promise<{ id: string; deleted: true }> {
@@ -351,6 +435,11 @@ export class TemplatesService {
     const deleteTemplate = requireMethod(this.prisma.assessmentTemplate.delete, "assessmentTemplate.delete");
     try {
       const deleted = await deleteTemplate({ where: { id } });
+      if (this.cache) {
+        await this.cache.delete(CacheKeys.template(id));
+        await this.cache.deleteByPrefix(buildCacheKey(CacheNamespace.TEMPLATES, "org"));
+        await this.cache.delete(buildCacheKey(CacheNamespace.TEMPLATES, "all"));
+      }
       return { id: deleted.id, deleted: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

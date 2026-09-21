@@ -10,6 +10,7 @@ import type { EmailDeliveryResult, EmailService } from "../email/email.service";
 import { INTERVIEW_EVENTS, type InterviewEventPublisher } from "../realtime/realtime.types";
 import { storedInterviewerNames, type StoredInterviewerAssignment } from "./interviewer-assignment";
 import { ReportIntegrityEventDto, type IntegrityEventType } from "./dto/report-integrity-event.dto";
+import { CacheKeys, CACHE_TTL, CacheService } from "../../common/caching";
 
 type PrismaSessionStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "EXPIRED";
 type PrismaRole = "ADMIN" | "ORGANIZATION" | "INTERVIEWER" | "CANDIDATE";
@@ -285,6 +286,7 @@ interface SessionsServiceOptions {
   emailService?: EmailService;
   /** Real-time fan-out. Optional so the service stays unit-testable without a gateway. */
   events?: InterviewEventPublisher;
+  cache?: CacheService;
 }
 
 export const SESSION_INCLUDE = {
@@ -358,6 +360,7 @@ export class SessionsService {
   private readonly now: () => Date;
   private readonly emailService?: EmailService;
   private readonly events?: InterviewEventPublisher;
+  private readonly cache?: CacheService;
 
   constructor(
     private readonly prisma: SessionPrismaClient,
@@ -367,6 +370,7 @@ export class SessionsService {
     this.now = options.now ?? (() => new Date());
     this.emailService = options.emailService;
     this.events = options.events;
+    this.cache = options.cache;
   }
 
   /**
@@ -556,9 +560,18 @@ export class SessionsService {
   }
 
   async getSessionByAccessCode(accessCode: string): Promise<CandidateAccessSessionDto> {
-    const session = await this.findCandidateSessionByAccessCode(accessCode);
-    assertCandidateAccessOpen(session);
-    return toCandidateAccessSessionDto(session);
+    const normalized = normalizeAccessCode(accessCode);
+    const fetch = async () => {
+      const session = await this.findCandidateSessionByAccessCode(accessCode);
+      assertCandidateAccessOpen(session);
+      return toCandidateAccessSessionDto(session);
+    };
+
+    if (!this.cache) {
+      return fetch();
+    }
+
+    return this.cache.getOrSet(CacheKeys.sessionAccess(normalized), fetch, CACHE_TTL.SHORT);
   }
 
   async startSession(id: string, access?: AccessContext): Promise<InterviewSessionDto> {
@@ -611,6 +624,9 @@ export class SessionsService {
       data: { status: "IN_PROGRESS", startedAt: this.now() },
       include: CANDIDATE_SESSION_INCLUDE,
     });
+    if (this.cache) {
+      await this.cache.delete(CacheKeys.sessionAccess(normalizeAccessCode(accessCode)));
+    }
     this.publishSessionUpdated(session as CandidateSessionRow);
     return toCandidateAccessSessionDto(session as CandidateSessionRow);
   }
@@ -625,6 +641,9 @@ export class SessionsService {
     const deleteMany = requireMethod(this.prisma.interviewSession.deleteMany, "interviewSession.deleteMany");
     const result = await deleteMany({ where: mergeWhere({ id }, buildSessionOwnershipWhere(access)) });
     if (result.count === 0) throw forbiddenResourceError("Session");
+    if (this.cache) {
+      await this.cache.deleteByPrefix("evalora:sessions:access");
+    }
   }
 
   async completeSession(id: string, access?: AccessContext): Promise<InterviewSessionDto> {
@@ -659,6 +678,9 @@ export class SessionsService {
       data: { status: "COMPLETED", completedAt: this.now() },
       include: CANDIDATE_SESSION_INCLUDE,
     });
+    if (this.cache) {
+      await this.cache.delete(CacheKeys.sessionAccess(normalizeAccessCode(accessCode)));
+    }
     this.publishSessionUpdated(session as CandidateSessionRow);
     return toCandidateAccessSessionDto(session as CandidateSessionRow);
   }
@@ -698,6 +720,9 @@ export class SessionsService {
       data: { status: "EXPIRED", expiredAt: new Date(deadline) },
       include: CANDIDATE_SESSION_INCLUDE,
     });
+    if (this.cache) {
+      await this.cache.delete(CacheKeys.sessionAccess(normalizeAccessCode(accessCode)));
+    }
     this.publishSessionUpdated(session as CandidateSessionRow);
     return toCandidateAccessSessionDto(session as CandidateSessionRow);
   }
@@ -795,6 +820,10 @@ export class SessionsService {
       finalStatus = expired.status;
       action = "terminated";
       this.publishSessionUpdated(expired as CandidateSessionRow);
+    }
+
+    if (this.cache && (counted || finalStatus === "EXPIRED")) {
+      await this.cache.delete(CacheKeys.sessionAccess(normalizeAccessCode(accessCode)));
     }
 
     const sessionStatus = fromPrismaSessionStatus(finalStatus);

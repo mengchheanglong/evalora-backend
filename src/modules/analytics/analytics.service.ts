@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 // Avoid direct Prisma type references here; use `any` where needed to
 // prevent compiler errors when generated types differ in environments.
 import { PrismaService } from "../../prisma/prisma.service";
@@ -7,6 +7,7 @@ import {
   buildTemplateOwnershipWhere,
   type AccessContext,
 } from "../auth/access-control";
+import { CacheKeys, CACHE_TTL, CacheService } from "../../common/caching";
 
 type StatusKey = "not_started" | "in_progress" | "completed" | "expired";
 const DAY_MS = 24 * 60 * 60 * 1_000;
@@ -17,68 +18,82 @@ const AUTO_EXPIRY_GRACE_MS = 5_000;
 
 @Injectable()
 export class AnalyticsService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Optional() @Inject(CacheService) private readonly cache?: CacheService,
+  ) {}
 
   async summary(access: AccessContext) {
-    const asOf = new Date();
-    await this.reconcileExpiredInvitations(access, asOf);
-    const sessionWhere = sessionScope(access);
-    const completedSessionWhere = completedSessionScope(access);
-    const templateWhere = buildTemplateOwnershipWhere(access) as any;
+    const scopeKey = access.role === "admin" ? "platform" : (access.organizationId ?? "unknown");
+    const cacheKey = CacheKeys.analyticsSummary(scopeKey);
 
-    // Prefer aggregates over loading every session row (much faster on Neon).
-    const [statusGroups, totalTemplates, reportStats, distinctCandidates] =
-      await Promise.all([
-        this.prisma.interviewSession.groupBy({
-          by: ["status"],
-          where: sessionWhere,
-          _count: { _all: true },
-        }),
-        this.prisma.assessmentTemplate.count({ where: templateWhere }),
-        this.prisma.candidateReport.aggregate({
-          where: { session: completedSessionWhere },
-          _count: { _all: true },
-        }),
-        this.prisma.interviewSession.findMany({
-          where: sessionWhere,
-          select: { candidateId: true },
-          distinct: ["candidateId"],
-        }),
-      ]);
+    const compute = async () => {
+      const asOf = new Date();
+      await this.reconcileExpiredInvitations(access, asOf);
+      const sessionWhere = sessionScope(access);
+      const completedSessionWhere = completedSessionScope(access);
+      const templateWhere = buildTemplateOwnershipWhere(access) as any;
 
-    const statusCounts = emptyStatusCounts();
-    let totalSessions = 0;
-    for (const group of statusGroups) {
-      const key = fromPrismaStatus(group.status);
-      statusCounts[key] = group._count._all;
-      totalSessions += group._count._all;
+      // Prefer aggregates over loading every session row (much faster on Neon).
+      const [statusGroups, totalTemplates, reportStats, distinctCandidates] =
+        await Promise.all([
+          this.prisma.interviewSession.groupBy({
+            by: ["status"],
+            where: sessionWhere,
+            _count: { _all: true },
+          }),
+          this.prisma.assessmentTemplate.count({ where: templateWhere }),
+          this.prisma.candidateReport.aggregate({
+            where: { session: completedSessionWhere },
+            _count: { _all: true },
+          }),
+          this.prisma.interviewSession.findMany({
+            where: sessionWhere,
+            select: { candidateId: true },
+            distinct: ["candidateId"],
+          }),
+        ]);
+
+      const statusCounts = emptyStatusCounts();
+      let totalSessions = 0;
+      for (const group of statusGroups) {
+        const key = fromPrismaStatus(group.status);
+        statusCounts[key] = group._count._all;
+        totalSessions += group._count._all;
+      }
+
+      const completedAssessments = statusCounts.completed;
+      const closedAssessments = completedAssessments + statusCounts.expired;
+      const reportReadyAssessments = reportStats._count._all;
+
+      return {
+        asOf: asOf.toISOString(),
+        dataWindow: "all_time" as const,
+        scope: access.role === "admin" ? "platform" as const : "organization" as const,
+        totalCandidates: distinctCandidates.length,
+        totalTemplates,
+        totalSessions,
+        completedAssessments,
+        inProgressAssessments: statusCounts.in_progress,
+        pendingAssessments: statusCounts.not_started,
+        expiredAssessments: statusCounts.expired,
+        activeAssessments: statusCounts.not_started + statusCounts.in_progress,
+        closedAssessments,
+        reportReadyAssessments,
+        reportsPending: Math.max(0, completedAssessments - reportReadyAssessments),
+        closedCompletionRate: closedAssessments ? round(completedAssessments / closedAssessments, 4) : null,
+        reportCoverageRate: completedAssessments
+          ? round(Math.min(reportReadyAssessments, completedAssessments) / completedAssessments, 4)
+          : null,
+        statusBreakdown: Object.entries(statusCounts).map(([status, count]) => ({ status, count })),
+      };
+    };
+
+    if (!this.cache) {
+      return compute();
     }
 
-    const completedAssessments = statusCounts.completed;
-    const closedAssessments = completedAssessments + statusCounts.expired;
-    const reportReadyAssessments = reportStats._count._all;
-
-    return {
-      asOf: asOf.toISOString(),
-      dataWindow: "all_time" as const,
-      scope: access.role === "admin" ? "platform" as const : "organization" as const,
-      totalCandidates: distinctCandidates.length,
-      totalTemplates,
-      totalSessions,
-      completedAssessments,
-      inProgressAssessments: statusCounts.in_progress,
-      pendingAssessments: statusCounts.not_started,
-      expiredAssessments: statusCounts.expired,
-      activeAssessments: statusCounts.not_started + statusCounts.in_progress,
-      closedAssessments,
-      reportReadyAssessments,
-      reportsPending: Math.max(0, completedAssessments - reportReadyAssessments),
-      closedCompletionRate: closedAssessments ? round(completedAssessments / closedAssessments, 4) : null,
-      reportCoverageRate: completedAssessments
-        ? round(Math.min(reportReadyAssessments, completedAssessments) / completedAssessments, 4)
-        : null,
-      statusBreakdown: Object.entries(statusCounts).map(([status, count]) => ({ status, count })),
-    };
+    return this.cache.getOrSet(cacheKey, compute, CACHE_TTL.MEDIUM);
   }
 
   async activity(access: AccessContext) {

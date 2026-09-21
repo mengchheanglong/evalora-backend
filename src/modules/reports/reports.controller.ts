@@ -1,13 +1,15 @@
-import { BadRequestException, Body, Controller, Get, Inject, Param, Patch, Post, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Inject, Param, Patch, Post, Req, UseGuards, UseInterceptors } from "@nestjs/common";
 import { ValidateDto } from "../../common/pipes/validate-dto.pipe";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
+import { CacheInvalidationInterceptor, InvalidateCache } from "../../common/caching";
 import { AddReviewerNoteDto } from "./dto/report.dto";
 import { UpdateRecruiterVerdictDto } from "./dto/update-verdict.dto";
 import { ReportsService } from "./reports.service";
 
 @Controller("reports")
 @UseGuards(JwtAuthGuard, RolesGuard)
+@UseInterceptors(CacheInvalidationInterceptor)
 export class ReportsController {
   constructor(@Inject(ReportsService) private readonly reportsService: ReportsService) {}
 
@@ -19,6 +21,7 @@ export class ReportsController {
 
   @Post(":sessionId/generate")
   @Roles("admin", "organization", "interviewer")
+  @InvalidateCache({ entities: ["reports"] })
   generate(@Param("sessionId") sessionId: string, @Req() request: AuthenticatedRequest) {
     return this.reportsService.generateAndPersistReport(sessionId, toAccessContext(request.user));
   }
@@ -37,6 +40,7 @@ export class ReportsController {
 
   @Post(":sessionId/notes")
   @Roles("admin", "organization", "interviewer")
+  @InvalidateCache({ entities: ["reports"] })
   async addNote(
     @Param("sessionId") sessionId: string,
     @Body(new ValidateDto(AddReviewerNoteDto)) body: AddReviewerNoteDto,
@@ -51,6 +55,7 @@ export class ReportsController {
 
   @Patch(":sessionId/verdict")
   @Roles("admin", "organization", "interviewer")
+  @InvalidateCache({ entities: ["reports"] })
   async updateVerdict(
     @Param("sessionId") sessionId: string,
     @Body(new ValidateDto(UpdateRecruiterVerdictDto)) body: UpdateRecruiterVerdictDto,
