@@ -117,4 +117,9 @@ export interface CandidateReportDto {
   evidence: string[];
   reviewerSummary?: string;
   advisoryNotice: string;
+  recruiterVerdict?: "STRONG_HIRE" | "HIRE" | "NEUTRAL" | "NO_HIRE";
+  recruiterTags?: string[];
+  recruiterScore?: number;
+  decidedAt?: string;
+  decidedById?: string;
 }
