@@ -10,6 +10,7 @@ import type { EmailDeliveryResult, EmailService } from "../email/email.service";
 import { INTERVIEW_EVENTS, type InterviewEventPublisher } from "../realtime/realtime.types";
 import { storedInterviewerNames, type StoredInterviewerAssignment } from "./interviewer-assignment";
 import { ReportIntegrityEventDto, type IntegrityEventType } from "./dto/report-integrity-event.dto";
+import { CacheKeys, CACHE_TTL, CacheService } from "../../common/caching";
 
 type PrismaSessionStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "EXPIRED";
 type PrismaRole = "ADMIN" | "ORGANIZATION" | "INTERVIEWER" | "CANDIDATE";
@@ -103,7 +104,7 @@ interface SessionRow {
   report?: SessionReportRow | null;
   warningCount?: number;
   warningLimit?: number;
-  pointerDetectionEnabled?: boolean;
+  detectionEnabled?: boolean;
   createdById?: string | null;
   createdBy?: SessionCreatorRow | null;
   title?: string | null;
@@ -274,7 +275,7 @@ export interface IntegritySummaryDto {
   sessionId: string;
   warningCount: number;
   warningLimit: number;
-  pointerDetectionEnabled: boolean;
+  detectionEnabled: boolean;
   status: SessionStatus;
   events: IntegrityEventDto[];
 }
@@ -285,6 +286,7 @@ interface SessionsServiceOptions {
   emailService?: EmailService;
   /** Real-time fan-out. Optional so the service stays unit-testable without a gateway. */
   events?: InterviewEventPublisher;
+  cache?: CacheService;
 }
 
 export const SESSION_INCLUDE = {
@@ -358,6 +360,7 @@ export class SessionsService {
   private readonly now: () => Date;
   private readonly emailService?: EmailService;
   private readonly events?: InterviewEventPublisher;
+  private readonly cache?: CacheService;
 
   constructor(
     private readonly prisma: SessionPrismaClient,
@@ -367,6 +370,7 @@ export class SessionsService {
     this.now = options.now ?? (() => new Date());
     this.emailService = options.emailService;
     this.events = options.events;
+    this.cache = options.cache;
   }
 
   /**
@@ -556,9 +560,18 @@ export class SessionsService {
   }
 
   async getSessionByAccessCode(accessCode: string): Promise<CandidateAccessSessionDto> {
-    const session = await this.findCandidateSessionByAccessCode(accessCode);
-    assertCandidateAccessOpen(session);
-    return toCandidateAccessSessionDto(session);
+    const normalized = normalizeAccessCode(accessCode);
+    const fetch = async () => {
+      const session = await this.findCandidateSessionByAccessCode(accessCode);
+      assertCandidateAccessOpen(session);
+      return toCandidateAccessSessionDto(session);
+    };
+
+    if (!this.cache) {
+      return fetch();
+    }
+
+    return this.cache.getOrSet(CacheKeys.sessionAccess(normalized), fetch, CACHE_TTL.SHORT);
   }
 
   async startSession(id: string, access?: AccessContext): Promise<InterviewSessionDto> {
@@ -611,6 +624,9 @@ export class SessionsService {
       data: { status: "IN_PROGRESS", startedAt: this.now() },
       include: CANDIDATE_SESSION_INCLUDE,
     });
+    if (this.cache) {
+      await this.cache.delete(CacheKeys.sessionAccess(normalizeAccessCode(accessCode)));
+    }
     this.publishSessionUpdated(session as CandidateSessionRow);
     return toCandidateAccessSessionDto(session as CandidateSessionRow);
   }
@@ -625,6 +641,9 @@ export class SessionsService {
     const deleteMany = requireMethod(this.prisma.interviewSession.deleteMany, "interviewSession.deleteMany");
     const result = await deleteMany({ where: mergeWhere({ id }, buildSessionOwnershipWhere(access)) });
     if (result.count === 0) throw forbiddenResourceError("Session");
+    if (this.cache) {
+      await this.cache.deleteByPrefix("evalora:sessions:access");
+    }
   }
 
   async completeSession(id: string, access?: AccessContext): Promise<InterviewSessionDto> {
@@ -659,6 +678,9 @@ export class SessionsService {
       data: { status: "COMPLETED", completedAt: this.now() },
       include: CANDIDATE_SESSION_INCLUDE,
     });
+    if (this.cache) {
+      await this.cache.delete(CacheKeys.sessionAccess(normalizeAccessCode(accessCode)));
+    }
     this.publishSessionUpdated(session as CandidateSessionRow);
     return toCandidateAccessSessionDto(session as CandidateSessionRow);
   }
@@ -698,6 +720,9 @@ export class SessionsService {
       data: { status: "EXPIRED", expiredAt: new Date(deadline) },
       include: CANDIDATE_SESSION_INCLUDE,
     });
+    if (this.cache) {
+      await this.cache.delete(CacheKeys.sessionAccess(normalizeAccessCode(accessCode)));
+    }
     this.publishSessionUpdated(session as CandidateSessionRow);
     return toCandidateAccessSessionDto(session as CandidateSessionRow);
   }
@@ -731,13 +756,9 @@ export class SessionsService {
       throw new BadRequestException("returnedAt cannot be earlier than detectedAt.");
     }
     const durationMs = input.durationMs != null ? Math.round(input.durationMs) : undefined;
-    let counted = INTEGRITY_COUNTED_TYPES.has(type);
-    // When the interviewer has paused pointer detection, pointer_exit events
-    // are stored as supporting evidence but never counted toward the warning.
-    if (type === "pointer_exit" && session.pointerDetectionEnabled === false) {
-      counted = false;
-    }
-    const reason = integrityReason(type, counted);
+    const paused = session.detectionEnabled === false;
+    const counted = !paused && INTEGRITY_COUNTED_TYPES.has(type);
+    const reason = paused ? "Detection paused by interviewer." : integrityReason(type, counted);
 
     // ------------------------------------------------------------
     // Deduplicate before writing: retrying the same clientEventId must
@@ -801,6 +822,10 @@ export class SessionsService {
       this.publishSessionUpdated(expired as CandidateSessionRow);
     }
 
+    if (this.cache && (counted || finalStatus === "EXPIRED")) {
+      await this.cache.delete(CacheKeys.sessionAccess(normalizeAccessCode(accessCode)));
+    }
+
     const sessionStatus = fromPrismaSessionStatus(finalStatus);
     const event = toIntegrityEventDto(created);
     this.publishIntegrityUpdated(session.id, { warningCount, warningLimit, status: sessionStatus, action, reason, event });
@@ -827,7 +852,7 @@ export class SessionsService {
     const session = await findFirst({
       relationLoadStrategy: "join",
       where: mergeWhere({ id: sessionId }, buildSessionOwnershipWhere(access)),
-      select: { id: true, status: true, warningCount: true, warningLimit: true, pointerDetectionEnabled: true },
+      select: { id: true, status: true, warningCount: true, warningLimit: true, detectionEnabled: true },
     });
     if (!session) throw forbiddenResourceError("Session");
 
@@ -843,47 +868,10 @@ export class SessionsService {
       sessionId: session.id,
       warningCount: session.warningCount ?? 0,
       warningLimit: session.warningLimit ?? DEFAULT_WARNING_LIMIT,
-      pointerDetectionEnabled: session.pointerDetectionEnabled ?? true,
+      detectionEnabled: session.detectionEnabled !== false,
       status: fromPrismaSessionStatus(session.status),
       events: events.map(toIntegrityEventDto),
     };
-  }
-
-  /**
-   * Toggles pointer-exit detection for a session. Only staff (interviewer/
-   * admin/organization) may call this. The candidate cannot change it.
-   *
-   * Emits `integrity.policy.updated` to the authorized session room so both
-   * the candidate hook and the reviewer toggle stay in sync without polling.
-   */
-  async updateIntegrityPolicy(sessionId: string, pointerDetectionEnabled: boolean, access?: AccessContext): Promise<{ sessionId: string; pointerDetectionEnabled: boolean }> {
-    const findFirst = requireMethod(this.prisma.interviewSession.findFirst, "interviewSession.findFirst");
-    const session = await findFirst({
-      where: mergeWhere({ id: sessionId }, buildSessionOwnershipWhere(access)),
-      select: { id: true },
-    });
-    if (!session) throw forbiddenResourceError("Session");
-
-    const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
-    const updated = await update({
-      where: { id: session.id },
-      data: { pointerDetectionEnabled },
-      select: { id: true, pointerDetectionEnabled: true },
-    });
-
-    const enabled = updated.pointerDetectionEnabled ?? true;
-    const payload = {
-      sessionId: updated.id,
-      pointerDetectionEnabled: enabled,
-      updatedAt: new Date().toISOString(),
-    };
-    try {
-      this.events?.emitToSession(updated.id, INTERVIEW_EVENTS.integrityPolicyUpdated, payload);
-    } catch {
-      // Fire-and-forget — see publishSessionUpdated.
-    }
-
-    return { sessionId: updated.id, pointerDetectionEnabled: enabled };
   }
 
   /**
@@ -987,6 +975,30 @@ export class SessionsService {
     }
   }
 
+  async updateIntegrityPolicy(id: string, detectionEnabled: boolean, access: AccessContext): Promise<{ sessionId: string; detectionEnabled: boolean }> {
+    const current = await this.getSession(id, access);
+    if (!current) throw forbiddenResourceError("Session");
+
+    const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
+    const updated = await update({
+      where: { id: current.id },
+      data: { detectionEnabled },
+      select: { id: true, detectionEnabled: true, updatedAt: true },
+    }) as { id: string; detectionEnabled: boolean; updatedAt?: Date };
+
+    try {
+      this.events?.emitToSession(updated.id, INTERVIEW_EVENTS.integrityPolicyUpdated, {
+        sessionId: updated.id,
+        detectionEnabled: updated.detectionEnabled,
+        updatedAt: toIso(updated.updatedAt) ?? this.now().toISOString(),
+      });
+    } catch {
+      // The persisted policy is authoritative; clients recover it on rejoin.
+    }
+
+    return { sessionId: updated.id, detectionEnabled: updated.detectionEnabled };
+  }
+
   private async resolveCandidateId(input: CreateSessionInput, organizationId: string | undefined, access?: AccessContext): Promise<string> {
     if (input.candidateId?.trim()) {
       const candidateId = input.candidateId.trim();
@@ -997,8 +1009,8 @@ export class SessionsService {
       return candidateId;
     }
 
-    const name = requireNonEmpty(input.candidateName, "Candidate name is required.");
     const email = normalizeEmail(requireNonEmpty(input.candidateEmail, "Candidate email is required."));
+    const name = input.candidateName?.trim() || candidateNameFromEmail(email);
     const findUnique = requireMethod(this.prisma.user?.findUnique, "user.findUnique");
     const create = requireMethod(this.prisma.user?.create, "user.create");
 
@@ -1010,7 +1022,9 @@ export class SessionsService {
       if (existingCandidate.role !== "CANDIDATE") {
         throw new Error("Candidate email is already used by a platform account.");
       }
-      assertCandidateBelongsToOrganization(existingCandidate, organizationId);
+      // Candidate identity is global (one account per email); session access is scoped by
+      // InterviewSession.organizationId, not by the candidate row's original organizationId.
+      // So the same person can be invited by any workspace without a collision.
       return existingCandidate.id;
     }
 
@@ -1128,7 +1142,7 @@ function toSessionDto(session: SessionRow): InterviewSessionDto {
     accessCode: session.accessCode,
     warningCount: session.warningCount ?? 0,
     warningLimit: session.warningLimit ?? DEFAULT_WARNING_LIMIT,
-    pointerDetectionEnabled: session.pointerDetectionEnabled ?? true,
+    detectionEnabled: session.detectionEnabled !== false,
     overallScore: session.report?.overallScore,
     reportReady: Boolean(session.report),
     startedAt: toIso(session.startedAt),
@@ -1410,6 +1424,14 @@ function isUniqueConstraintError(error: unknown): boolean {
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
+}
+
+/** "sok.dara+jobs@example.com" → "Sok Dara"; falls back to the email itself for unusual local parts. */
+function candidateNameFromEmail(email: string): string {
+  const localPart = email.split("@")[0]?.replace(/\+.*$/, "") ?? "";
+  const words = localPart.split(/[._-]+/).filter((word) => /[a-z]/i.test(word));
+  if (!words.length) return email;
+  return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
 }
 
 function normalizeAccessCode(accessCode: string): string {

@@ -3,6 +3,7 @@ import type { Response } from "express";
 import { ValidateDto } from "../../common/pipes/validate-dto.pipe";
 import { JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { CandidateAccessRateLimitGuard } from "../sessions/access-rate-limit.guard";
+import { AiRateLimitGuard } from "./guards/ai-rate-limit.guard";
 import { CandidateAiService } from "./candidate-ai.service";
 import { AiService } from "./ai.service";
 import type { EvaluationResultDto } from "./evaluation.service";
@@ -18,7 +19,7 @@ import {
 } from "./dto/ai.dto";
 
 @Controller("ai")
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, AiRateLimitGuard)
 @Roles("admin", "organization", "interviewer")
 export class AiController {
   constructor(@Inject(AiService) private readonly aiService: AiService) {}

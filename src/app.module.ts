@@ -1,10 +1,17 @@
-import { Module } from "@nestjs/common";
+import { SubscriptionsController } from "./modules/subscriptions/subscriptions.controller";
+import { SubscriptionsService } from "./modules/subscriptions/subscriptions.service";
+import { PayWayCallbackController } from "./modules/subscriptions/payway/payway-callback.controller";
+import { PayWayClient, type PayWayGateway } from "./modules/subscriptions/payway";
+import { type MiddlewareConsumer, Module, type NestModule, RequestMethod } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
+import { RequestValidationMiddleware } from "./common/middleware/request-validation.middleware";
+import { GlobalRateLimitMiddleware } from "./common/rate-limiting";
 import { AnalyticsController } from "./modules/analytics/analytics.controller";
 import { AnalyticsService } from "./modules/analytics/analytics.service";
 import { SystemHealthService } from "./modules/analytics/system-health.service";
 import { AppController } from "./app.controller";
 import { AiController, CandidateAiController } from "./modules/ai/ai.controller";
+import { AiRateLimitGuard } from "./modules/ai/guards/ai-rate-limit.guard";
 import { AiService } from "./modules/ai/ai.service";
 import { CandidateAiService } from "./modules/ai/candidate-ai.service";
 import { createDeepSeekProviderFromEnv } from "./modules/ai/deepseek.provider";
@@ -41,12 +48,14 @@ import { createEmailServiceFromEnv, EmailService } from "./modules/email/email.s
 import { PrismaService } from "./prisma/prisma.service";
 import { PrismaModule } from "./prisma/prisma.module";
 import { LiveKitService } from "./modules/livekit/livekit.service";
-
+import { CachingModule, CacheService } from "./common/caching";
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, RealtimeModule, CodeModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, RealtimeModule, CodeModule, CachingModule],
   controllers: [
     AppController,
+    SubscriptionsController,
+    PayWayCallbackController,
     AuthController,
     OrganizationController,
     // Registered ahead of TemplatesController: its @Get(":id") route would
@@ -66,8 +75,18 @@ import { LiveKitService } from "./modules/livekit/livekit.service";
     AnalyticsController,
   ],
   providers: [
+    // PayWay is constructed once and reads its environment lazily, so a missing
+    // sandbox key leaves the rest of the API running and turns only card
+    // checkout into a clear 503.
+    { provide: PayWayClient, useFactory: () => new PayWayClient() },
+    {
+      provide: SubscriptionsService,
+      useFactory: (prisma: PrismaService, payway: PayWayGateway) => new SubscriptionsService(prisma, payway),
+      inject: [PrismaService, PayWayClient],
+    },
     AnalyticsService,
     SystemHealthService,
+    AiRateLimitGuard,
     AuthRateLimitGuard,
     CandidateAccessRateLimitGuard,
     CandidateAiService,
@@ -103,8 +122,8 @@ import { LiveKitService } from "./modules/livekit/livekit.service";
     },
     {
       provide: TemplatesService,
-      useFactory: (prisma: PrismaService) => new TemplatesService(prisma),
-      inject: [PrismaService],
+      useFactory: (prisma: PrismaService, cache: CacheService) => new TemplatesService(prisma, cache),
+      inject: [PrismaService, CacheService],
     },
     {
       provide: TemplateDraftsService,
@@ -114,9 +133,9 @@ import { LiveKitService } from "./modules/livekit/livekit.service";
     },
     {
       provide: SessionsService,
-      useFactory: (prisma: PrismaService, email: EmailService, gateway: InterviewGateway) =>
-        new SessionsService(prisma, { emailService: email, events: gateway }),
-      inject: [PrismaService, EmailService, InterviewGateway],
+      useFactory: (prisma: PrismaService, email: EmailService, gateway: InterviewGateway, cache: CacheService) =>
+        new SessionsService(prisma, { emailService: email, events: gateway, cache }),
+      inject: [PrismaService, EmailService, InterviewGateway, CacheService],
     },
     {
       provide: ResponsesService,
@@ -135,4 +154,10 @@ import { LiveKitService } from "./modules/livekit/livekit.service";
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(GlobalRateLimitMiddleware, RequestValidationMiddleware)
+      .forRoutes({ path: "*", method: RequestMethod.ALL });
+  }
+}

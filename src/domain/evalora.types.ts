@@ -86,7 +86,7 @@ export interface InterviewSessionDto {
   reportReady?: boolean;
   warningCount?: number;
   warningLimit?: number;
-  pointerDetectionEnabled?: boolean;
+  detectionEnabled?: boolean;
   startedAt?: string;
   completedAt?: string;
   expiresAt?: string;

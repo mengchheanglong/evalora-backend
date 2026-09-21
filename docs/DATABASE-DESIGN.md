@@ -63,3 +63,21 @@ InterviewSession 1---N IntegrityEvent
 - Dashboard queries use organization/status/completion/update indexes on sessions, an organization index on templates, and a session/time index on evaluations. These indexes keep scoped overview queries efficient without weakening RBAC filters.
 
 See `backend/prisma/schema.prisma` for the first Prisma schema draft.
+
+## Organization subscription (Step 1)
+
+`Organization.subscription` is optional and one-to-one with `Subscription` (`subscriptions`). The unique `organization_id` foreign key scopes the record to a workspace, not an individual. Organization deletion cascades to its subscription. This stores one current record, not a subscription event history.
+
+Fields: UUID `id`; `organizationId`; required `plan` (PLUS/PRO/BUSINESS), `status` (ACTIVE/TRIALING/PAST_DUE/CANCELLED/EXPIRED), `billingCycle` (MONTHLY/ANNUAL); required DateTime `currentPeriodStart` and `currentPeriodEnd`; `cancelAtPeriodEnd` (default false); nullable `providerCustomerId` and unique nullable `providerSubscriptionId`; `createdAt` and automatically maintained `updatedAt`.
+
+Plan, status, cycle, and period dates have no defaults: absent data cannot silently provision a paid plan. Provider fields are reserved for a future single-provider integration. No records are seeded or backfilled. Migration: `prisma/migrations/20260913000000_add_organization_subscription/migration.sql`.
+
+## Prepaid payment attempts (Step 4)
+
+`Subscription` also carries `renewalMode` (`MANUAL | AUTOMATIC`, default `MANUAL`) and the paired `pendingPlan` / `pendingBillingCycle` columns that hold a plan change which has been paid for but starts at the end of the running period. They are always written and cleared together.
+
+`PaymentAttempt` (`payment_attempts`) records one attempt to buy one prepaid billing cycle: UUID `id`; `organizationId` (cascade on organization delete); nullable `subscriptionId` (`onDelete: SetNull`, because a subscription row can be replaced by a new paid period without losing payment history); unique `tranId` (the merchant transaction id sent to PayWay and the only identity a callback is resolved with, max 20 characters); unique `idempotencyKey`; `plan`; `billingCycle`; `purpose` (`NEW_SUBSCRIPTION | RENEWAL | PLAN_CHANGE`); `amountMinor` (integer cents, backend catalog); `currency`; `status` (`PENDING | VERIFIED | FAILED`); nullable `providerReference`, `providerStatus`, `failureReason`; nullable `verifiedAt`, `periodStart`, `periodEnd`; `createdAt`; `updatedAt`.
+
+Idempotency is enforced twice. The unique `idempotency_key` stops two concurrent identical checkouts from creating two chargeable transactions. The `PENDING → VERIFIED` conditional update is the activation claim inside one database transaction, so a duplicate callback, a repeated poll, or two simultaneous reconcilers extend a paid period exactly once. There is no `PaymentCredential` table and no billing worker state: no card or account data is stored anywhere, and every renewal is a new customer-initiated payment.
+
+As with the subscription record, Prisma validation and client generation do not apply these changes; migration: `prisma/migrations/20260913010000_add_manual_payment_attempts/migration.sql`.

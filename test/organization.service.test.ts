@@ -89,11 +89,17 @@ function createFakePrisma() {
           organizationId: user.organizationId,
         };
       },
-      async update(args: { where: { id: string }; data: { organizationId: string | null } }) {
+      async update(args: { where: { id: string }; data: Partial<UserRow>; select?: unknown }) {
         const user = users.find((row) => row.id === args.where.id);
         if (!user) throw new Error("missing user");
-        user.organizationId = args.data.organizationId;
-        return user;
+        Object.assign(user, args.data);
+        return {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          organizationId: user.organizationId,
+        };
       },
     },
     organization: {
@@ -226,7 +232,7 @@ test("workspace owner can invite an interviewer by email", async () => {
   assert.equal(invite.inviteUrlPath, `/invite/${invite.token}`);
 });
 
-test("inviting an email already registered as a candidate is rejected up front (no dead-end invite)", async () => {
+test("an email already registered as a candidate can still be invited as an interviewer", async () => {
   const { prisma, users, invites } = createFakePrisma();
   users.push({
     id: "owner-1",
@@ -248,13 +254,36 @@ test("inviting an email already registered as a candidate is rejected up front (
   });
   const service = new OrganizationService(prisma as never);
 
-  // acceptInvite always blocks candidate accounts, so createInvite must reject too
-  // rather than sending an invitation that can never be accepted.
-  await assert.rejects(
-    () => service.createInvite(ownerAccess, { email: "candidate@acme.com" }),
-    /already registered as a candidate/i,
-  );
-  assert.equal(invites.length, 0);
+  const invite = await service.createInvite(ownerAccess, { email: "candidate@acme.com" });
+  assert.equal(invite.email, "candidate@acme.com");
+  assert.equal(invites.length, 1);
+});
+
+test("a candidate who was invited to a session in this same workspace can still be invited as an interviewer", async () => {
+  const { prisma, users, invites } = createFakePrisma();
+  users.push({
+    id: "owner-1",
+    name: "Owner",
+    email: "owner@acme.com",
+    passwordHash: "hash",
+    role: "ORGANIZATION",
+    organizationId: "org-1",
+    createdAt: new Date(),
+  });
+  users.push({
+    id: "cand-1",
+    name: "Prior Candidate",
+    email: "candidate@acme.com",
+    passwordHash: "hash",
+    role: "CANDIDATE",
+    organizationId: "org-1",
+    createdAt: new Date(),
+  });
+  const service = new OrganizationService(prisma as never);
+
+  const invite = await service.createInvite(ownerAccess, { email: "candidate@acme.com" });
+  assert.equal(invite.email, "candidate@acme.com");
+  assert.equal(invites.length, 1);
 });
 
 test("interviewers cannot create invites", async () => {
@@ -304,6 +333,60 @@ test("accept invite creates interviewer in the same organization", async () => {
   assert.equal(invites[0].status, "ACCEPTED");
   assert.equal(users.some((user) => user.email === "newhire@acme.com" && user.role === "INTERVIEWER"), true);
   assert.equal(await bcrypt.compare("SecurePass1", users.find((user) => user.email === "newhire@acme.com")!.passwordHash), true);
+});
+
+test("accepting an invite upgrades an existing candidate account in place instead of creating a second row", async () => {
+  const { prisma, users, invites } = createFakePrisma();
+  users.push({
+    id: "owner-1",
+    name: "Owner",
+    email: "owner@acme.com",
+    passwordHash: "hash",
+    role: "ORGANIZATION",
+    organizationId: "org-1",
+    createdAt: new Date(),
+  });
+  users.push({
+    id: "cand-1",
+    name: "Prior Candidate",
+    email: "candidate@acme.com",
+    passwordHash: "invite-only-hash",
+    role: "CANDIDATE",
+    organizationId: "org-other",
+    createdAt: new Date(),
+  });
+  invites.push({
+    id: "invite-1",
+    organizationId: "org-1",
+    email: "candidate@acme.com",
+    role: "INTERVIEWER",
+    token: "tok-abc",
+    status: "PENDING",
+    invitedById: "owner-1",
+    expiresAt: new Date(Date.now() + 60_000),
+    acceptedAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  const service = new OrganizationService(prisma as never);
+  const result = await service.acceptInvite({
+    token: "tok-abc",
+    name: "Candidate Turned Interviewer",
+    password: "SecurePass1",
+  });
+
+  assert.equal(result.user.id, "cand-1");
+  assert.equal(result.user.role, "interviewer");
+  assert.equal(result.user.organizationId, "org-1");
+  assert.equal(users.length, 2, "no second user row should be created for the same email");
+  const upgraded = users.find((user) => user.email === "candidate@acme.com")!;
+  assert.equal(upgraded.id, "cand-1");
+  assert.equal(upgraded.role, "INTERVIEWER");
+  assert.equal(upgraded.organizationId, "org-1");
+  assert.equal(upgraded.name, "Candidate Turned Interviewer");
+  assert.equal(await bcrypt.compare("SecurePass1", upgraded.passwordHash), true);
+  assert.equal(invites[0].status, "ACCEPTED");
 });
 
 test("owner can remove interviewer but not themselves", async () => {
