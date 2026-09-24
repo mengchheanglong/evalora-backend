@@ -87,6 +87,7 @@ export interface TemplateModuleInput {
   title: string;
   description?: string;
   weight?: number;
+  order?: number;
   orderIndex?: number;
   settings?: JsonValue;
   questions?: TemplateQuestionInput[];
@@ -351,7 +352,7 @@ export class TemplatesService {
       data: {
         title: requireNonEmpty(input.title, "Template title is required."),
         description: input.description,
-        roleType: requireNonEmpty(input.roleType, "Template role type is required."),
+        roleType: requireNonEmpty(input.roleType || (input as any).roleLevel, "Template role type is required."),
         timeLimitMin: input.timeLimitMin,
         scoringRules: input.scoringRules,
         createdById: access?.userId ?? requireNonEmpty(input.createdById, "Template creator is required."),
@@ -378,7 +379,8 @@ export class TemplatesService {
     const data: Record<string, unknown> = {};
     if (input.title !== undefined) data.title = requireNonEmpty(input.title, "Template title is required.");
     if (input.description !== undefined) data.description = input.description;
-    if (input.roleType !== undefined) data.roleType = requireNonEmpty(input.roleType, "Template role type is required.");
+    const resolvedRole = input.roleType ?? (input as any).roleLevel;
+    if (resolvedRole !== undefined) data.roleType = requireNonEmpty(resolvedRole, "Template role type is required.");
     if (input.timeLimitMin !== undefined) data.timeLimitMin = input.timeLimitMin;
     if (input.scoringRules !== undefined) data.scoringRules = input.scoringRules;
     if (input.organizationId !== undefined || access) data.organizationId = resolveWritableOrganizationId(input.organizationId, access);
@@ -476,7 +478,7 @@ function toPrismaModuleCreate(module: TemplateModuleInput) {
     title: requireNonEmpty(module.title, "Module title is required."),
     description: module.description,
     weight: module.weight ?? 1,
-    orderIndex: module.orderIndex ?? 1,
+    orderIndex: module.orderIndex ?? module.order ?? 1,
     settings: normalizeModuleSettings(module),
     // Authored ai_interview questions are kept as the session's opening
     // questions. Prebuilt templates have always shipped them this way; dropping
@@ -491,7 +493,7 @@ function toPrismaModuleCreate(module: TemplateModuleInput) {
 function toPrismaQuestionCreate(question: TemplateQuestionInput) {
   return {
     questionText: requireNonEmpty(question.questionText, "Question text is required."),
-    questionType: toPrismaQuestionType(question.questionType),
+    questionType: toPrismaQuestionType(question.questionType || "short_answer"),
     options: question.options,
     rubric: question.rubric,
   };

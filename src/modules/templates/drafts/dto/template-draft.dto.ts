@@ -142,6 +142,15 @@ export class DraftModuleDto {
   weightSignals?: DraftWeightSignalsDto;
 
   @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  orderIndex?: number;
+
+  @IsOptional()
+  settings?: unknown;
+
+  @IsOptional()
   @IsArray()
   @ArrayMaxSize(MAX_QUESTIONS_PER_MODULE)
   @ValidateNested({ each: true })

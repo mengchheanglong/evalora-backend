@@ -4,6 +4,7 @@ import {
   IsIn,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   Max,
@@ -60,15 +61,23 @@ export class CreateTemplateQuestionDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(RUBRIC_MAX_LENGTH)
   @Trim()
-  rubric?: string;
+  questionType?: string;
+
+  @IsOptional()
+  rubric?: unknown;
 
   @IsOptional()
   @IsInt()
   @Min(1)
   @Max(100)
   order?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  orderIndex?: number;
 
   @IsOptional()
   options?: unknown;
@@ -112,9 +121,18 @@ export class CreateTemplateModuleDto {
 
   @IsOptional()
   @IsInt()
+  @Min(1)
+  @Max(100)
+  orderIndex?: number;
+
+  @IsOptional()
+  @IsNumber()
   @Min(0)
   @Max(100)
   weight?: number;
+
+  @IsOptional()
+  settings?: unknown;
 
   @IsOptional()
   @IsArray()
@@ -138,6 +156,12 @@ export class CreateTemplateDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(TITLE_MAX_LENGTH)
+  @Trim()
+  roleType?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(64)
   @Trim()
   roleLevel?: string;
@@ -153,6 +177,9 @@ export class CreateTemplateDto {
   @Min(1)
   @Max(1440)
   timeLimitMin?: number;
+
+  @IsOptional()
+  scoringRules?: unknown;
 
   @IsOptional()
   @IsArray()
@@ -176,6 +203,12 @@ export class UpdateTemplateDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(TITLE_MAX_LENGTH)
+  @Trim()
+  roleType?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(64)
   @Trim()
   roleLevel?: string;
@@ -185,6 +218,9 @@ export class UpdateTemplateDto {
   @Min(1)
   @Max(1440)
   timeLimitMin?: number;
+
+  @IsOptional()
+  scoringRules?: unknown;
 
   @IsOptional()
   @IsArray()

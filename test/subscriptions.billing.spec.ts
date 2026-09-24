@@ -71,6 +71,7 @@ const service = new SubscriptionsService(fake.asPrismaService(), harness.gateway
 let app: INestApplication;
 let baseUrl: string;
 const previousSecret = process.env.JWT_SECRET;
+const previousTesterEmails = process.env.BILLING_TESTER_EMAILS;
 
 @Module({
   controllers: [SubscriptionsController, PayWayCallbackController],
@@ -86,6 +87,7 @@ class TestModule {}
 
 beforeAll(async () => {
   process.env.JWT_SECRET = "billing-tests-only-secret";
+  delete process.env.BILLING_TESTER_EMAILS;
   app = await NestFactory.create(TestModule, { logger: false });
   app.setGlobalPrefix("api");
   await app.listen(0, "127.0.0.1");
@@ -95,12 +97,15 @@ afterAll(async () => {
   await app?.close();
   if (previousSecret === undefined) delete process.env.JWT_SECRET;
   else process.env.JWT_SECRET = previousSecret;
+  if (previousTesterEmails === undefined) delete process.env.BILLING_TESTER_EMAILS;
+  else process.env.BILLING_TESTER_EMAILS = previousTesterEmails;
 });
 
 beforeEach(() => {
   fake.reset();
   harness.reset();
   fake.setNow(NOW);
+  delete process.env.BILLING_TESTER_EMAILS;
 });
 
 function token(role: string, organizationId: string | null = "org-a", email = "owner@example.invalid") {
