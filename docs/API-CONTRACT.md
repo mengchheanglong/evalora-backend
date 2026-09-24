@@ -54,7 +54,7 @@ Email verification requests:
 { "email": "owner@example.com" }
 ```
 
-Unverified password accounts receive `401` from login until verification succeeds. Resend responses are deliberately generic to avoid revealing whether an account exists. In non-production environments only, registration/resend may include `verificationUrl` when email delivery is unavailable.
+Unverified password accounts receive `401` from login until verification succeeds. Suspended accounts, and owner/interviewer members of a suspended workspace, receive `403` with the suspension message (see Platform administration). Resend responses are deliberately generic to avoid revealing whether an account exists. In non-production environments only, registration/resend may include `verificationUrl` when email delivery is unavailable.
 
 Google sign-in request:
 
@@ -383,6 +383,32 @@ Workspace analytics are computed from persisted data visible to the authenticate
 - current status breakdown. Candidate identity and mixed-template evidence are excluded from this aggregate payload.
 
 Score, module, and duration endpoints use completed sessions for exactly one required, nonblank `templateId`, so different template IDs are never combined in a comparison. Historical template revisions are not yet versioned; evidence for an edited template must therefore be interpreted cautiously. Distribution includes a distinct `No assessable evidence` bucket for exact zero scores. Duration excludes missing, invalid, or negative timestamp pairs and reports its sample size. Template usage is assignment context, not candidate performance. Activity is a current-state session update feed, not an immutable event log.
+
+## Platform administration
+
+Super-admin routes behind the `/admin` dashboard. Every route requires a JWT whose account *currently* holds the `admin` role; every other role receives `403`. Role, workspace, and suspension flags are re-read from the database on each authenticated request, so an admin action takes effect on the target's next call. An existing JWT never outlives a suspension or a demotion.
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/admin/overview` | Platform totals (organizations by plan, users by role, sessions all-time and this month), a 30-day daily `activity` series with `comparisons` against the previous 30 days, an `attention` block (suspended workspaces and accounts, unverified staff, workspaces without an owner, live sessions), estimated AI spend with a linear month-end projection, and a platform-scoped system health snapshot. |
+| GET | `/admin/organizations?q=&plan=&status=&sort=&order=&page=&pageSize=` | Paginated workspaces with owner, plan, member/session/template counts, and suspension state. `q` matches the workspace name or the owner's email. `sort` is `createdAt` (default, newest first), `name`, or `sessions`; `order` is `asc` or `desc`. |
+| GET | `/admin/organizations/:id` | One workspace plus its staff `members`, `sessionsByStatus`, the five most recent `recentSessions`, `draftCount`, and `lastActivityAt`. |
+| PATCH | `/admin/organizations/:id/status` | Body `{ "isSuspended": true \| false }`. Suspends or reactivates a workspace. An admin cannot suspend their own workspace. |
+| PATCH | `/admin/organizations/:id/plan` | Body `{ "plan": "free" \| "pro" \| "enterprise" }`. |
+| GET | `/admin/users?q=&role=&status=&sort=&order=&page=&pageSize=` | Paginated accounts across all workspaces. `q` matches name or email; `role` is `admin`, `organization`, `interviewer`, or `candidate`. `sort` is `createdAt` (default, newest first), `name`, or `email`. |
+| GET | `/admin/users/:id` | One account plus `createdSessionCount`, `candidateSessionCount`, `templateCount`, the five most recently updated `recentSessions` it created or sat, and `lastActivityAt`. |
+| PATCH | `/admin/users/:id/status` | Body `{ "isSuspended": true \| false }`. An admin cannot deactivate their own account. |
+| PATCH | `/admin/users/:id/role` | Body `{ "role": "admin" \| "organization" \| "interviewer" }`. Rejected for the acting admin, for candidate records, for accounts without a workspace (unless the new role is `admin`), and for the only owner of a workspace being demoted to interviewer. |
+
+List responses are `{ "items": [...], "page": 1, "pageSize": 25, "total": 0, "totalPages": 1 }`; `pageSize` is capped at 100. `status` is `active` or `suspended`.
+
+Suspension semantics:
+
+- A suspended user receives `403 This account has been suspended by platform administration.` on every authenticated route, at login, and from the realtime handshake; `GET /auth/me` returns `null` for them.
+- Suspending a workspace cascades to every `organization` and `interviewer` member with `403 Your workspace has been suspended by platform administration.` Platform admins are exempt so the action can always be reversed. Candidate access-code flows are not affected by workspace suspension.
+- Suspension is reversible and never deletes data.
+
+AI cost estimate: `ai.estimatedCostUsd = (billableTurns + draftGenerations) x costPerTurnUsd`. Billable turns are assistant interview messages tagged `provider: "deepseek"`; deterministic fallback output is free. `costPerTurnUsd` defaults to `0.002` and is configurable with `AI_COST_PER_TURN_USD`.
 
 ## Alignment checklist
 

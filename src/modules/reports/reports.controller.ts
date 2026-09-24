@@ -1,9 +1,10 @@
-import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Req, UseGuards, UseInterceptors } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Inject, Param, Patch, Post, Req, UseGuards, UseInterceptors } from "@nestjs/common";
 import { ValidateDto } from "../../common/pipes/validate-dto.pipe";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { CacheInvalidationInterceptor, InvalidateCache } from "../../common/caching";
 import { AddReviewerNoteDto } from "./dto/report.dto";
+import { UpdateRecruiterVerdictDto } from "./dto/update-verdict.dto";
 import { ReportsService } from "./reports.service";
 
 @Controller("reports")
@@ -49,6 +50,21 @@ export class ReportsController {
       return await this.reportsService.addReviewerNote(sessionId, body.note, toAccessContext(request.user));
     } catch (error) {
       throw new BadRequestException(error instanceof Error ? error.message : "Unable to add reviewer note.");
+    }
+  }
+
+  @Patch(":sessionId/verdict")
+  @Roles("admin", "organization", "interviewer")
+  @InvalidateCache({ entities: ["reports"] })
+  async updateVerdict(
+    @Param("sessionId") sessionId: string,
+    @Body(new ValidateDto(UpdateRecruiterVerdictDto)) body: UpdateRecruiterVerdictDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    try {
+      return await this.reportsService.updateRecruiterVerdict(sessionId, body, toAccessContext(request.user));
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : "Unable to save recruiter decision.");
     }
   }
 }

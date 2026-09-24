@@ -1,6 +1,6 @@
 import "reflect-metadata";
-import { Module, ServiceUnavailableException, type INestApplication } from "@nestjs/common";
-import { NestFactory } from "@nestjs/core";
+import { ExecutionContext, Module, ServiceUnavailableException, type INestApplication } from "@nestjs/common";
+import { NestFactory, Reflector } from "@nestjs/core";
 import * as jwt from "jsonwebtoken";
 import { SubscriptionsController } from "../src/modules/subscriptions/subscriptions.controller";
 import { SubscriptionsService } from "../src/modules/subscriptions/subscriptions.service";
@@ -19,9 +19,10 @@ import {
   type BillingCycleName,
   type SubscriptionPlanName,
 } from "../src/modules/subscriptions/plan-catalog";
-import { JwtAuthGuard, RolesGuard } from "../src/modules/auth/auth.guard";
+import { JwtAuthGuard, RolesGuard, extractAuthUserFromHeader, type AuthenticatedRequest } from "../src/modules/auth/auth.guard";
 import type { AccessContext } from "../src/modules/auth/access-control";
 import type { PayWayGateway } from "../src/modules/subscriptions/payway";
+import { PrismaService } from "../src/prisma/prisma.service";
 import {
   BillingFake,
   TEST_PAYWAY_CONFIG,
@@ -38,6 +39,34 @@ const fake = new BillingFake();
 const harness = createPayWayHarness();
 // One service instance for the whole file: the store and harness are reset per test
 // so the injected clock and the fake Prisma stay the same objects.
+const fakePrisma = {
+  ...fake.asPrismaService(),
+  user: {
+    findUnique: async ({ where }: { where: { id: string } }) => {
+      const parts = where.id.split(":");
+      if (parts[0] === "user" && parts.length >= 4) {
+        const [, role, org, email] = parts;
+        return {
+          id: where.id,
+          email,
+          role: role.toUpperCase() as "ADMIN" | "ORGANIZATION" | "INTERVIEWER" | "CANDIDATE",
+          organizationId: org === "none" ? null : org,
+          isSuspended: false,
+          organization: { isSuspended: false },
+        };
+      }
+      return {
+        id: where.id,
+        email: "owner@example.invalid",
+        role: "ORGANIZATION" as const,
+        organizationId: "org-a",
+        isSuspended: false,
+        organization: { isSuspended: false },
+      };
+    },
+  },
+};
+
 const service = new SubscriptionsService(fake.asPrismaService(), harness.gateway, () => fake.now);
 let app: INestApplication;
 let baseUrl: string;
@@ -45,7 +74,13 @@ const previousSecret = process.env.JWT_SECRET;
 
 @Module({
   controllers: [SubscriptionsController, PayWayCallbackController],
-  providers: [JwtAuthGuard, RolesGuard, { provide: SubscriptionsService, useValue: service }],
+  providers: [
+    Reflector,
+    JwtAuthGuard,
+    RolesGuard,
+    { provide: PrismaService, useValue: fakePrisma },
+    { provide: SubscriptionsService, useValue: service },
+  ],
 })
 class TestModule {}
 
@@ -70,7 +105,7 @@ beforeEach(() => {
 
 function token(role: string, organizationId: string | null = "org-a", email = "owner@example.invalid") {
   return jwt.sign(
-    { sub: "user-1", email, role, ...(organizationId ? { organizationId } : {}), purpose: "session" },
+    { sub: `user:${role}:${organizationId ?? "none"}:${email}`, email, role, ...(organizationId ? { organizationId } : {}), purpose: "session" },
     process.env.JWT_SECRET!,
   );
 }

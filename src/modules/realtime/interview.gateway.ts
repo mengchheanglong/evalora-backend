@@ -688,10 +688,16 @@ export class InterviewGateway
         select: {
           role: true,
           organizationId: true,
+          isSuspended: true,
+          organization: { select: { isSuspended: true } },
         },
       });
 
     if (!user) return null;
+
+    // Mirrors the REST guard: a suspended staff account, or a non-admin whose
+    // workspace is suspended, cannot open a live session room either.
+    if (user.isSuspended || (user.role !== "ADMIN" && user.organization?.isSuspended)) return null;
 
     const session =
       await this.prisma.interviewSession.findUnique(

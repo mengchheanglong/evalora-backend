@@ -36,6 +36,24 @@ pnpm prisma migrate dev --name init
 
 The schema in `prisma/schema.prisma` includes `warning_count` / `warning_limit` columns in `interview_sessions` (defaults `0` / `2`) and creates the `integrity_events` table with the `(session_id, client_event_id)` unique constraint. Apply schema updates directly via `pnpm exec prisma db push`.
 
+## Platform administration schema
+
+`Organization.plan` (`SubscriptionPlan`, default `FREE`), `Organization.is_suspended`/`suspended_at`, `User.is_suspended`/`suspended_at`, and the `users(role, created_at)` index back the Admin Hub. On a fresh database `pnpm exec prisma db push` applies them. On the shared Neon database apply the additive script below with `pnpm exec prisma db execute --file <file> --schema prisma/schema.prisma` rather than `db push`, so drift from other branches is never dropped:
+
+```sql
+CREATE TYPE "SubscriptionPlan" AS ENUM ('FREE', 'PRO', 'ENTERPRISE');
+ALTER TABLE "organizations"
+  ADD COLUMN "plan" "SubscriptionPlan" NOT NULL DEFAULT 'FREE',
+  ADD COLUMN "is_suspended" BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN "suspended_at" TIMESTAMP(3);
+ALTER TABLE "users"
+  ADD COLUMN "is_suspended" BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN "suspended_at" TIMESTAMP(3);
+CREATE INDEX "users_role_created_at_idx" ON "users"("role", "created_at");
+```
+
+Public registration only creates workspace owners, so the first platform admin is promoted with `pnpm admin:grant <email>`. After that, admins promote others from the Admin Hub.
+
 ## Model implementation order
 
 1. `User`, `Organization`.

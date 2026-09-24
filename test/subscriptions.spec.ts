@@ -1,23 +1,58 @@
 import "reflect-metadata";
 import { Module, type INestApplication } from "@nestjs/common";
-import { NestFactory } from "@nestjs/core";
+import { NestFactory, Reflector } from "@nestjs/core";
 import * as jwt from "jsonwebtoken";
 import { SubscriptionsController } from "../src/modules/subscriptions/subscriptions.controller";
 import { SubscriptionsService } from "../src/modules/subscriptions/subscriptions.service";
 import type { BillingCycle, SubscriptionPlan, SubscriptionStatus } from "@prisma/client";
 import { JwtAuthGuard, RolesGuard } from "../src/modules/auth/auth.guard";
+import { PrismaService } from "../src/prisma/prisma.service";
 import { BillingFake, createPayWayHarness } from "./common/billing-fake";
 
 const periodStart = new Date("2026-09-01T00:00:00.000Z");
 const periodEnd = new Date("2026-10-01T00:00:00.000Z");
 
 const fake = new BillingFake();
+const fakePrisma = {
+  ...fake.asPrismaService(),
+  user: {
+    findUnique: async ({ where }: { where: { id: string } }) => {
+      const parts = where.id.split(":");
+      if (parts[0] === "user" && parts.length >= 4) {
+        const [, role, org, email] = parts;
+        return {
+          id: where.id,
+          email,
+          role: role.toUpperCase() as "ADMIN" | "ORGANIZATION" | "INTERVIEWER" | "CANDIDATE",
+          organizationId: org === "none" ? null : org,
+          isSuspended: false,
+          organization: { isSuspended: false },
+        };
+      }
+      return {
+        id: where.id,
+        email: "test@example.invalid",
+        role: "ORGANIZATION" as const,
+        organizationId: "org-a",
+        isSuspended: false,
+        organization: { isSuspended: false },
+      };
+    },
+  },
+};
+
 const service = new SubscriptionsService(fake.asPrismaService(), createPayWayHarness().gateway, () => fake.now);
 const findSubscription = jest.spyOn(fake.client.subscription, "findUnique");
 
 @Module({
   controllers: [SubscriptionsController],
-  providers: [JwtAuthGuard, RolesGuard, { provide: SubscriptionsService, useValue: service }],
+  providers: [
+    Reflector,
+    JwtAuthGuard,
+    RolesGuard,
+    { provide: PrismaService, useValue: fakePrisma },
+    { provide: SubscriptionsService, useValue: service },
+  ],
 })
 class TestModule {}
 
@@ -44,8 +79,13 @@ beforeEach(() => {
 });
 
 function request(role = "interviewer", organizationId: string | null = "org-a", query = "") {
-  const token = jwt.sign({ sub: "test-user", email: "test@example.invalid", role,
-    ...(organizationId ? { organizationId } : {}), purpose: "session" }, process.env.JWT_SECRET!);
+  const token = jwt.sign({
+    sub: `user:${role}:${organizationId ?? "none"}:test@example.invalid`,
+    email: "test@example.invalid",
+    role,
+    ...(organizationId ? { organizationId } : {}),
+    purpose: "session",
+  }, process.env.JWT_SECRET!);
   return fetch(`${baseUrl}/api/subscriptions/current${query}`, { headers: { Authorization: `Bearer ${token}` } });
 }
 function seed(plan: SubscriptionPlan = "PRO", status: SubscriptionStatus = "ACTIVE", billingCycle: BillingCycle = "MONTHLY") {

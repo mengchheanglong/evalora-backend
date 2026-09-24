@@ -18,7 +18,8 @@
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
     "prisma:format": "prisma format",
-    "seed:prebuilt": "tsx scripts/seed-prebuilt-templates.ts"
+    "seed:prebuilt": "tsx scripts/seed-prebuilt-templates.ts",
+    "admin:grant": "tsx scripts/grant-admin.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

@@ -48,10 +48,11 @@ import { createEmailServiceFromEnv, EmailService } from "./modules/email/email.s
 import { PrismaService } from "./prisma/prisma.service";
 import { PrismaModule } from "./prisma/prisma.module";
 import { LiveKitService } from "./modules/livekit/livekit.service";
+import { AdminModule } from "./modules/admin/admin.module";
 import { CachingModule, CacheService } from "./common/caching";
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, RealtimeModule, CodeModule, CachingModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, RealtimeModule, CodeModule, AdminModule, CachingModule],
   controllers: [
     AppController,
     SubscriptionsController,

@@ -4,6 +4,7 @@ import { OAuth2Client } from "google-auth-library";
 import * as jwt from "jsonwebtoken";
 import { randomBytes } from "node:crypto";
 import type { UserRole } from "../../domain/evalora.types";
+import { ACCOUNT_SUSPENDED_MESSAGE, WORKSPACE_SUSPENDED_MESSAGE } from "./account-status";
 import { TOKEN_PURPOSES } from "./auth.guard";
 import { assertPasswordPolicy, PASSWORD_MAX_LENGTH } from "./password-policy";
 
@@ -18,6 +19,9 @@ export interface AuthUserRecord {
   profilePhoto?: string;
   role: UserRole;
   organizationId?: string;
+  /** Platform-level suspension flags, read from the database on every lookup. */
+  isSuspended?: boolean;
+  workspaceSuspended?: boolean;
 }
 
 export interface AuthUserRepository {
@@ -97,11 +101,15 @@ interface PrismaUserRow {
   profilePhoto?: string | null;
   role: PrismaRole;
   organizationId?: string | null;
+  isSuspended: boolean;
+  organization?: { isSuspended: boolean } | null;
 }
+
+type UserSelect = typeof USER_SELECT;
 
 interface PrismaUserClient {
   user: {
-    findUnique(args: { where: { email: string } | { id: string }; select: Record<keyof PrismaUserRow, true> }): Promise<PrismaUserRow | null>;
+    findUnique(args: { where: { email: string } | { id: string }; select: UserSelect }): Promise<PrismaUserRow | null>;
     create(args: {
       data:
         | {
@@ -122,12 +130,12 @@ interface PrismaUserClient {
             organizationId?: never;
             organization: { create: { name: string } };
           };
-      select: Record<keyof PrismaUserRow, true>;
+      select: UserSelect;
     }): Promise<PrismaUserRow>;
     update(args: {
       where: { id: string };
       data: { organizationId?: string; passwordHash?: string; name?: string; profilePhoto?: string | null; emailVerified?: boolean };
-      select: Record<keyof PrismaUserRow, true>;
+      select: UserSelect;
     }): Promise<PrismaUserRow>;
   };
   organization: {
@@ -162,7 +170,7 @@ const PASSWORD_RESET_GENERIC_MESSAGE =
 const EMAIL_NOT_CONFIGURED_REASON = "Email is not configured. Share the reset link manually.";
 const VERIFICATION_EMAIL_NOT_CONFIGURED_REASON = "Email is not configured. Configure Gmail SMTP or Resend, then try again.";
 
-const USER_SELECT: Record<keyof PrismaUserRow, true> = {
+const USER_SELECT = {
   id: true,
   name: true,
   email: true,
@@ -171,7 +179,9 @@ const USER_SELECT: Record<keyof PrismaUserRow, true> = {
   profilePhoto: true,
   role: true,
   organizationId: true,
-};
+  isSuspended: true,
+  organization: { select: { isSuspended: true } },
+} as const;
 
 const SALT_ROUNDS = 12;
 const DEFAULT_JWT_SECRET = "evalora-development-secret-change-me";
@@ -397,6 +407,7 @@ export class AuthService {
     if (!this.users.findById) throw new Error("User lookup is unavailable.");
     const user = await this.users.findById(id);
     if (!user || user.role === "candidate") throw new Error("User account is unavailable.");
+    assertNotSuspended(user);
     return stripPasswordHash(user);
   }
 
@@ -433,6 +444,7 @@ export class AuthService {
     if (user.role === "candidate") {
       throw new Error("Candidates access assessments through an invitation link or access code.");
     }
+    assertNotSuspended(user);
     if (!user.emailVerified) {
       throw new EmailVerificationRequiredError();
     }
@@ -467,6 +479,7 @@ export class AuthService {
       if (user.role === "candidate") {
         throw new Error("This email is registered as a candidate invitation. Use a different Google account for workspace access.");
       }
+      assertNotSuspended(user);
       if (!user.emailVerified) {
         if (!this.users.markEmailVerified) throw new Error("Email verification is unavailable.");
         user = await this.users.markEmailVerified(user.id);
@@ -673,6 +686,18 @@ export class AuthService {
   }
 }
 
+/**
+ * Raised when a suspended account (or a member of a suspended workspace) tries
+ * to sign in or refresh its session. Distinct from a bad-credential failure so
+ * the controller can answer 403 with the real reason instead of a generic 401.
+ */
+export class AccountSuspendedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AccountSuspendedError";
+  }
+}
+
 export class EmailVerificationRequiredError extends Error {
   constructor() {
     super("Verify your email before signing in.");
@@ -753,6 +778,13 @@ function resolvePublicRegistrationRole(role: UserRole | undefined): UserRole {
   throw new Error("Candidates access assessments through invitation links or access codes, not platform registration.");
 }
 
+function assertNotSuspended(user: AuthUserRecord): void {
+  if (user.isSuspended) throw new AccountSuspendedError(ACCOUNT_SUSPENDED_MESSAGE);
+  // Platform admins stay able to sign in when their own workspace is suspended,
+  // otherwise nobody could reverse the suspension.
+  if (user.workspaceSuspended && user.role !== "admin") throw new AccountSuspendedError(WORKSPACE_SUSPENDED_MESSAGE);
+}
+
 function stripPasswordHash(user: AuthUserRecord): Omit<AuthUserRecord, "passwordHash"> {
   return {
     id: user.id,
@@ -792,6 +824,8 @@ function toAuthUserRecord(user: PrismaUserRow): AuthUserRecord {
     ...(user.profilePhoto ? { profilePhoto: user.profilePhoto } : {}),
     role: fromPrismaRole(user.role),
     organizationId: user.organizationId ?? undefined,
+    isSuspended: user.isSuspended,
+    workspaceSuspended: user.organization?.isSuspended ?? false,
   };
 }
 
