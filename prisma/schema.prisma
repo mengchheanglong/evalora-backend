@@ -355,6 +355,7 @@ model InterviewSession {
   report               CandidateReport?
   reviewerNotes        ReviewerNote[]
   interviewerFollowUps InterviewerFollowUp[]
+  detectionEnabled    Boolean            @default(true) @map("detection_enabled")
   warningCount         Int                   @default(0) @map("warning_count")
   /// Two-strike integrity policy: the first counted violation warns, the second ends the session.
   warningLimit         Int                   @default(2) @map("warning_limit")

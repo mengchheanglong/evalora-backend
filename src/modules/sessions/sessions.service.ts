@@ -976,27 +976,35 @@ export class SessionsService {
   }
 
   async updateIntegrityPolicy(id: string, detectionEnabled: boolean, access: AccessContext): Promise<{ sessionId: string; detectionEnabled: boolean }> {
-    const current = await this.getSession(id, access);
-    if (!current) throw forbiddenResourceError("Session");
-
-    const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
-    const updated = await update({
-      where: { id: current.id },
-      data: { detectionEnabled },
-      select: { id: true, detectionEnabled: true, updatedAt: true },
-    }) as { id: string; detectionEnabled: boolean; updatedAt?: Date };
-
     try {
-      this.events?.emitToSession(updated.id, INTERVIEW_EVENTS.integrityPolicyUpdated, {
-        sessionId: updated.id,
-        detectionEnabled: updated.detectionEnabled,
-        updatedAt: toIso(updated.updatedAt) ?? this.now().toISOString(),
-      });
-    } catch {
-      // The persisted policy is authoritative; clients recover it on rejoin.
-    }
+      const current = await this.getSession(id, access);
+      if (!current) throw forbiddenResourceError("Session");
 
-    return { sessionId: updated.id, detectionEnabled: updated.detectionEnabled };
+      const update = requireMethod(this.prisma.interviewSession.update, "interviewSession.update");
+      const updated = await update({
+        where: { id: current.id },
+        data: { detectionEnabled },
+        select: { id: true, detectionEnabled: true, updatedAt: true },
+      }) as { id: string; detectionEnabled: boolean; updatedAt?: Date };
+
+      try {
+        this.events?.emitToSession(updated.id, INTERVIEW_EVENTS.integrityPolicyUpdated, {
+          sessionId: updated.id,
+          detectionEnabled: updated.detectionEnabled,
+          updatedAt: toIso(updated.updatedAt) ?? this.now().toISOString(),
+        });
+      } catch {
+        // The persisted policy is authoritative; clients recover it on rejoin.
+      }
+
+      return { sessionId: updated.id, detectionEnabled: updated.detectionEnabled };
+    } catch (error) {
+      // Surface the exact Prisma/underlying error in the backend terminal
+      // (e.g. client/schema drift causing "Unknown argument") instead of
+      // failing silently as an opaque 500.
+      console.error("[sessions.service] updateIntegrityPolicy failed:", error);
+      throw error;
+    }
   }
 
   private async resolveCandidateId(input: CreateSessionInput, organizationId: string | undefined, access?: AccessContext): Promise<string> {
