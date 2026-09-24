@@ -1,3 +1,4 @@
+process.env.NODE_ENV = "production"; // Rate-limit tests exercise the limiter itself; opt out of the dev bypass.
 import "reflect-metadata";
 import { test } from "node:test";
 import { strict as assert } from "node:assert";

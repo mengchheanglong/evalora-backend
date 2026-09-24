@@ -1,3 +1,4 @@
+process.env.NODE_ENV = "production"; // Rate-limit tests exercise the limiter itself; opt out of the dev bypass.
 import { HttpException, type ExecutionContext } from "@nestjs/common";
 import { AuthRateLimitGuard } from "../src/modules/auth/auth-rate-limit.guard";
 

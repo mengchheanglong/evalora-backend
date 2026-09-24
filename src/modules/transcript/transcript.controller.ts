@@ -1,6 +1,7 @@
 import { Controller, Get, Inject, Param, Req, UseGuards } from "@nestjs/common";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
+import { StaffPollingRateLimitGuard } from "../../common/rate-limiting/polling-rate-limit.guard";
 import { TranscriptService } from "./transcript.service";
 
 /**
@@ -14,6 +15,7 @@ export class TranscriptController {
 
   @Get(":sessionId/transcript")
   @Roles("admin", "organization", "interviewer")
+  @UseGuards(StaffPollingRateLimitGuard)
   getTranscript(@Param("sessionId") sessionId: string, @Req() request: AuthenticatedRequest) {
     return this.service.getTranscript(sessionId, toAccessContext(request.user));
   }

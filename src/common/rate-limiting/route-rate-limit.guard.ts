@@ -7,6 +7,7 @@ import type { Request, Response } from "express";
 import { resolveClientIp } from "./client-ip.util";
 import { SlidingWindowRateLimitStore, type RateLimitStore } from "./rate-limit-store";
 import { applyRateLimitHeaders, createRateLimitException } from "./headers.util";
+import { shouldBypassRateLimit, warnRateLimitHit } from "./dev-bypass.util";
 
 export interface RouteRateLimitConfig {
   windowMs: number;
@@ -44,6 +45,12 @@ export class BaseRouteRateLimitGuard implements CanActivate {
       return true;
     }
 
+    // Development bypass: skip entirely when NODE_ENV !== "production";
+    // loopback clients are always exempt (even in production).
+    if (shouldBypassRateLimit(request)) {
+      return true;
+    }
+
     const response = typeof http.getResponse === "function" ? http.getResponse<Response>() : undefined;
 
     const key = this.resolveKey(request);
@@ -53,6 +60,7 @@ export class BaseRouteRateLimitGuard implements CanActivate {
     applyRateLimitHeaders(response, result);
 
     if (!result.allowed) {
+      warnRateLimitHit(`route:${this.constructor.name}`, key, result.retryAfterSeconds);
       throw createRateLimitException(this.message, result);
     }
 

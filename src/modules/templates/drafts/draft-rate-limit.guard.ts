@@ -4,6 +4,7 @@ import type { AuthenticatedRequest } from "../../auth/auth.guard";
 import { SlidingWindowRateLimitStore } from "../../../common/rate-limiting/rate-limit-store";
 import { resolveClientIp } from "../../../common/rate-limiting/client-ip.util";
 import { applyRateLimitHeaders, createRateLimitException } from "../../../common/rate-limiting/headers.util";
+import { shouldBypassRateLimit, warnRateLimitHit } from "../../../common/rate-limiting/dev-bypass.util";
 
 /**
  * Per-user sliding-window limiter for draft generation.
@@ -31,6 +32,12 @@ export class DraftRateLimitGuard implements CanActivate {
       return true;
     }
 
+    // Development bypass: skip entirely when NODE_ENV !== "production";
+    // loopback clients are always exempt (even in production).
+    if (shouldBypassRateLimit(request)) {
+      return true;
+    }
+
     const response = typeof http.getResponse === "function" ? http.getResponse<Response>() : undefined;
 
     // Falls back to normalized source address only if the guard is ever mounted ahead of
@@ -42,6 +49,7 @@ export class DraftRateLimitGuard implements CanActivate {
     applyRateLimitHeaders(response, result);
 
     if (!result.allowed) {
+      warnRateLimitHit("draft", key, result.retryAfterSeconds);
       throw createRateLimitException(this.limitMessage, result);
     }
 

@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import { SlidingWindowRateLimitStore } from "../../common/rate-limiting/rate-limit-store";
 import { resolveClientIp } from "../../common/rate-limiting/client-ip.util";
 import { applyRateLimitHeaders, createRateLimitException } from "../../common/rate-limiting/headers.util";
+import { shouldBypassRateLimit, warnRateLimitHit } from "../../common/rate-limiting/dev-bypass.util";
 
 /**
  * Sliding-window rate limiter for candidate access code endpoints.
@@ -29,6 +30,12 @@ export class CandidateAccessRateLimitGuard implements CanActivate {
       return true;
     }
 
+    // Development bypass: skip entirely when NODE_ENV !== "production";
+    // loopback clients are always exempt (even in production).
+    if (shouldBypassRateLimit(request)) {
+      return true;
+    }
+
     const response = typeof http.getResponse === "function" ? http.getResponse<Response>() : undefined;
     const key = resolveClientIp(request);
 
@@ -37,6 +44,7 @@ export class CandidateAccessRateLimitGuard implements CanActivate {
     applyRateLimitHeaders(response, result);
 
     if (!result.allowed) {
+      warnRateLimitHit("candidate-access", key, result.retryAfterSeconds);
       throw createRateLimitException("Too many candidate access requests. Please wait and try again", result);
     }
 

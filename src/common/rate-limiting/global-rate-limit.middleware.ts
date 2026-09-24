@@ -8,6 +8,7 @@ import { resolveClientIp } from "./client-ip.util";
 import { InMemoryRateLimitStore, type RateLimitStore } from "./rate-limit-store";
 import type { RateLimitOptions } from "./rate-limit.types";
 import { applyRateLimitHeaders, buildRateLimitPayload } from "./headers.util";
+import { shouldBypassRateLimit, warnRateLimitHit } from "./dev-bypass.util";
 
 const DEFAULT_WINDOW_MS = 60_000; // 1 minute
 const DEFAULT_MAX_REQUESTS = 100; // 100 requests / minute per IP
@@ -34,6 +35,12 @@ export class GlobalRateLimitMiddleware implements NestMiddleware {
       return next();
     }
 
+    // 1b. Development bypass: no rate limiting when NODE_ENV !== "production",
+    // and loopback clients are always exempt (even in production).
+    if (shouldBypassRateLimit(req)) {
+      return next();
+    }
+
     // 2. Resolve client key (IP address)
     const clientIp = resolveClientIp(req);
 
@@ -45,6 +52,7 @@ export class GlobalRateLimitMiddleware implements NestMiddleware {
 
     // 5. Handle exceeded threshold with informative 429 payload and Retry-After
     if (!result.allowed) {
+      warnRateLimitHit("global", clientIp, result.retryAfterSeconds);
       res.status(HttpStatus.TOO_MANY_REQUESTS).json(buildRateLimitPayload(this.message, result));
       return;
     }

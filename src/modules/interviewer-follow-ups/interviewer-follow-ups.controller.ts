@@ -3,6 +3,7 @@ import { ValidateDto } from "../../common/pipes/validate-dto.pipe";
 import { toAccessContext } from "../auth/access-control";
 import { type AuthenticatedRequest, JwtAuthGuard, Roles, RolesGuard } from "../auth/auth.guard";
 import { CandidateAccessRateLimitGuard } from "../sessions/access-rate-limit.guard";
+import { StaffPollingRateLimitGuard } from "../../common/rate-limiting/polling-rate-limit.guard";
 import { AnswerInterviewerFollowUpDto, SendInterviewerFollowUpDto } from "./dto/interviewer-follow-up.dto";
 import { InterviewerFollowUpsService } from "./interviewer-follow-ups.service";
 
@@ -13,12 +14,14 @@ export class InterviewerFollowUpsController {
 
   @Get("session/:sessionId")
   @Roles("admin", "organization", "interviewer")
+  @UseGuards(StaffPollingRateLimitGuard)
   list(@Param("sessionId") sessionId: string, @Req() request: AuthenticatedRequest) {
     return this.service.listForSession(sessionId, toAccessContext(request.user));
   }
 
   @Post("session/:sessionId")
   @Roles("admin", "organization", "interviewer")
+  @UseGuards(StaffPollingRateLimitGuard)
   send(
     @Param("sessionId") sessionId: string,
     @Body(new ValidateDto(SendInterviewerFollowUpDto)) body: SendInterviewerFollowUpDto,

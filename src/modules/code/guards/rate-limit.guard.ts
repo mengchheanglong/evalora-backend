@@ -7,6 +7,7 @@ import type { Request, Response } from "express";
 import { SlidingWindowRateLimitStore } from "../../../common/rate-limiting/rate-limit-store";
 import { resolveClientIp } from "../../../common/rate-limiting/client-ip.util";
 import { applyRateLimitHeaders, createRateLimitException } from "../../../common/rate-limiting/headers.util";
+import { shouldBypassRateLimit, warnRateLimitHit } from "../../../common/rate-limiting/dev-bypass.util";
 
 /**
  * Sliding-window rate limiter for the code-execution endpoints.
@@ -36,6 +37,12 @@ export class CodeRateLimitGuard implements CanActivate {
       return true;
     }
 
+    // Development bypass: skip entirely when NODE_ENV !== "production";
+    // loopback clients are always exempt (even in production).
+    if (shouldBypassRateLimit(request)) {
+      return true;
+    }
+
     const response = typeof http.getResponse === "function" ? http.getResponse<Response>() : undefined;
     const key = this.resolveClientKey(request);
 
@@ -44,6 +51,7 @@ export class CodeRateLimitGuard implements CanActivate {
     applyRateLimitHeaders(response, result);
 
     if (!result.allowed) {
+      warnRateLimitHit("code", key, result.retryAfterSeconds);
       throw createRateLimitException("Too many code execution requests. Please slow down and try again shortly", result);
     }
 

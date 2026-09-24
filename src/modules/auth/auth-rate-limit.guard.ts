@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import { SlidingWindowRateLimitStore } from "../../common/rate-limiting/rate-limit-store";
 import { resolveClientIp } from "../../common/rate-limiting/client-ip.util";
 import { applyRateLimitHeaders, createRateLimitException } from "../../common/rate-limiting/headers.util";
+import { shouldBypassRateLimit, warnRateLimitHit } from "../../common/rate-limiting/dev-bypass.util";
 
 /**
  * Per-IP sliding-window limiter for the unauthenticated auth endpoints
@@ -36,6 +37,12 @@ export class AuthRateLimitGuard implements CanActivate {
       return true;
     }
 
+    // Development bypass: skip entirely when NODE_ENV !== "production";
+    // loopback clients are always exempt (even in production).
+    if (shouldBypassRateLimit(request)) {
+      return true;
+    }
+
     const response = typeof http.getResponse === "function" ? http.getResponse<Response>() : undefined;
     const key = resolveClientIp(request);
 
@@ -44,6 +51,7 @@ export class AuthRateLimitGuard implements CanActivate {
     applyRateLimitHeaders(response, result);
 
     if (!result.allowed) {
+      warnRateLimitHit("auth", key, result.retryAfterSeconds);
       throw createRateLimitException("Too many authentication attempts. Please wait a moment and try again", result);
     }
 
