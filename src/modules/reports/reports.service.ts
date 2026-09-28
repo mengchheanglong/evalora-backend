@@ -321,17 +321,25 @@ export class ReportsService {
 
     // Verify the report exists and the caller has access
     const findReport = requireMethod(this.prisma?.candidateReport?.findFirst, "candidateReport.findFirst");
-    const report = await findReport({
+    const report = (await findReport({
       where: { sessionId },
-    }) as { id?: unknown } | null;
+      include: {
+        session: { select: { organizationId: true } },
+      },
+    })) as { session?: { organizationId?: string } | null } | null;
     if (!report) throw new NotFoundException("Report not found for this session.");
 
     // Org-scoping: verify the session belongs to the caller's organization
     await this.assertReportAccess(sessionId, access);
 
+    const sessionOrgId = report.session?.organizationId;
+    if (access.role !== "admin" && sessionOrgId && sessionOrgId !== access.organizationId) {
+      throw forbiddenResourceError("Recruiter verdict");
+    }
+
     // Update the verdict fields
     const updateReport = requireMethod(this.prisma?.candidateReport?.update, "candidateReport.update");
-    const updatedReport = await updateReport({
+    const updatedReport = (await updateReport({
       where: { sessionId },
       data: {
         recruiterVerdict: dto.verdict,
@@ -340,7 +348,10 @@ export class ReportsService {
         decidedAt: new Date(),
         decidedById: access.userId,
       },
-    }) as PersistedCandidateReportRow;
+      include: {
+        decidedBy: { select: { id: true, name: true, email: true } },
+      },
+    })) as PersistedCandidateReportRow & { decidedBy?: { id: string; name: string; email: string } | null };
 
     // If notes are provided, create a ReviewerNote
     let savedNote: ReviewerNoteRow | undefined;
@@ -356,8 +367,13 @@ export class ReportsService {
       })) as ReviewerNoteRow;
     }
 
-    // Return the updated report and notes
-    const notes = await this.listReviewerNotes(sessionId, access);
+    const decidedBy = updatedReport?.decidedBy && typeof updatedReport.decidedBy === "object"
+      ? {
+          id: stringValue(updatedReport.decidedBy.id, access.userId),
+          name: stringValue(updatedReport.decidedBy.name, "Reviewer"),
+          email: stringValue(updatedReport.decidedBy.email, ""),
+        }
+      : undefined;
 
     return {
       ...mapPersistedReport(updatedReport),
@@ -366,7 +382,8 @@ export class ReportsService {
       recruiterScore: dto.score ?? null,
       decidedAt: new Date().toISOString(),
       decidedById: access.userId,
-      notes: savedNote ? [mapReviewerNote(savedNote), ...notes] : notes,
+      decidedBy,
+      notes: savedNote ? [mapReviewerNote(savedNote)] : [],
     };
   }
 
