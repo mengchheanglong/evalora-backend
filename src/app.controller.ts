@@ -1,8 +1,11 @@
-import { Controller, Get } from "@nestjs/common";
+import { Controller, Get, Inject, Optional } from "@nestjs/common";
 import { getSafeRuntimeConfig } from "./config/runtime.config";
+import { CacheService } from "./common/caching";
 
 @Controller()
 export class AppController {
+  constructor(@Optional() @Inject(CacheService) private readonly cacheService?: CacheService) {}
+
   @Get()
   getRoot() {
     return {
@@ -33,6 +36,7 @@ export class AppController {
       databaseProvider: config.database.provider,
       databaseConfigured: !["not_configured", "invalid"].includes(config.database.host),
       databaseSslRequired: config.database.sslRequired,
+      cacheProvider: this.cacheService?.providerType ?? "memory",
     };
   }
 }

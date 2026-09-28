@@ -19,6 +19,13 @@ export class CacheService {
   }
 
   /**
+   * Returns the underlying active cache engine ('redis' or 'memory').
+   */
+  get providerType(): "redis" | "memory" {
+    return this.client.constructor.name === "RedisCacheClient" ? "redis" : "memory";
+  }
+
+  /**
    * Retrieves an item from cache. Returns null if missing or expired.
    */
   async get<T>(key: string): Promise<T | null> {

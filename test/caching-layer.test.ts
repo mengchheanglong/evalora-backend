@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import {
   InMemoryCacheClient,
+  RedisCacheClient,
   CacheService,
   CacheNamespace,
   buildCacheKey,
@@ -223,3 +224,17 @@ test("CacheStats: accurate tracking of hits, misses, evictions, and hit ratio", 
   assert.equal(stats.sets, 1);
   assert.equal(stats.hitRatio, 0.5); // 1 hit / 2 requests = 0.5
 });
+
+test("CacheService: providerType accurately reports active cache engine", async () => {
+  const memoryService = new CacheService(new InMemoryCacheClient());
+  assert.equal(memoryService.providerType, "memory");
+
+  const redisClient = new RedisCacheClient({
+    url: "redis://127.0.0.1:6379",
+    keyPrefix: "evalora:test:",
+  });
+  const redisService = new CacheService(redisClient);
+  assert.equal(redisService.providerType, "redis");
+  await redisClient.disconnect();
+});
+
