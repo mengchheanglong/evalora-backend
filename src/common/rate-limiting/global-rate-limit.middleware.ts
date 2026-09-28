@@ -1,6 +1,7 @@
 import {
   HttpStatus,
   Injectable,
+  Optional,
   type NestMiddleware,
 } from "@nestjs/common";
 import type { Request, Response, NextFunction } from "express";
@@ -22,7 +23,10 @@ export class GlobalRateLimitMiddleware implements NestMiddleware {
   private readonly maxRequests: number;
   private readonly message: string;
 
-  constructor(options?: Partial<RateLimitOptions>, store?: RateLimitStore) {
+  constructor(
+    @Optional() options?: Partial<RateLimitOptions>,
+    @Optional() store?: RateLimitStore,
+  ) {
     this.store = store ?? new InMemoryRateLimitStore();
     this.windowMs = options?.windowMs ?? readPositiveInt(process.env.GLOBAL_RATE_LIMIT_WINDOW_MS, DEFAULT_WINDOW_MS);
     this.maxRequests = options?.maxRequests ?? readPositiveInt(process.env.GLOBAL_RATE_LIMIT_MAX, DEFAULT_MAX_REQUESTS);

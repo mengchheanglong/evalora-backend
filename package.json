@@ -18,6 +18,7 @@
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
     "prisma:format": "prisma format",
+    "prisma:migrate:deploy": "prisma migrate deploy",
     "seed:prebuilt": "tsx scripts/seed-prebuilt-templates.ts",
     "admin:grant": "tsx scripts/grant-admin.ts"
   },
@@ -39,6 +40,7 @@
     "multer": "^2.2.0",
     "nodemailer": "^9.0.3",
     "pdf-parse": "^2.4.5",
+    "prisma": "^6.1.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "socket.io": "^4.8.3"
@@ -54,7 +56,6 @@
     "@types/nodemailer": "^8.0.1",
     "eslint": "^9.17.0",
     "jest": "^30.4.2",
-    "prisma": "^6.1.0",
     "ts-jest": "^29.4.11",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
