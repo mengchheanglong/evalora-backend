@@ -35,7 +35,6 @@ services:
       --maxmemory 256mb
       --maxmemory-policy allkeys-lru
     ports:
-      # Bound to localhost so it is not exposed publicly on your Oracle VM
       - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
@@ -51,23 +50,5 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Optional Caddy reverse proxy for automated HTTPS / Let's Encrypt SSL
-  # Uncomment if using on your Oracle VM with ports 80/443 exposed
-  # caddy:
-  #   image: caddy:2-alpine
-  #   container_name: evalora-caddy
-  #   restart: unless-stopped
-  #   ports:
-  #     - "80:80"
-  #     - "443:443"
-  #   volumes:
-  #     - ./Caddyfile:/etc/caddy/Caddyfile:ro
-  #     - caddy_data:/data
-  #     - caddy_config:/config
-  #   depends_on:
-  #     - backend
-
 volumes:
   redis_data:
-#   caddy_data:
-#   caddy_config:

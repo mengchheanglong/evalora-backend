@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: evalora-backend
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: pnpm install && pnpm build
+    startCommand: pnpm start:prod
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: FRONTEND_URL
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: AI_PROVIDER
+        value: deepseek
+      - key: DEEPSEEK_MODEL
+        value: deepseek-v4-flash
