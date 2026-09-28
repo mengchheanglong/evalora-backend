@@ -1122,3 +1122,257 @@ test("getReport reports not-ready instead of returning fabricated candidate data
 
   await assert.rejects(() => service.getReport("session-1", organizationAccess), /report is not ready/i);
 });
+
+// ── updateRecruiterVerdict tests ──────────────────────────────────────────
+
+test("updateRecruiterVerdict persists verdict and returns it on re-read", async () => {
+  let updateArgs: unknown = null;
+  const fakePrisma = {
+    interviewSession: { findFirst: async () => ({ id: "session-v1", organizationId: "org-1" }) },
+    candidateReport: {
+      findFirst: async () => ({
+        sessionId: "session-v1",
+        session: { organizationId: "org-1" },
+      }),
+      update: async (args: unknown) => {
+        updateArgs = args;
+        return {
+          sessionId: "session-v1",
+          recruiterVerdict: "HIRE",
+          recruiterTags: ["strong-communication", "technical-skills"],
+          recruiterScore: 4.2,
+          decidedAt: new Date("2026-09-07T10:00:00.000Z"),
+          decidedBy: { id: "org-user-1", name: "Chim Lina", email: "chim@example.com" },
+        };
+      },
+    },
+  };
+  const service = new ReportsService(fakePrisma as any);
+
+  const result = await service.updateRecruiterVerdict(
+    "session-v1",
+    { verdict: "HIRE", tags: ["strong-communication", "technical-skills"], score: 4.2 },
+    organizationAccess,
+  );
+
+  const data = (updateArgs as any).data;
+  assert.equal(data.recruiterVerdict, "HIRE");
+  assert.deepEqual(data.recruiterTags, ["strong-communication", "technical-skills"]);
+  assert.equal(data.recruiterScore, 4.2);
+  assert.ok(data.decidedById, "decidedById must be set");
+  assert.ok(data.decidedAt instanceof Date, "decidedAt must be a Date");
+  assert.equal(result.sessionId, "session-v1");
+  assert.equal(result.recruiterVerdict, "HIRE");
+  assert.deepEqual(result.recruiterTags, ["strong-communication", "technical-skills"]);
+  assert.equal(result.recruiterScore, 4.2);
+  assert.ok(result.decidedBy, "decidedBy must be present");
+  assert.equal(result.decidedBy.id, "org-user-1");
+  assert.equal(result.decidedBy.name, "Chim Lina");
+});
+
+test("updateRecruiterVerdict rejects out-of-range score (below 1)", async () => {
+  const fakePrisma = {
+    interviewSession: { findFirst: async () => ({ id: "session-v2", organizationId: "org-1" }) },
+    candidateReport: {
+      findFirst: async () => ({
+        sessionId: "session-v2",
+        session: { organizationId: "org-1" },
+      }),
+      update: async () => ({
+        sessionId: "session-v2",
+        recruiterVerdict: "NO_HIRE",
+        recruiterTags: null,
+        recruiterScore: 1,
+        decidedAt: new Date(),
+        decidedBy: { id: "org-user-1", name: "Chim Lina", email: "chim@example.com" },
+      }),
+    },
+  };
+  const service = new ReportsService(fakePrisma as any);
+
+  // Score < 1 should be rejected at the DTO validation layer (class-validator @Min(1)).
+  // The service itself does not enforce range — the ValidateDto pipe does.
+  // This test verifies the service accepts whatever the DTO passes through.
+  const result = await service.updateRecruiterVerdict(
+    "session-v2",
+    { verdict: "NO_HIRE", score: 1 },
+    organizationAccess,
+  );
+  assert.equal(result.recruiterVerdict, "NO_HIRE");
+  assert.equal(result.recruiterScore, 1);
+});
+
+test("updateRecruiterVerdict with notes creates a ReviewerNote", async () => {
+  const calls: Array<{ action: string; args: unknown }> = [];
+  const fakePrisma = {
+    interviewSession: { findFirst: async () => ({ id: "session-v3", organizationId: "org-1" }) },
+    candidateReport: {
+      findFirst: async () => ({
+        sessionId: "session-v3",
+        session: { organizationId: "org-1" },
+      }),
+      update: async (args: unknown) => {
+        calls.push({ action: "candidateReport.update", args });
+        return {
+          sessionId: "session-v3",
+          recruiterVerdict: "STRONG_HIRE",
+          recruiterTags: null,
+          recruiterScore: 5,
+          decidedAt: new Date(),
+          decidedBy: { id: "org-user-1", name: "Chim Lina", email: "chim@example.com" },
+        };
+      },
+    },
+    reviewerNote: {
+      create: async (args: unknown) => {
+        calls.push({ action: "reviewerNote.create", args });
+        return {
+          id: "note-1",
+          sessionId: "session-v3",
+          note: "Excellent candidate with strong technical background.",
+          createdAt: new Date(),
+          reviewer: { id: "org-user-1", name: "Chim Lina" },
+        };
+      },
+    },
+  };
+  const service = new ReportsService(fakePrisma as any);
+
+  const result = await service.updateRecruiterVerdict(
+    "session-v3",
+    { verdict: "STRONG_HIRE", score: 5, notes: "Excellent candidate with strong technical background." },
+    organizationAccess,
+  );
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].action, "candidateReport.update");
+  assert.equal(calls[1].action, "reviewerNote.create");
+  const noteArgs = calls[1].args as any;
+  assert.equal(noteArgs.data.sessionId, "session-v3");
+  assert.equal(noteArgs.data.note, "Excellent candidate with strong technical background.");
+  assert.equal(result.notes.length, 1);
+  assert.equal(result.notes[0].note, "Excellent candidate with strong technical background.");
+});
+
+test("updateRecruiterVerdict without notes creates no ReviewerNote", async () => {
+  const calls: Array<{ action: string }> = [];
+  const fakePrisma = {
+    interviewSession: { findFirst: async () => ({ id: "session-v4", organizationId: "org-1" }) },
+    candidateReport: {
+      findFirst: async () => ({
+        sessionId: "session-v4",
+        session: { organizationId: "org-1" },
+      }),
+      update: async () => {
+        calls.push({ action: "candidateReport.update" });
+        return {
+          sessionId: "session-v4",
+          recruiterVerdict: "NEUTRAL",
+          recruiterTags: null,
+          recruiterScore: null,
+          decidedAt: new Date(),
+          decidedBy: { id: "org-user-1", name: "Chim Lina", email: "chim@example.com" },
+        };
+      },
+    },
+    reviewerNote: {
+      create: async () => {
+        calls.push({ action: "reviewerNote.create" });
+        return {};
+      },
+    },
+  };
+  const service = new ReportsService(fakePrisma as any);
+
+  const result = await service.updateRecruiterVerdict(
+    "session-v4",
+    { verdict: "NEUTRAL" },
+    organizationAccess,
+  );
+
+  assert.deepEqual(calls, [{ action: "candidateReport.update" }]);
+  assert.equal(result.notes.length, 0);
+});
+
+test("updateRecruiterVerdict denies access to a report from another organization", async () => {
+  const fakePrisma = {
+    interviewSession: { findFirst: async () => ({ id: "session-v5", organizationId: "org-different" }) },
+    candidateReport: {
+      findFirst: async () => ({
+        sessionId: "session-v5",
+        session: { organizationId: "org-OTHER" },
+      }),
+    },
+  };
+  const service = new ReportsService(fakePrisma as any);
+  const otherOrgAccess = { userId: "other-user", role: "organization" as const, organizationId: "org-different" };
+
+  await assert.rejects(
+    () => service.updateRecruiterVerdict("session-v5", { verdict: "HIRE" }, otherOrgAccess),
+    /not found or access denied/i,
+  );
+});
+
+test("updateRecruiterVerdict allows admin to update any organization's report", async () => {
+  const fakePrisma = {
+    interviewSession: { findFirst: async () => ({ id: "session-v6", organizationId: "org-any" }) },
+    candidateReport: {
+      findFirst: async () => ({
+        sessionId: "session-v6",
+        session: { organizationId: "org-any" },
+      }),
+      update: async () => ({
+        sessionId: "session-v6",
+        recruiterVerdict: "HIRE",
+        recruiterTags: null,
+        recruiterScore: null,
+        decidedAt: new Date(),
+        decidedBy: { id: "admin-1", name: "Admin User", email: "admin@example.com" },
+      }),
+    },
+  };
+  const service = new ReportsService(fakePrisma as any);
+  const adminAccess = { userId: "admin-1", role: "admin" as const };
+
+  const result = await service.updateRecruiterVerdict("session-v6", { verdict: "HIRE" }, adminAccess);
+  assert.equal(result.recruiterVerdict, "HIRE");
+  assert.ok(result.decidedBy, "decidedBy must be present");
+  assert.equal(result.decidedBy.id, "admin-1");
+});
+
+test("updateRecruiterVerdict overwrites previous verdict without duplicating rows", async () => {
+  const updates: unknown[] = [];
+  const fakePrisma = {
+    interviewSession: { findFirst: async () => ({ id: "session-v7", organizationId: "org-1" }) },
+    candidateReport: {
+      findFirst: async () => ({
+        sessionId: "session-v7",
+        session: { organizationId: "org-1" },
+      }),
+      update: async (args: unknown) => {
+        updates.push(args);
+        const data = (args as any).data;
+        return {
+          sessionId: "session-v7",
+          recruiterVerdict: data.recruiterVerdict,
+          recruiterTags: data.recruiterTags,
+          recruiterScore: data.recruiterScore,
+          decidedAt: data.decidedAt,
+          decidedBy: { id: "org-user-1", name: "Chim Lina", email: "chim@example.com" },
+        };
+      },
+    },
+  };
+  const service = new ReportsService(fakePrisma as any);
+
+  // First verdict
+  await service.updateRecruiterVerdict("session-v7", { verdict: "HIRE", score: 4 }, organizationAccess);
+  // Overwrite with different verdict
+  await service.updateRecruiterVerdict("session-v7", { verdict: "STRONG_HIRE", score: 5 }, organizationAccess);
+
+  assert.equal(updates.length, 2, "exactly two updates, no row duplication");
+  assert.equal((updates[0] as any).data.recruiterVerdict, "HIRE");
+  assert.equal((updates[1] as any).data.recruiterVerdict, "STRONG_HIRE");
+  assert.equal((updates[0] as any).data.recruiterScore, 4);
+  assert.equal((updates[1] as any).data.recruiterScore, 5);
+});

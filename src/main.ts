@@ -7,6 +7,17 @@ import { PrismaExceptionFilter } from "./common/filters/prisma-exception.filter"
 import { PayloadValidationFilter } from "./common/filters/payload-validation.filter";
 import { payloadSyntaxErrorHandler } from "./common/middleware/request-validation.middleware";
 
+// ── Process-level crash guards ────────────────────────────────────────────
+// Prevent the backend from dying silently.  Log the error and keep the
+// process alive so that transient DB / network blips do not take down the
+// entire server.
+process.on("uncaughtException", (err) => {
+  console.error("[FATAL] uncaughtException — keeping process alive:", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[WARN]  unhandledRejection — keeping process alive:", reason);
+});
+
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   // Profile photos are resized in the browser before upload. Raise the JSON cap
@@ -50,9 +61,16 @@ async function bootstrap() {
   // Drain Prisma connections / in-flight work on SIGTERM/SIGINT.
   app.enableShutdownHooks();
 
-  const port = Number(process.env.PORT ?? 4000);
+  // Number('0') is 0 (falsy), which tells Node to pick a random port.
+  // Use || so that both '0' and undefined fall back to the default.
+  const port = Number(process.env.PORT) || 4000;
   const host = process.env.HOST?.trim() || "0.0.0.0";
   await app.listen(port, host);
+
+  // Heartbeat log — helps detect silent crashes in logs.
+  setInterval(() => {
+    console.log(`[heartbeat] ${new Date().toISOString()} — port ${port} alive`);
+  }, 60_000);
 }
 
 void bootstrap();
