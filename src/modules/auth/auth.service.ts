@@ -602,12 +602,17 @@ export class AuthService {
     const token = this.signEmailVerificationToken(user);
     const verificationUrl = this.emailService?.buildEmailVerificationUrl?.(token) ?? defaultEmailVerificationUrl(token);
     const delivery = this.emailService?.sendEmailVerification
-      ? await this.emailService.sendEmailVerification({
-          to: user.email,
-          userName: user.name,
-          verificationUrl,
-          expiresInLabel: "15 minutes",
-        })
+      ? await Promise.race([
+          this.emailService.sendEmailVerification({
+            to: user.email,
+            userName: user.name,
+            verificationUrl,
+            expiresInLabel: "15 minutes",
+          }),
+          new Promise<{ status: "queued"; reason: string }>((resolve) =>
+            setTimeout(() => resolve({ status: "queued", reason: "Email delivery dispatched." }), 5000),
+          ),
+        ])
       : { status: "skipped" as const, reason: VERIFICATION_EMAIL_NOT_CONFIGURED_REASON };
 
     return {

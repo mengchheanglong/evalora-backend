@@ -299,6 +299,7 @@ export class EmailService implements EmailSender {
     try {
       const response = await fetch(RESEND_API_URL, {
         method: "POST",
+        signal: AbortSignal.timeout(6000),
         headers: {
           Authorization: `Bearer ${config.apiKey}`,
           "Content-Type": "application/json",
@@ -342,6 +343,7 @@ export class EmailService implements EmailSender {
     try {
       const response = await fetch(BREVO_API_URL, {
         method: "POST",
+        signal: AbortSignal.timeout(6000),
         headers: {
           "api-key": config.apiKey,
           "Content-Type": "application/json",
@@ -421,6 +423,9 @@ export class EmailService implements EmailSender {
         user: config.user,
         pass: config.pass,
       },
+      connectionTimeout: 5000,
+      greetingTimeout: 5000,
+      socketTimeout: 5000,
     });
     return this.gmailTransporter;
   }
