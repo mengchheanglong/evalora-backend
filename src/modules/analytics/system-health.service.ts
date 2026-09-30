@@ -103,7 +103,11 @@ export class SystemHealthService {
           key: "email",
           name: "Email delivery",
           detail: "Invites, verification, and password resets",
-          configured: Boolean(process.env.RESEND_API_KEY?.trim() || process.env.SMTP_USER?.trim()),
+          configured: Boolean(
+            process.env.RESEND_API_KEY?.trim() ||
+              process.env.BREVO_API_KEY?.trim() ||
+              process.env.SMTP_USER?.trim(),
+          ),
           fallbackNote: "Links are surfaced in the UI when email is not configured.",
         }),
         this.describeProvider({

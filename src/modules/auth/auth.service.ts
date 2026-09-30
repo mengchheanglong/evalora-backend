@@ -556,7 +556,7 @@ export class AuthService {
     // Dev convenience only: in production the reset link is delivered by email and
     // must never appear in the API response — returning it there would let anyone
     // who can call this endpoint take over the account.
-    if (resetUrl && delivery.status !== "sent" && process.env.NODE_ENV !== "production") {
+    if (resetUrl && delivery.status !== "sent" && allowDevVerificationLink()) {
       result.resetUrl = resetUrl;
     }
 
@@ -618,7 +618,7 @@ export class AuthService {
         status: delivery.status,
         reason: delivery.status === "sent" || delivery.status === "queued" ? undefined : delivery.reason,
       },
-      ...(process.env.NODE_ENV !== "production" && delivery.status !== "sent" && delivery.status !== "queued"
+      ...(allowDevVerificationLink() && delivery.status !== "sent" && delivery.status !== "queued"
         ? { verificationUrl }
         : {}),
     };
@@ -724,6 +724,14 @@ function defaultAppUrl(): string {
     ?.trim()
     .replace(/\/$/, "");
   return base || "http://localhost:3010";
+}
+
+function allowDevVerificationLink(): boolean {
+  return (
+    process.env.NODE_ENV !== "production" ||
+    process.env.ALLOW_VERIFICATION_LINK === "true" ||
+    process.env.ALLOW_INSECURE_VERIFICATION_LINK === "true"
+  );
 }
 
 const NAME_MAX_LENGTH = 200;

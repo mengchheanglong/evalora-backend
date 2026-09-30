@@ -2,7 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import nodemailer, { type Transporter } from "nodemailer";
 
 export type EmailDeliveryStatus = "sent" | "skipped" | "failed" | "queued";
-export type EmailProviderName = "resend" | "gmail" | "none";
+export type EmailProviderName = "resend" | "brevo" | "gmail" | "none";
 
 export interface EmailDeliveryResult {
   status: EmailDeliveryStatus;
@@ -59,6 +59,13 @@ export type EmailRuntimeConfig =
       appUrl: string;
     }
   | {
+      provider: "brevo";
+      apiKey: string;
+      fromName: string;
+      fromEmail: string;
+      appUrl: string;
+    }
+  | {
       provider: "gmail";
       host: string;
       port: number;
@@ -70,6 +77,7 @@ export type EmailRuntimeConfig =
     };
 
 const RESEND_API_URL = "https://api.resend.com/emails";
+const BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
 const DEFAULT_RESEND_FROM = "Evalora <onboarding@resend.dev>";
 const DEFAULT_GMAIL_HOST = "smtp.gmail.com";
 const DEFAULT_GMAIL_PORT = 587;
@@ -278,6 +286,9 @@ export class EmailService implements EmailSender {
     if (this.config.provider === "gmail") {
       return this.sendViaGmail(this.config, input);
     }
+    if (this.config.provider === "brevo") {
+      return this.sendViaBrevo(this.config, input);
+    }
     return this.sendViaResend(this.config, input);
   }
 
@@ -321,6 +332,49 @@ export class EmailService implements EmailSender {
       const reason = error instanceof Error ? error.message : "Email provider unavailable.";
       this.logger.warn(`Resend send error for ${input.to}: ${reason}`);
       return { status: "failed", provider: "resend", reason };
+    }
+  }
+
+  private async sendViaBrevo(
+    config: Extract<EmailRuntimeConfig, { provider: "brevo" }>,
+    input: { to: string; subject: string; html: string; text: string },
+  ): Promise<EmailDeliveryResult> {
+    try {
+      const response = await fetch(BREVO_API_URL, {
+        method: "POST",
+        headers: {
+          "api-key": config.apiKey,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          sender: { name: config.fromName, email: config.fromEmail },
+          to: [{ email: input.to }],
+          subject: input.subject,
+          htmlContent: input.html,
+          textContent: input.text,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as { messageId?: string; message?: string; code?: string };
+
+      if (!response.ok) {
+        const raw = payload.message || payload.code || `Brevo error (${response.status})`;
+        this.logger.warn(`Failed to send email to ${input.to} via Brevo: ${raw}`);
+        return { status: "failed", provider: "brevo", reason: raw };
+      }
+
+      this.logger.log(`Email sent via Brevo to ${input.to} (${payload.messageId ?? "no-id"})`);
+      return {
+        status: "sent",
+        provider: "brevo",
+        messageId: payload.messageId,
+        reason: "Email sent via Brevo.",
+      };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "Brevo API unavailable.";
+      this.logger.warn(`Brevo send error for ${input.to}: ${reason}`);
+      return { status: "failed", provider: "brevo", reason };
     }
   }
 
@@ -387,6 +441,7 @@ export function createEmailConfigFromEnv(): EmailRuntimeConfig | null {
 
   const gmail = readGmailConfig(appUrl);
   const resend = readResendConfig(appUrl);
+  const brevo = readBrevoConfig(appUrl);
 
   if (preferred === "gmail") {
     if (!gmail) {
@@ -400,10 +455,37 @@ export function createEmailConfigFromEnv(): EmailRuntimeConfig | null {
     return resend;
   }
 
-  // auto: prefer Gmail when configured (can mail any inbox for demos), else Resend.
-  if (gmail) return gmail;
+  if (preferred === "brevo") {
+    return brevo;
+  }
+
+  // auto: prefer HTTPS APIs (Resend/Brevo) which work in any cloud/Render environment, then Gmail.
+  if (brevo) return brevo;
   if (resend) return resend;
+  if (gmail) return gmail;
   return null;
+}
+
+function readBrevoConfig(appUrl: string): EmailRuntimeConfig | null {
+  const apiKey = (process.env.BREVO_API_KEY ?? process.env.SENDINBLUE_API_KEY)?.trim();
+  if (!apiKey) return null;
+  const rawFrom = process.env.EMAIL_FROM?.trim() || "Evalora <longkaze2001@gmail.com>";
+  const sender = parseSender(rawFrom);
+  return {
+    provider: "brevo",
+    apiKey,
+    fromName: sender.name,
+    fromEmail: sender.email,
+    appUrl,
+  };
+}
+
+function parseSender(from: string): { name: string; email: string } {
+  const match = from.match(/^(.*?)\s*<([^>]+)>$/);
+  if (match) {
+    return { name: match[1]?.trim() || "Evalora", email: match[2]?.trim() || from };
+  }
+  return { name: "Evalora", email: from.trim() };
 }
 
 function readResendConfig(appUrl: string): EmailRuntimeConfig | null {
