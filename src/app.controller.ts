@@ -1,10 +1,14 @@
 import { Controller, Get, Inject, Optional } from "@nestjs/common";
 import { getSafeRuntimeConfig } from "./config/runtime.config";
 import { CacheService } from "./common/caching";
+import { EmailService } from "./modules/email/email.service";
 
 @Controller()
 export class AppController {
-  constructor(@Optional() @Inject(CacheService) private readonly cacheService?: CacheService) {}
+  constructor(
+    @Optional() @Inject(CacheService) private readonly cacheService?: CacheService,
+    @Optional() @Inject(EmailService) private readonly emailService?: EmailService,
+  ) {}
 
   @Get()
   getRoot() {
@@ -37,6 +41,8 @@ export class AppController {
       databaseConfigured: !["not_configured", "invalid"].includes(config.database.host),
       databaseSslRequired: config.database.sslRequired,
       cacheProvider: this.cacheService?.providerType ?? "memory",
+      emailProvider: this.emailService?.provider ?? "none",
+      emailConfigured: this.emailService?.isConfigured ?? false,
     };
   }
 }
