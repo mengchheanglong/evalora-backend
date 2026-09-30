@@ -623,9 +623,7 @@ export class AuthService {
         status: delivery.status,
         reason: delivery.status === "sent" || delivery.status === "queued" ? undefined : delivery.reason,
       },
-      ...(allowDevVerificationLink() && delivery.status !== "sent" && delivery.status !== "queued"
-        ? { verificationUrl }
-        : {}),
+      ...(allowDevVerificationLink() ? { verificationUrl } : {}),
     };
   }
 
